@@ -151,51 +151,82 @@ class PropostaHandler(FileSystemEventHandler):
 
 # ── Setup inicial ─────────────────────────────────────────────────────────────
 
+def _pick_file_dialog(title, filetypes=None):
+    """Abre janela gráfica para selecionar arquivo."""
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    path = filedialog.askopenfilename(title=title, filetypes=filetypes or [("Todos", "*.*")])
+    root.destroy()
+    return path
+
+
+def _pick_folder_dialog(title):
+    """Abre janela gráfica para selecionar pasta."""
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    path = filedialog.askdirectory(title=title)
+    root.destroy()
+    return path
+
+
 def configurar():
-    """Pergunta ao usuário o caminho da pasta e do PDF de capa (salva na config)."""
+    """Configura capa PDF e pasta de orçamentos (abre janelas de seleção)."""
     cfg = load_config()
 
     print("=" * 60)
     print("  EGEMAP - Monitor de Propostas")
     print("=" * 60)
 
-    # Capa PDF
+    # ── Capa PDF ────────────────────────────────────────────────────────────
     capa = cfg.get("capa_pdf", "")
     if capa and Path(capa).exists():
-        print(f"\nCapa PDF atual: {capa}")
-        resp = input("Pressione Enter para manter ou informe o novo caminho: ").strip()
-        if resp:
-            capa = resp
-    else:
-        print("\nInforme o caminho completo do arquivo PDF de Capa (ex: C:\\Documentos\\Capa_Orcamento_1.pdf):")
-        capa = input("> ").strip().strip('"')
+        print(f"\nCapa PDF: {capa}")
+        resp = input("Pressione Enter para manter ou 'T' para trocar: ").strip().upper()
+        if resp == "T":
+            capa = ""
 
-    if not Path(capa).exists():
-        print(f"\nERRO: Arquivo nao encontrado: {capa}")
-        input("Pressione Enter para sair...")
-        sys.exit(1)
+    if not capa or not Path(capa).exists():
+        print("\nUma janela vai abrir — selecione o arquivo PDF de Capa (Capa_Orcamento_1.pdf)...")
+        input("Pressione Enter para abrir a janela de seleção...")
+        capa = _pick_file_dialog(
+            title="Selecionar PDF de Capa/Contra Capa",
+            filetypes=[("PDF", "*.pdf"), ("Todos", "*.*")],
+        )
+        if not capa:
+            print("Nenhum arquivo selecionado. Encerrando.")
+            input("Pressione Enter para sair...")
+            sys.exit(1)
 
     cfg["capa_pdf"] = capa
     save_config(cfg)
+    print(f"Capa PDF: {capa}")
 
-    # Pasta a monitorar
+    # ── Pasta de orçamentos ─────────────────────────────────────────────────
     pasta = cfg.get("pasta_orcamentos", "")
     if pasta and Path(pasta).exists():
-        print(f"\nPasta monitorada atual: {pasta}")
-        resp = input("Pressione Enter para manter ou informe o novo caminho: ").strip()
-        if resp:
-            pasta = resp
-    else:
-        print("\nInforme o caminho da pasta principal de Orçamentos (ex: C:\\OneDrive\\Orcamentos):")
-        pasta = input("> ").strip().strip('"')
+        print(f"\nPasta monitorada: {pasta}")
+        resp = input("Pressione Enter para manter ou 'T' para trocar: ").strip().upper()
+        if resp == "T":
+            pasta = ""
 
-    if not Path(pasta).exists():
-        print(f"\nERRO: Pasta nao encontrada: {pasta}")
-        input("Pressione Enter para sair...")
-        sys.exit(1)
+    if not pasta or not Path(pasta).exists():
+        print("\nUma janela vai abrir — selecione a pasta principal de Orçamentos...")
+        input("Pressione Enter para abrir a janela de seleção...")
+        pasta = _pick_folder_dialog(title="Selecionar Pasta Principal de Orçamentos")
+        if not pasta:
+            print("Nenhuma pasta selecionada. Encerrando.")
+            input("Pressione Enter para sair...")
+            sys.exit(1)
 
     cfg["pasta_orcamentos"] = pasta
     save_config(cfg)
+    print(f"Pasta: {pasta}")
 
     return capa, pasta
 
