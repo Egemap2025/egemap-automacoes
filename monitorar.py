@@ -231,10 +231,14 @@ class PropostaHandler(FileSystemEventHandler):
         self.log = log_fn
         self._pending = {}
 
+    def _is_trigger(self, path):
+        """Retorna True se o arquivo tem COMPLETO no nome — sinal para montar."""
+        return "COMPLETO" in Path(path).stem.upper()
+
     def _queue(self, path):
         p = Path(path)
-        if p.suffix.lower() == ".pdf":
-            self._pending[str(p.parent)] = time.time()
+        if p.suffix.lower() == ".pdf" and self._is_trigger(str(p)):
+            self._pending[str(p.parent)] = (time.time(), str(p))
 
     def on_created(self, event):
         if not event.is_directory:
@@ -250,26 +254,31 @@ class PropostaHandler(FileSystemEventHandler):
 
     def tick(self):
         now = time.time()
-        ready = [f for f, t in list(self._pending.items()) if now - t >= WAIT_SECONDS]
+        ready = [f for f, (t, p) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
         for folder in ready:
-            del self._pending[folder]
+            _, trigger_path = self._pending.pop(folder)
             try:
-                self._process_folder(folder)
+                self._process_folder(folder, trigger_path)
             except Exception as e:
                 self.log(f"ERRO em {folder}: {e}")
 
-    def _process_folder(self, folder):
+    def _process_folder(self, folder, trigger_path):
         pdfs = find_pdfs_in_folder(folder)
+
+        # Remove o próprio arquivo COMPLETO da lista de origem
+        trigger = str(trigger_path)
+        for key in pdfs:
+            pdfs[key] = [p for p in pdfs[key] if p != trigger]
+
         has_pvc = bool(pdfs["pvc"])
         has_alm = bool(pdfs["alm"])
 
-        if not has_pvc and not has_alm:
-            return
-
+        client = suggest_client_name(folder)
         today  = date.today().strftime("%d-%m-%Y")
-        client = suggest_client_name(folder, pdfs["pvc"][0] if pdfs["pvc"] else pdfs["alm"][0])
         out_name = f"Proposta Comercial {client} - {today}"
         output_path = safe_output_path(folder, out_name)
+
+        self.log(f"[{client}] COMPLETO detectado → verificando PDFs na pasta...")
 
         if has_pvc and has_alm:
             pvc_path  = pdfs["pvc"][0]
@@ -278,22 +287,25 @@ class PropostaHandler(FileSystemEventHandler):
             alm_total = extract_total_alm(alm_path)
 
             if not pvc_total or not alm_total:
-                self.log(f"[{client}] Não foi possível extrair os totais automaticamente. "
+                self.log(f"[{client}] Não foi possível extrair totais. "
                          f"PVC={pvc_total or 'N/A'}  ALM={alm_total or 'N/A'}")
                 return
 
-            self.log(f"[{client}] PVC + ALM detectados → montando proposta completa...")
+            self.log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} → montando com Resumo...")
             merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path)
             self.log(f"[{client}] ✔ Salvo: {Path(output_path).name}")
 
         elif has_alm and not has_pvc:
             alm_path = pdfs["alm"][0]
-            self.log(f"[{client}] ALM detectado → montando proposta de alumínio...")
+            self.log(f"[{client}] Alumínio → montando Capa + Conteúdo + Contra Capa...")
             merge_alm(self.capa_pdf, alm_path, output_path)
             self.log(f"[{client}] ✔ Salvo: {Path(output_path).name}")
 
         elif has_pvc and not has_alm:
-            self.log(f"[{client}] Arquivo PVC encontrado — aguardando ALM para montar.")
+            self.log(f"[{client}] Só PVC encontrado — falta o ALM (portas internas).")
+
+        else:
+            self.log(f"[{client}] Nenhum PDF de orçamento encontrado na pasta.")
 
 # ── Interface gráfica ─────────────────────────────────────────────────────────
 
