@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Script de configuração das credenciais do Google Drive.
-
-Execute este script UMA VEZ para autorizar o acesso ao Drive.
-Após isso, o drive_agent.py funcionará automaticamente.
+Configuração inicial do acesso ao Google Drive.
+Execute este script UMA VEZ. Depois o drive_agent.py funciona sozinho.
 """
 
 import os
@@ -12,15 +10,10 @@ import pickle
 
 try:
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 except ImportError:
-    print("Instalando dependências...")
     os.system(f"{sys.executable} -m pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -36,19 +29,21 @@ def configurar():
 
     if not os.path.exists(CREDENTIALS_FILE):
         print(f"\nArquivo '{CREDENTIALS_FILE}' não encontrado!")
-        print("\nPara obtê-lo:")
+        print("\nComo obter:")
         print("  1. Acesse: https://console.cloud.google.com/")
         print("  2. Crie um projeto (ex: 'Egemap Automações')")
-        print("  3. Ative a API: APIs > Google Drive API > Ativar")
-        print("  4. Credenciais > Criar credencial > ID do cliente OAuth 2.0")
-        print("  5. Tipo: 'App para computador'")
-        print("  6. Baixe o JSON e salve como 'credentials.json' nesta pasta")
+        print("  3. Menu lateral > APIs e Serviços > Biblioteca")
+        print("     Pesquise 'Google Drive API' e clique em Ativar")
+        print("  4. APIs e Serviços > Credenciais > Criar credencial")
+        print("     Escolha: ID do cliente OAuth 2.0")
+        print("     Tipo de aplicativo: App para computador")
+        print("  5. Baixe o arquivo JSON e salve como 'credentials.json'")
+        print("     nesta mesma pasta")
         print("\nDepois execute este script novamente.")
         sys.exit(1)
 
-    print("\nIniciando autorização...")
-    print("Uma janela do navegador será aberta para você autorizar o acesso.")
-    print("Faça login com a conta: egemapesquadrias@gmail.com\n")
+    print("\nUma janela do navegador vai abrir para você fazer login.")
+    print("Entre com a sua conta do Google normalmente.\n")
 
     flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
     creds = flow.run_local_server(port=0)
@@ -56,16 +51,12 @@ def configurar():
     with open(TOKEN_FILE, "wb") as f:
         pickle.dump(creds, f)
 
-    print("\nAutorização concluída! Testando conexão com o Drive...")
-
+    print("\nTestando conexão com o Drive...")
     service = build("drive", "v3", credentials=creds)
-    pasta = service.files().get(fileId=ROOT_FOLDER_ID, fields="name, webViewLink").execute()
+    pasta = service.files().get(fileId=ROOT_FOLDER_ID, fields="name").execute()
 
-    print(f"\n[OK] Conectado ao Drive!")
-    print(f"     Pasta raiz: {pasta['name']}")
-    print(f"     Link: {pasta.get('webViewLink', '')}")
-    print("\nTudo pronto! Agora você pode usar o drive_agent.py.")
-    print("\nExemplo:")
+    print(f"\n[OK] Conectado! Pasta encontrada: {pasta['name']}")
+    print("\nPronto! Agora use o drive_agent.py normalmente:")
     print('  python drive_agent.py --cidade "Sombrio" --cliente "João Silva"')
 
 
