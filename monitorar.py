@@ -50,13 +50,45 @@ def save_config(cfg):
 
 # ── Lógica de PDF ─────────────────────────────────────────────────────────────
 
+def detect_pdf_type(pdf_path):
+    """Detecta tipo pelo conteúdo do PDF: 'pvc', 'alm' ou None."""
+    try:
+        # Primeiro tenta pelo nome do arquivo
+        name = Path(pdf_path).name.upper()
+        if "PVC" in name:
+            return "pvc"
+        if "ALM" in name or "MAD" in name:
+            return "alm"
+
+        # Se não tiver sufixo, analisa o conteúdo
+        doc = fitz.open(pdf_path)
+        text = "".join(p.get_text() for p in doc)
+
+        # Sintegra/PVC: tem código OAD- e "TOTAL GERAL"
+        if "OAD-" in text or "TOTAL GERAL (R$)" in text or "Archicentro" in text:
+            return "pvc"
+
+        # W-Vetro: tem referência ao sistema w.vetro ou "TOTAL:" no final
+        if "w.vetro" in text.lower() or "wvetro" in text.lower():
+            return "alm"
+
+        # W-Vetro sem marca: tem estrutura de orçamento com TOTAL: e EGEMAP
+        if "TOTAL:" in text and "EGEMAP" in text:
+            return "alm"
+
+    except Exception:
+        pass
+    return None
+
+
 def find_pdfs_in_folder(folder):
+    """Classifica PDFs da pasta por conteúdo e nome."""
     result = {"pvc": [], "alm": [], "other": []}
     for p in Path(folder).glob("*.pdf"):
-        name_upper = p.name.upper()
-        if "PVC" in name_upper:
+        tipo = detect_pdf_type(str(p))
+        if tipo == "pvc":
             result["pvc"].append(str(p))
-        elif "ALM" in name_upper:
+        elif tipo == "alm":
             result["alm"].append(str(p))
         else:
             result["other"].append(str(p))
@@ -202,9 +234,7 @@ class PropostaHandler(FileSystemEventHandler):
     def _queue(self, path):
         p = Path(path)
         if p.suffix.lower() == ".pdf":
-            name = p.name.upper()
-            if "PVC" in name or "ALM" in name:
-                self._pending[str(p.parent)] = time.time()
+            self._pending[str(p.parent)] = time.time()
 
     def on_created(self, event):
         if not event.is_directory:
