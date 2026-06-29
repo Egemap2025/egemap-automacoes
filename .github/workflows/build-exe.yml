@@ -26,7 +26,7 @@ jobs:
 
       - name: Gerar EXE
         run: |
-          pyinstaller --onefile --console --name "EGEMAP-Monitor" monitorar.py
+          pyinstaller --onefile --windowed --name "EGEMAP-Monitor" monitorar.py
 
       - name: Publicar EXE como artefato
         uses: actions/upload-artifact@v4
