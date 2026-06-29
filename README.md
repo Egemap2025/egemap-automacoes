@@ -1,104 +1,126 @@
-# Egemap Automações — Orçamentos no Drive
+# Egemap — Agente de Orçamentos no Drive
 
-Sobe automaticamente os PDFs de orçamento para o Google Drive assim que entram na pasta do computador.
+Sobe automaticamente os PDFs de orçamento para o Google Drive assim que entram na pasta do computador. Roda em segundo plano, sem precisar abrir nada.
 
 ---
 
 ## Como funciona
 
-O agente fica rodando em segundo plano no Windows.
-
-Quando você salva um PDF na pasta:
+Você salva o PDF na pasta do computador normalmente:
 ```
 Orçamentos / Sombrio / João Silva / orcamento.pdf
 ```
 
-Ele cria automaticamente no Drive e faz o upload:
+O agente detecta em segundos e cria automaticamente no Drive:
 ```
 Pedidos e Contratos / 2026 / Sombrio / João Silva / orcamento.pdf
 ```
 
-Se a pasta da cidade ou do cliente já existir no Drive, só joga o arquivo dentro — não duplica nada.
+Se a pasta do cliente já existir no Drive, só joga o arquivo lá dentro — não duplica nada.
 
 ---
 
-## Configuração (só uma vez)
+## Instalação (só uma vez)
 
-### 1. Instalar o Python
+### Passo 1 — Instalar o Python
 
-Baixe em [python.org/downloads](https://www.python.org/downloads/) e marque a opção **"Add Python to PATH"** durante a instalação.
+Baixe em **[python.org/downloads](https://www.python.org/downloads/)**
 
-### 2. Baixar as credenciais do Google
+> Durante a instalação, marque obrigatoriamente: **"Add Python to PATH"**
 
-- Acesse [console.cloud.google.com](https://console.cloud.google.com/)
-- Crie um projeto → Ative a **Google Drive API**
-- Credenciais → Criar credencial → **ID do cliente OAuth 2.0** → App para computador
-- Baixe o JSON e salve como `credentials.json` nesta pasta
+---
 
-### 3. Configurar a pasta de orçamentos
+### Passo 2 — Baixar as credenciais do Google
 
-Abra o arquivo `config.json` e coloque o caminho correto da sua pasta:
+Precisa baixar um arquivo do Google que permite ao agente acessar o seu Drive.
 
-```json
-{
-  "pasta_orcamentos": "C:/Users/SeuNome/Documents/Orçamentos",
-  "extensoes": [".pdf"],
-  "ano": "2026"
-}
-```
+1. Acesse **[console.cloud.google.com](https://console.cloud.google.com/)**
+2. Clique em **"Selecionar projeto"** → **"Novo projeto"**
+   - Nome: `Egemap` → clique em **Criar**
+3. No menu lateral: **APIs e Serviços → Biblioteca**
+   - Pesquise `Google Drive API` → clique nela → **Ativar**
+4. **APIs e Serviços → Credenciais → Criar credencial**
+   - Escolha: **ID do cliente OAuth 2.0**
+   - Tipo de aplicativo: **Aplicativo para computador**
+   - Nome: `Agente Orçamentos` → **Criar**
+5. Clique em **Baixar JSON** → renomeie o arquivo para `credentials.json`
+6. Salve o `credentials.json` **dentro da pasta deste projeto**
 
-### 4. Instalar e iniciar o agente
+---
+
+### Passo 3 — Instalar o agente
 
 Clique duas vezes em:
 ```
 instalar_inicio_automatico.bat
 ```
 
-Na primeira execução vai abrir o navegador pedindo login no Google — faça login normalmente com sua conta. Depois fica salvo e nunca mais pede.
-
-**Pronto.** O agente vai iniciar sozinho toda vez que o Windows ligar.
-
----
-
-## Estrutura de pastas esperada
-
-O agente identifica cidade e cliente pela posição das pastas:
-
-```
-📁 Orçamentos          ← pasta configurada no config.json
- └── 📁 Sombrio         ← cidade
-      └── 📁 João Silva  ← cliente
-           └── 📄 orcamento.pdf   ← detectado → sobe pro Drive
-```
+O que vai acontecer:
+- Instala as dependências Python automaticamente
+- Pergunta o caminho da sua pasta de orçamentos no computador
+- Abre o navegador para fazer login no Google (uma única vez)
+- Configura o agente para iniciar junto com o Windows
+- Inicia o agente imediatamente
 
 ---
 
-## Arquivos
+### Passo 4 — Testar
 
-| Arquivo | O que é |
+Clique duas vezes em:
+```
+testar_agente.bat
+```
+
+Se aparecer **"Tudo funcionando!"** está pronto. Ele cria uma pasta `_TESTE_AGENTE` no Drive só para confirmar — pode apagar depois.
+
+---
+
+## Uso no dia a dia
+
+Não precisa fazer nada. O agente fica rodando invisível em segundo plano.
+
+Basta salvar o PDF na estrutura correta de pastas:
+
+```
+📁 Orçamentos              ← sua pasta configurada
+ └── 📁 Sombrio            ← cidade
+      └── 📁 João Silva    ← nome do cliente
+           └── 📄 orcamento.pdf   ← arquivo detectado → vai pro Drive
+```
+
+O Drive recebe na hora:
+```
+Pedidos e Contratos / 2026 / Sombrio / João Silva / orcamento.pdf
+```
+
+---
+
+## Acompanhar o que o agente fez
+
+Abra o arquivo `watcher.log` — ele registra tudo:
+
+```
+2026-06-29 14:32  Novo arquivo detectado: orcamento.pdf
+2026-06-29 14:32    Cidade:  Sombrio
+2026-06-29 14:32    Cliente: João Silva
+2026-06-29 14:32    [OK]     Pasta João Silva já existe no Drive
+2026-06-29 14:32    [ENVIADO] orcamento.pdf
+```
+
+---
+
+## Arquivos do projeto
+
+| Arquivo | O que faz |
 |---|---|
 | `watcher.py` | O agente que monitora a pasta |
-| `drive_agent.py` | Funções de criação de pasta e upload |
-| `configurar_credenciais.py` | Autoriza o acesso ao Drive (opcional, o watcher faz isso automaticamente) |
+| `drive_agent.py` | Funções de Drive (não executar direto) |
+| `configurar_credenciais.py` | Configuração inicial |
 | `config.json` | Caminho da pasta e configurações |
-| `instalar_inicio_automatico.bat` | Instala o agente no início do Windows |
-| `iniciar_agente.bat` | Inicia o agente manualmente |
-| `parar_agente.bat` | Para o agente |
-| `watcher.log` | Registro de tudo que o agente fez |
+| `instalar_inicio_automatico.bat` | **Instalação — executar uma vez** |
+| `testar_agente.bat` | **Teste — confirmar que funciona** |
+| `iniciar_agente.bat` | Iniciar manualmente se precisar |
+| `parar_agente.bat` | Parar o agente |
+| `watcher.log` | Registro de atividade |
 | `credentials.json` | Baixado do Google — **não compartilhar** |
 | `token.pickle` | Gerado automaticamente — **não compartilhar** |
-
----
-
-## Log de atividade
-
-Tudo que o agente faz fica registrado em `watcher.log`:
-
-```
-2026-06-29 14:32:01  Novo arquivo detectado: orcamento.pdf
-2026-06-29 14:32:02    Cidade:  Sombrio
-2026-06-29 14:32:02    Cliente: João Silva
-2026-06-29 14:32:03    [OK]     Pasta João Silva já existe no Drive
-2026-06-29 14:32:05    [ENVIADO] orcamento.pdf
-2026-06-29 14:32:05    https://drive.google.com/...
-```
