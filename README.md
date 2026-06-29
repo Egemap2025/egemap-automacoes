@@ -1,82 +1,104 @@
-# Egemap Automações
+# Egemap Automações — Orçamentos no Drive
 
-Automação para criação de pastas de orçamentos no Google Drive.
+Sobe automaticamente os PDFs de orçamento para o Google Drive assim que entram na pasta do computador.
 
 ---
 
 ## Como funciona
 
-O agente cria automaticamente a estrutura de pastas no Drive e faz upload dos arquivos:
+O agente fica rodando em segundo plano no Windows.
 
+Quando você salva um PDF na pasta:
 ```
-Pedidos e Contratos
-└── 2026
-    └── {Cidade do Cliente}
-        └── {Nome do Cliente}
-            └── orcamento.pdf, planilha.xlsx ...
+Orçamentos / Sombrio / João Silva / orcamento.pdf
 ```
 
-Se a pasta da cidade ou do cliente já existir, ele aproveita — não duplica nada.
+Ele cria automaticamente no Drive e faz o upload:
+```
+Pedidos e Contratos / 2026 / Sombrio / João Silva / orcamento.pdf
+```
+
+Se a pasta da cidade ou do cliente já existir no Drive, só joga o arquivo dentro — não duplica nada.
 
 ---
 
 ## Configuração (só uma vez)
 
-**1. Instalar dependências**
-```bash
-pip install -r requirements.txt
-```
+### 1. Instalar o Python
 
-**2. Baixar o arquivo de credenciais do Google**
+Baixe em [python.org/downloads](https://www.python.org/downloads/) e marque a opção **"Add Python to PATH"** durante a instalação.
 
-- Acesse: [console.cloud.google.com](https://console.cloud.google.com/)
+### 2. Baixar as credenciais do Google
+
+- Acesse [console.cloud.google.com](https://console.cloud.google.com/)
 - Crie um projeto → Ative a **Google Drive API**
 - Credenciais → Criar credencial → **ID do cliente OAuth 2.0** → App para computador
 - Baixe o JSON e salve como `credentials.json` nesta pasta
 
-**3. Autorizar o acesso**
-```bash
-python configurar_credenciais.py
+### 3. Configurar a pasta de orçamentos
+
+Abra o arquivo `config.json` e coloque o caminho correto da sua pasta:
+
+```json
+{
+  "pasta_orcamentos": "C:/Users/SeuNome/Documents/Orçamentos",
+  "extensoes": [".pdf"],
+  "ano": "2026"
+}
 ```
-> Abre o navegador para você fazer login. Depois fica salvo automaticamente.
+
+### 4. Instalar e iniciar o agente
+
+Clique duas vezes em:
+```
+instalar_inicio_automatico.bat
+```
+
+Na primeira execução vai abrir o navegador pedindo login no Google — faça login normalmente com sua conta. Depois fica salvo e nunca mais pede.
+
+**Pronto.** O agente vai iniciar sozinho toda vez que o Windows ligar.
 
 ---
 
-## Como usar
+## Estrutura de pastas esperada
 
-**Criar pasta para novo cliente:**
-```bash
-python drive_agent.py --cidade "Sombrio" --cliente "João Silva"
+O agente identifica cidade e cliente pela posição das pastas:
+
 ```
-
-**Criar pasta e enviar o orçamento:**
-```bash
-python drive_agent.py --cidade "Criciúma" --cliente "Maria Souza" --arquivos orcamento.pdf
-```
-
-**Enviar vários arquivos de uma vez:**
-```bash
-python drive_agent.py --cidade "Içara" --cliente "Carlos Lima" --arquivos orcamento.pdf planilha.xlsx
-```
-
-**Criar pasta e já abrir no navegador:**
-```bash
-python drive_agent.py --cidade "Araranguá" --cliente "Empresa ABC" --arquivos orcamento.pdf --abrir
-```
-
-**Ver quais cidades já estão cadastradas:**
-```bash
-python drive_agent.py --listar-cidades
+📁 Orçamentos          ← pasta configurada no config.json
+ └── 📁 Sombrio         ← cidade
+      └── 📁 João Silva  ← cliente
+           └── 📄 orcamento.pdf   ← detectado → sobe pro Drive
 ```
 
 ---
 
 ## Arquivos
 
-| Arquivo | Descrição |
+| Arquivo | O que é |
 |---|---|
-| `drive_agent.py` | Agente principal |
-| `configurar_credenciais.py` | Configuração inicial (rodar uma vez) |
-| `credentials.json` | Baixado do Google Cloud Console — **não compartilhar** |
+| `watcher.py` | O agente que monitora a pasta |
+| `drive_agent.py` | Funções de criação de pasta e upload |
+| `configurar_credenciais.py` | Autoriza o acesso ao Drive (opcional, o watcher faz isso automaticamente) |
+| `config.json` | Caminho da pasta e configurações |
+| `instalar_inicio_automatico.bat` | Instala o agente no início do Windows |
+| `iniciar_agente.bat` | Inicia o agente manualmente |
+| `parar_agente.bat` | Para o agente |
+| `watcher.log` | Registro de tudo que o agente fez |
+| `credentials.json` | Baixado do Google — **não compartilhar** |
 | `token.pickle` | Gerado automaticamente — **não compartilhar** |
-| `requirements.txt` | Dependências Python |
+
+---
+
+## Log de atividade
+
+Tudo que o agente faz fica registrado em `watcher.log`:
+
+```
+2026-06-29 14:32:01  Novo arquivo detectado: orcamento.pdf
+2026-06-29 14:32:02    Cidade:  Sombrio
+2026-06-29 14:32:02    Cliente: João Silva
+2026-06-29 14:32:03    [OK]     Pasta João Silva já existe no Drive
+2026-06-29 14:32:05    [ENVIADO] orcamento.pdf
+2026-06-29 14:32:05    https://drive.google.com/...
+```
