@@ -91,6 +91,20 @@ export class WVetroAutomator {
     await page.goto(`${baseUrl}/login`, { waitUntil: 'networkidle', timeout: 30000 });
     await this.screenshot(page, sessionId, '01-login-page');
 
+    // Preenche código da empresa se o campo existir
+    const codigoEmpresa = process.env.WVETRO_CODIGO_EMPRESA;
+    if (codigoEmpresa) {
+      try {
+        await page.fill(
+          'input[name="codigo"], input[name="empresa"], input[name="code"], #codigo, #empresa',
+          codigoEmpresa,
+          { timeout: 3000 }
+        );
+      } catch {
+        // Campo de código não existe nesta tela, ok
+      }
+    }
+
     // Tenta os seletores mais comuns de campos de login
     await page.fill(
       'input[type="email"], input[name="email"], input[name="login"], #email, #login',
