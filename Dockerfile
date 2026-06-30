@@ -2,14 +2,15 @@ FROM mcr.microsoft.com/playwright:v1.48.0-jammy
 
 WORKDIR /app
 
+# poppler-utils fornece pdftoppm para converter PDF em imagem PNG
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm install
 
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
-
-RUN npx playwright install chromium
 
 COPY . .
 

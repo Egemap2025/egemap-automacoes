@@ -1,8 +1,11 @@
-import { chromium } from 'playwright';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
 import { logger } from '../../utils/logger';
+
+const execAsync = promisify(exec);
 
 export type TipoAbertura = 'janela' | 'porta' | 'maxim-ar' | 'porta-janela';
 export type TipoAmbiente = 'dormitorio' | 'banheiro' | 'sala' | 'cozinha' | 'area-servico' | 'outro';
@@ -74,7 +77,6 @@ REGRAS:
 - Portas internas de madeira NÃO incluir (apenas portas de alumínio externas/principais)`;
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// Modelo gratuito no OpenRouter com boa capacidade de visão
 const MODEL = 'google/gemini-flash-1.5:free';
 
 export class FloorPlanAnalyzer {
@@ -89,7 +91,6 @@ export class FloorPlanAnalyzer {
   async analisar(pdfPath: string): Promise<AnaliseFloorPlan> {
     logger.info(`Analisando planta: ${pdfPath}`);
 
-    // Converte PDF para imagem usando o Chromium já instalado
     const imagemBase64 = await this.pdfParaImagem(pdfPath);
 
     logger.info('Enviando imagem para análise com IA...');
@@ -144,35 +145,26 @@ export class FloorPlanAnalyzer {
   }
 
   private async pdfParaImagem(pdfPath: string): Promise<string> {
-    logger.info('Convertendo PDF para imagem via Chromium...');
+    logger.info('Convertendo PDF para imagem via pdftoppm...');
 
-    const browser = await chromium.launch({
-      headless: true,
-      executablePath: process.env.CHROMIUM_PATH || undefined,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
-    });
+    const tmpDir = path.join(path.dirname(pdfPath), `tmp_${Date.now()}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const outputPrefix = path.join(tmpDir, 'page');
 
     try {
-      const page = await browser.newPage();
-      // Viewport largo para capturar planta inteira com boa resolução
-      await page.setViewportSize({ width: 1920, height: 2560 });
+      await execAsync(`pdftoppm -r 180 -f 1 -l 1 -png "${pdfPath}" "${outputPrefix}"`);
 
-      const fileUrl = `file://${path.resolve(pdfPath)}`;
-      await page.goto(fileUrl, { waitUntil: 'networkidle', timeout: 30000 });
+      const files = fs.readdirSync(tmpDir).filter(f => f.endsWith('.png'));
+      if (files.length === 0) throw new Error('pdftoppm não gerou nenhuma imagem');
 
-      // Aguarda o PDF renderizar completamente no Chromium
-      await page.waitForTimeout(3000);
+      const pngPath = path.join(tmpDir, files[0]);
+      const imageBuffer = fs.readFileSync(pngPath);
 
-      const screenshot = await page.screenshot({
-        fullPage: true,
-        type: 'png',
-      });
-
-      const base64 = screenshot.toString('base64');
+      const base64 = imageBuffer.toString('base64');
       logger.info(`Imagem gerada: ${Math.round(base64.length / 1024)} KB`);
       return base64;
     } finally {
-      await browser.close();
+      try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
     }
   }
 }
