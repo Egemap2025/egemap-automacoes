@@ -77,7 +77,14 @@ REGRAS:
 - Portas internas de madeira NÃO incluir (apenas portas de alumínio externas/principais)`;
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'google/gemini-2.0-flash-exp:free';
+
+// Modelos gratuitos com visão — tentados em ordem até um funcionar
+const MODELOS_VISAO: string[] = [
+  'meta-llama/llama-3.2-11b-vision-instruct:free',
+  'qwen/qwen2-vl-7b-instruct:free',
+  'google/gemini-2.5-flash:free',
+  'mistralai/pixtral-12b:free',
+];
 
 export class FloorPlanAnalyzer {
   private apiKey: string;
@@ -96,46 +103,61 @@ export class FloorPlanAnalyzer {
     logger.info('Enviando imagem para análise com IA...');
 
     let response;
-    try {
-      response = await axios.post(
-        OPENROUTER_URL,
-        {
-          model: MODEL,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:image/png;base64,${imagemBase64}`,
+    let ultimoErro = '';
+    for (const modelo of MODELOS_VISAO) {
+      try {
+        logger.info(`Tentando modelo: ${modelo}`);
+        response = await axios.post(
+          OPENROUTER_URL,
+          {
+            model: modelo,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:image/png;base64,${imagemBase64}`,
+                    },
                   },
-                },
-                {
-                  type: 'text',
-                  text: PROMPT_ANALISE,
-                },
-              ],
-            },
-          ],
-          max_tokens: 4096,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/Egemap2025/egemap-automacoes',
-            'X-Title': 'Egemap Automações',
+                  {
+                    type: 'text',
+                    text: PROMPT_ANALISE,
+                  },
+                ],
+              },
+            ],
+            max_tokens: 4096,
           },
-          timeout: 120000,
+          {
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://github.com/Egemap2025/egemap-automacoes',
+              'X-Title': 'Egemap Automações',
+            },
+            timeout: 120000,
+          }
+        );
+        logger.info(`Modelo funcionando: ${modelo}`);
+        break;
+      } catch (axiosErr: unknown) {
+        if (axios.isAxiosError(axiosErr) && axiosErr.response?.status === 404) {
+          ultimoErro = `${modelo}: não encontrado`;
+          logger.warn(`Modelo indisponível: ${modelo}`);
+          continue;
         }
-      );
-    } catch (axiosErr: unknown) {
-      if (axios.isAxiosError(axiosErr) && axiosErr.response) {
-        const detail = JSON.stringify(axiosErr.response.data).substring(0, 400);
-        throw new Error(`OpenRouter ${axiosErr.response.status}: ${detail}`);
+        if (axios.isAxiosError(axiosErr) && axiosErr.response) {
+          const detail = JSON.stringify(axiosErr.response.data).substring(0, 400);
+          throw new Error(`OpenRouter ${axiosErr.response.status}: ${detail}`);
+        }
+        throw axiosErr;
       }
-      throw axiosErr;
+    }
+
+    if (!response) {
+      throw new Error(`Nenhum modelo de IA disponível. Último erro: ${ultimoErro}`);
     }
 
     const rawText: string = response.data.choices[0]?.message?.content?.trim() ?? '';
