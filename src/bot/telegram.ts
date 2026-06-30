@@ -68,12 +68,53 @@ export class TelegramBot {
       return;
     }
 
+    if (text === '/modelos') {
+      await this.listarModelos(chatId);
+      return;
+    }
+
     if (text && !text.startsWith('/')) {
       await this.bot.sendMessage(
         chatId,
         '📎 Envie o arquivo da planta em *PDF* para eu analisar.',
         { parse_mode: 'Markdown' }
       );
+    }
+  }
+
+  private async listarModelos(chatId: number): Promise<void> {
+    await this.bot.sendMessage(chatId, '🔍 Consultando modelos disponíveis no OpenRouter...');
+    try {
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      const res = await axios.get('https://openrouter.ai/api/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 15000,
+      });
+      const modelos: Array<{ id: string; pricing?: { prompt?: string }; architecture?: { modality?: string } }> =
+        res.data?.data ?? [];
+      const gratuitos = modelos.filter(
+        (m) => m.id.endsWith(':free') && (
+          m.architecture?.modality?.includes('image') ||
+          m.id.includes('vision') ||
+          m.id.includes('vl') ||
+          m.id.includes('pixtral') ||
+          m.id.includes('gemini') ||
+          m.id.includes('phi-4')
+        )
+      );
+      if (gratuitos.length === 0) {
+        await this.bot.sendMessage(chatId, '⚠️ Nenhum modelo gratuito com visão encontrado.\n\nModelos gratuitos disponíveis:\n' +
+          modelos.filter(m => m.id.endsWith(':free')).slice(0, 20).map(m => `• ${m.id}`).join('\n'));
+      } else {
+        await this.bot.sendMessage(chatId,
+          `✅ *Modelos gratuitos com visão (${gratuitos.length}):*\n` +
+          gratuitos.map(m => `• \`${m.id}\``).join('\n'),
+          { parse_mode: 'Markdown' }
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.bot.sendMessage(chatId, `❌ Erro ao consultar modelos: ${msg}`);
     }
   }
 
