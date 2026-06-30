@@ -81,9 +81,12 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // Modelos gratuitos com visão — tentados em ordem até um funcionar
 const MODELOS_VISAO: string[] = [
   'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'qwen/qwen2-vl-7b-instruct:free',
-  'google/gemini-2.5-flash:free',
+  'qwen/qwen2.5-vl-7b-instruct:free',
+  'qwen/qwen2.5-vl-72b-instruct:free',
+  'google/gemini-2.5-flash-preview-05-20:free',
+  'google/gemini-2.5-flash-preview:free',
   'mistralai/pixtral-12b:free',
+  'microsoft/phi-4-multimodal-instruct:free',
 ];
 
 export class FloorPlanAnalyzer {
@@ -143,13 +146,16 @@ export class FloorPlanAnalyzer {
         logger.info(`Modelo funcionando: ${modelo}`);
         break;
       } catch (axiosErr: unknown) {
-        if (axios.isAxiosError(axiosErr) && axiosErr.response?.status === 404) {
-          ultimoErro = `${modelo}: não encontrado`;
-          logger.warn(`Modelo indisponível: ${modelo}`);
-          continue;
+        if (axios.isAxiosError(axiosErr) && axiosErr.response) {
+          const status = axiosErr.response.status;
+          if (status === 404 || status === 400) {
+            ultimoErro = `${modelo}: ${status}`;
+            logger.warn(`Modelo indisponível (${status}): ${modelo}`);
+            continue;
+          }
         }
         if (axios.isAxiosError(axiosErr) && axiosErr.response) {
-          const detail = JSON.stringify(axiosErr.response.data).substring(0, 400);
+          const detail = JSON.stringify(axiosErr.response.data).substring(0, 300);
           throw new Error(`OpenRouter ${axiosErr.response.status}: ${detail}`);
         }
         throw axiosErr;
