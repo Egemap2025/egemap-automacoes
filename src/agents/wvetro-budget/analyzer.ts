@@ -80,13 +80,10 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Modelos gratuitos com visão — tentados em ordem até um funcionar
 const MODELOS_VISAO: string[] = [
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'qwen/qwen2.5-vl-7b-instruct:free',
-  'qwen/qwen2.5-vl-72b-instruct:free',
-  'google/gemini-2.5-flash-preview-05-20:free',
-  'google/gemini-2.5-flash-preview:free',
-  'mistralai/pixtral-12b:free',
-  'microsoft/phi-4-multimodal-instruct:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
 ];
 
 export class FloorPlanAnalyzer {
