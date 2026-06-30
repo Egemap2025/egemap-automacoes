@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleAIFileManager } from '@google/generative-ai/server';
 import * as fs from 'fs';
 import { logger } from '../../utils/logger';
 
@@ -72,65 +73,71 @@ REGRAS:
 - Portas internas de madeira NÃO incluir (apenas portas de alumínio externas/principais)`;
 
 export class FloorPlanAnalyzer {
-  private client: Anthropic;
+  private genAI: GoogleGenerativeAI;
+  private fileManager: GoogleAIFileManager;
 
   constructor() {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY não configurado no .env');
-    this.client = new Anthropic({ apiKey });
+    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) throw new Error('GOOGLE_AI_API_KEY não configurado no .env');
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.fileManager = new GoogleAIFileManager(apiKey);
   }
 
   async analisar(pdfPath: string): Promise<AnaliseFloorPlan> {
     logger.info(`Analisando planta: ${pdfPath}`);
 
-    const pdfBuffer = fs.readFileSync(pdfPath);
-    const base64Pdf = pdfBuffer.toString('base64');
-
-    const response = await (this.client.beta.messages as any).create({
-      model: 'claude-opus-4-8',
-      max_tokens: 4096,
-      betas: ['pdfs-2024-09-25'],
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: base64Pdf,
-              },
-            },
-            {
-              type: 'text',
-              text: PROMPT_ANALISE,
-            },
-          ],
-        },
-      ],
+    // Envia o PDF para o Google AI File API
+    logger.info('Fazendo upload do PDF para o Google AI...');
+    const uploadResult = await this.fileManager.uploadFile(pdfPath, {
+      mimeType: 'application/pdf',
+      displayName: 'Planta Baixa',
     });
 
-    const textContent = response.content.find((c: { type: string }) => c.type === 'text') as
-      | { type: 'text'; text: string }
-      | undefined;
+    logger.info(`Upload concluído: ${uploadResult.file.uri}`);
 
-    if (!textContent) {
-      throw new Error('Claude não retornou resposta de texto');
+    // Aguarda o processamento do arquivo
+    let file = uploadResult.file;
+    while (file.state === 'PROCESSING') {
+      await new Promise((r) => setTimeout(r, 2000));
+      file = await this.fileManager.getFile(file.name);
     }
 
-    const rawText = textContent.text.trim();
+    if (file.state === 'FAILED') {
+      throw new Error('Falha ao processar o PDF no Google AI');
+    }
+
+    // Analisa com Gemini 1.5 Flash (gratuito)
+    const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    const result = await model.generateContent([
+      {
+        fileData: {
+          mimeType: uploadResult.file.mimeType,
+          fileUri: uploadResult.file.uri,
+        },
+      },
+      { text: PROMPT_ANALISE },
+    ]);
+
+    const rawText = result.response.text().trim();
+
+    // Remove o arquivo após análise
+    try {
+      await this.fileManager.deleteFile(uploadResult.file.name);
+    } catch {
+      // Limpeza opcional, não interrompe o fluxo
+    }
 
     try {
-      const result = JSON.parse(rawText) as AnaliseFloorPlan;
-      logger.info(`Análise concluída: ${result.aberturas.length} grupos de aberturas, confiança: ${result.confianca}`);
-      return result;
+      const parsed = JSON.parse(rawText) as AnaliseFloorPlan;
+      logger.info(`Análise concluída: ${parsed.aberturas.length} grupos, confiança: ${parsed.confianca}`);
+      return parsed;
     } catch {
       const match = rawText.match(/\{[\s\S]*\}/);
       if (match) {
         return JSON.parse(match[0]) as AnaliseFloorPlan;
       }
-      throw new Error(`Resposta inválida do Claude. Primeiros 300 chars: ${rawText.substring(0, 300)}`);
+      throw new Error(`Resposta inválida do Gemini: ${rawText.substring(0, 300)}`);
     }
   }
 }
