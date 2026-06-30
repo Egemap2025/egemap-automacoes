@@ -1,88 +1,71 @@
 #!/usr/bin/env python3
 """
 EGEMAP - Monitor de Propostas
-Interface gráfica com monitoramento automático de pasta.
+Janela de console que fica rodando em segundo plano monitorando a pasta.
 """
 
 import sys
 import time
-import threading
-import json
 import re
+import os
 from pathlib import Path
 from datetime import date
-import tkinter as tk
-from tkinter import filedialog, scrolledtext
-import tkinter.font as tkfont
-
-# ── Dependências externas ─────────────────────────────────────────────────────
 
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 except ImportError:
-    import subprocess, sys as _sys
-    subprocess.check_call([_sys.executable, "-m", "pip", "install", "watchdog"])
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "watchdog"])
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 
 try:
     import fitz
 except ImportError:
-    import subprocess, sys as _sys
-    subprocess.check_call([_sys.executable, "-m", "pip", "install", "pymupdf"])
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pymupdf"])
     import fitz
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# ── Config salva em arquivo texto simples ─────────────────────────────────────
 
-CONFIG_FILE = Path.home() / ".egemap_montador.json"
+CONFIG_FILE = Path.home() / ".egemap_monitor_config.txt"
 
 def load_config():
     if CONFIG_FILE.exists():
-        try:
-            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
+        lines = CONFIG_FILE.read_text(encoding="utf-8").splitlines()
+        if len(lines) >= 2:
+            return lines[0].strip(), lines[1].strip()
+    return "", ""
 
-def save_config(cfg):
-    CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+def save_config(capa, pasta):
+    CONFIG_FILE.write_text(f"{capa}\n{pasta}\n", encoding="utf-8")
 
 # ── Lógica de PDF ─────────────────────────────────────────────────────────────
 
 def detect_pdf_type(pdf_path):
-    """Detecta tipo pelo conteúdo do PDF: 'pvc', 'alm' ou None."""
     try:
-        # Primeiro tenta pelo nome do arquivo
         name = Path(pdf_path).name.upper()
         if "PVC" in name:
             return "pvc"
         if "ALM" in name or "MAD" in name:
             return "alm"
 
-        # Se não tiver sufixo, analisa o conteúdo
         doc = fitz.open(pdf_path)
         text = "".join(p.get_text() for p in doc)
 
-        # Sintegra/PVC: tem código OAD- e "TOTAL GERAL"
         if "OAD-" in text or "TOTAL GERAL (R$)" in text or "Archicentro" in text:
             return "pvc"
-
-        # W-Vetro: tem referência ao sistema w.vetro ou "TOTAL:" no final
         if "w.vetro" in text.lower() or "wvetro" in text.lower():
             return "alm"
-
-        # W-Vetro sem marca: tem estrutura de orçamento com TOTAL: e EGEMAP
         if "TOTAL:" in text and "EGEMAP" in text:
             return "alm"
-
     except Exception:
         pass
     return None
 
 
 def find_pdfs_in_folder(folder):
-    """Classifica PDFs da pasta por conteúdo e nome."""
     result = {"pvc": [], "alm": [], "other": []}
     for p in Path(folder).glob("*.pdf"):
         tipo = detect_pdf_type(str(p))
@@ -94,6 +77,7 @@ def find_pdfs_in_folder(folder):
             result["other"].append(str(p))
     return result
 
+
 def extract_total_pvc(pdf_path):
     try:
         doc = fitz.open(pdf_path)
@@ -102,6 +86,7 @@ def extract_total_pvc(pdf_path):
         return match.group(1) if match else ""
     except Exception:
         return ""
+
 
 def extract_total_alm(pdf_path):
     try:
@@ -112,13 +97,16 @@ def extract_total_alm(pdf_path):
     except Exception:
         return ""
 
+
 def parse_brl(value_str):
     cleaned = value_str.strip().replace("R$", "").replace(" ", "")
     return float(cleaned.replace(".", "").replace(",", "."))
 
+
 def format_brl(value):
     s = f"{value:,.2f}"
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
 
 def safe_output_path(folder, name):
     base = Path(folder) / f"{name}.pdf"
@@ -131,15 +119,10 @@ def safe_output_path(folder, name):
             return str(candidate)
         i += 1
 
-def suggest_client_name(folder_path, pdf_path=""):
-    folder_name = Path(folder_path).name
-    if folder_name:
-        return folder_name
-    if pdf_path:
-        stem = Path(pdf_path).stem
-        stem = re.sub(r"\s*(PVC|ALM|pvc|alm)\s*$", "", stem, flags=re.IGNORECASE).strip()
-        return stem
-    return "Cliente"
+
+def suggest_client_name(folder_path):
+    return Path(folder_path).name or "Cliente"
+
 
 def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str):
     pvc = parse_brl(pvc_total_str)
@@ -173,16 +156,19 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str):
                          fontname="helv", fontsize=20, color=(0, 0, 0))
     return resumo_doc
 
+
 def _has_system_capa(doc):
     if len(doc) == 0:
         return False
     return "PROPOSTA" in doc[0].get_text().upper()
+
 
 def _content_range(doc):
     n = len(doc)
     start = 1 if n > 1 else 0
     end = n - 2 if n > 2 else n - 1
     return start, end
+
 
 def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, output_path):
     capa_doc = fitz.open(capa_pdf_path)
@@ -206,6 +192,7 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
     result.save(output_path)
     result.close()
 
+
 def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
     capa_doc = fitz.open(capa_pdf_path)
     alm_doc  = fitz.open(alm_pdf_path)
@@ -225,14 +212,17 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
 
 WAIT_SECONDS = 4
 
+def log(msg):
+    hora = time.strftime("%H:%M:%S")
+    print(f"[{hora}] {msg}", flush=True)
+
+
 class PropostaHandler(FileSystemEventHandler):
-    def __init__(self, capa_pdf, log_fn):
+    def __init__(self, capa_pdf):
         self.capa_pdf = capa_pdf
-        self.log = log_fn
         self._pending = {}
 
     def _is_trigger(self, path):
-        """Retorna True se o arquivo tem COMPLETO no nome — sinal para montar."""
         return "COMPLETO" in Path(path).stem.upper()
 
     def _queue(self, path):
@@ -254,18 +244,16 @@ class PropostaHandler(FileSystemEventHandler):
 
     def tick(self):
         now = time.time()
-        ready = [f for f, (t, p) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
+        ready = [f for f, (t, _) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
         for folder in ready:
             _, trigger_path = self._pending.pop(folder)
             try:
                 self._process_folder(folder, trigger_path)
             except Exception as e:
-                self.log(f"ERRO em {folder}: {e}")
+                log(f"ERRO em {folder}: {e}")
 
     def _process_folder(self, folder, trigger_path):
         pdfs = find_pdfs_in_folder(folder)
-
-        # Remove o próprio arquivo COMPLETO da lista de origem
         trigger = str(trigger_path)
         for key in pdfs:
             pdfs[key] = [p for p in pdfs[key] if p != trigger]
@@ -278,7 +266,7 @@ class PropostaHandler(FileSystemEventHandler):
         out_name = f"Proposta Comercial {client} - {today}"
         output_path = safe_output_path(folder, out_name)
 
-        self.log(f"[{client}] COMPLETO detectado → verificando PDFs na pasta...")
+        log(f"[{client}] COMPLETO detectado — verificando PDFs...")
 
         if has_pvc and has_alm:
             pvc_path  = pdfs["pvc"][0]
@@ -287,191 +275,96 @@ class PropostaHandler(FileSystemEventHandler):
             alm_total = extract_total_alm(alm_path)
 
             if not pvc_total or not alm_total:
-                self.log(f"[{client}] Não foi possível extrair totais. "
-                         f"PVC={pvc_total or 'N/A'}  ALM={alm_total or 'N/A'}")
+                log(f"[{client}] Nao foi possivel extrair totais. PVC={pvc_total or 'N/A'}  ALM={alm_total or 'N/A'}")
                 return
 
-            self.log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} → montando com Resumo...")
+            log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
             merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path)
-            self.log(f"[{client}] ✔ Salvo: {Path(output_path).name}")
+            log(f"[{client}] SALVO: {Path(output_path).name}")
 
         elif has_alm and not has_pvc:
             alm_path = pdfs["alm"][0]
-            self.log(f"[{client}] Alumínio → montando Capa + Conteúdo + Contra Capa...")
+            log(f"[{client}] Aluminio — montando Capa + Conteudo + Contra Capa...")
             merge_alm(self.capa_pdf, alm_path, output_path)
-            self.log(f"[{client}] ✔ Salvo: {Path(output_path).name}")
+            log(f"[{client}] SALVO: {Path(output_path).name}")
 
         elif has_pvc and not has_alm:
-            self.log(f"[{client}] Só PVC encontrado — falta o ALM (portas internas).")
+            log(f"[{client}] So PVC encontrado — falta o ALM (portas internas).")
 
         else:
-            self.log(f"[{client}] Nenhum PDF de orçamento encontrado na pasta.")
+            log(f"[{client}] Nenhum PDF de orcamento encontrado na pasta.")
 
-# ── Interface gráfica ─────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-class App(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("EGEMAP — Monitor de Propostas")
-        self.resizable(False, False)
-        self.configure(bg="#1e1e2e")
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+def main():
+    os.system("cls" if os.name == "nt" else "clear")
+    print("=" * 55)
+    print("   EGEMAP - Monitor de Propostas Comerciais")
+    print("=" * 55)
+    print()
 
-        self.cfg = load_config()
-        self._observer = None
-        self._handler  = None
-        self._running  = False
-        self._tick_after = None
+    saved_capa, saved_pasta = load_config()
 
-        self._build_ui()
-        self._load_saved()
+    # Capa PDF
+    if saved_capa and Path(saved_capa).exists():
+        print(f"Capa PDF salvo: {saved_capa}")
+        resp = input("Usar este? (ENTER = sim, ou cole novo caminho): ").strip()
+        capa_pdf = resp if resp else saved_capa
+    else:
+        capa_pdf = input("Cole o caminho do PDF de Capa (ex: C:\\EGEMAP\\Capa.pdf): ").strip()
 
-    def _build_ui(self):
-        BG   = "#1e1e2e"
-        CARD = "#2a2a3e"
-        RED  = "#c0392b"
-        GRN  = "#27ae60"
-        TXT  = "#e0e0e0"
-        SUB  = "#888"
+    capa_pdf = capa_pdf.strip('"').strip("'")
+    if not Path(capa_pdf).exists():
+        print(f"\nERRO: Arquivo nao encontrado: {capa_pdf}")
+        input("\nPressione ENTER para fechar.")
+        sys.exit(1)
 
-        # ── Título ───────────────────────────────────────────────────────────
-        tk.Label(self, text="EGEMAP", bg=BG, fg=RED,
-                 font=("Arial", 20, "bold")).pack(pady=(18, 0))
-        tk.Label(self, text="Monitor de Propostas Comerciais", bg=BG, fg=SUB,
-                 font=("Arial", 9)).pack(pady=(0, 12))
+    # Pasta raiz
+    if saved_pasta and Path(saved_pasta).exists():
+        print(f"\nPasta salva: {saved_pasta}")
+        resp = input("Usar esta? (ENTER = sim, ou cole nova pasta): ").strip()
+        pasta_raiz = resp if resp else saved_pasta
+    else:
+        pasta_raiz = input("\nCole o caminho da pasta de orcamentos: ").strip()
 
-        # ── Capa PDF ─────────────────────────────────────────────────────────
-        frm1 = tk.Frame(self, bg=CARD, bd=0)
-        frm1.pack(fill="x", padx=20, pady=4)
-        tk.Label(frm1, text="PDF de Capa  (Capa_Orcamento_1.pdf)", bg=CARD, fg=SUB,
-                 font=("Arial", 8)).pack(anchor="w", padx=10, pady=(8, 2))
-        row1 = tk.Frame(frm1, bg=CARD)
-        row1.pack(fill="x", padx=10, pady=(0, 8))
-        self.var_capa = tk.StringVar()
-        tk.Entry(row1, textvariable=self.var_capa, width=46, bg="#12121e", fg=TXT,
-                 insertbackground=TXT, relief="flat", font=("Arial", 9)).pack(side="left")
-        tk.Button(row1, text="Procurar", command=self._pick_capa,
-                  bg=RED, fg="white", relief="flat", font=("Arial", 8),
-                  padx=8, cursor="hand2").pack(side="left", padx=(6, 0))
+    pasta_raiz = pasta_raiz.strip('"').strip("'")
+    if not Path(pasta_raiz).is_dir():
+        print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
+        input("\nPressione ENTER para fechar.")
+        sys.exit(1)
 
-        # ── Pasta ─────────────────────────────────────────────────────────────
-        frm2 = tk.Frame(self, bg=CARD, bd=0)
-        frm2.pack(fill="x", padx=20, pady=4)
-        tk.Label(frm2, text="Pasta principal de Orçamentos", bg=CARD, fg=SUB,
-                 font=("Arial", 8)).pack(anchor="w", padx=10, pady=(8, 2))
-        row2 = tk.Frame(frm2, bg=CARD)
-        row2.pack(fill="x", padx=10, pady=(0, 8))
-        self.var_pasta = tk.StringVar()
-        tk.Entry(row2, textvariable=self.var_pasta, width=46, bg="#12121e", fg=TXT,
-                 insertbackground=TXT, relief="flat", font=("Arial", 9)).pack(side="left")
-        tk.Button(row2, text="Procurar", command=self._pick_pasta,
-                  bg=RED, fg="white", relief="flat", font=("Arial", 8),
-                  padx=8, cursor="hand2").pack(side="left", padx=(6, 0))
+    save_config(capa_pdf, pasta_raiz)
 
-        # ── Botão iniciar/parar ───────────────────────────────────────────────
-        self.btn = tk.Button(self, text="▶  INICIAR MONITORAMENTO",
-                             command=self._toggle,
-                             bg=GRN, fg="white", relief="flat",
-                             font=("Arial", 11, "bold"),
-                             padx=20, pady=10, cursor="hand2")
-        self.btn.pack(pady=14)
+    print()
+    print("=" * 55)
+    print(f"  Monitorando: {pasta_raiz}")
+    print(f"  Capa: {Path(capa_pdf).name}")
+    print()
+    print("  Salve qualquer PDF com COMPLETO no nome para")
+    print("  disparar a montagem automatica da proposta.")
+    print()
+    print("  Pressione Ctrl+C para parar.")
+    print("=" * 55)
+    print()
 
-        # ── Status ────────────────────────────────────────────────────────────
-        self.lbl_status = tk.Label(self, text="● Parado", bg=BG, fg=SUB,
-                                   font=("Arial", 9))
-        self.lbl_status.pack()
+    handler  = PropostaHandler(capa_pdf)
+    observer = Observer()
+    observer.schedule(handler, str(pasta_raiz), recursive=True)
+    observer.start()
 
-        # ── Log ───────────────────────────────────────────────────────────────
-        tk.Label(self, text="Registro de atividade", bg=BG, fg=SUB,
-                 font=("Arial", 8)).pack(anchor="w", padx=22, pady=(10, 2))
-        self.log_box = scrolledtext.ScrolledText(
-            self, width=62, height=14, bg="#12121e", fg=TXT,
-            font=("Consolas", 8), relief="flat", state="disabled",
-            insertbackground=TXT)
-        self.log_box.pack(padx=20, pady=(0, 16))
+    log("Monitor iniciado. Aguardando arquivos COMPLETO...")
 
-    def _load_saved(self):
-        self.var_capa.set(self.cfg.get("capa_pdf", ""))
-        self.var_pasta.set(self.cfg.get("pasta_orcamentos", ""))
+    try:
+        while True:
+            handler.tick()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        log("Parando monitor...")
+        observer.stop()
 
-    def _pick_capa(self):
-        path = filedialog.askopenfilename(
-            title="Selecionar PDF de Capa",
-            filetypes=[("PDF", "*.pdf"), ("Todos", "*.*")])
-        if path:
-            self.var_capa.set(path)
-
-    def _pick_pasta(self):
-        path = filedialog.askdirectory(title="Selecionar Pasta de Orçamentos")
-        if path:
-            self.var_pasta.set(path)
-
-    def _log(self, msg):
-        from datetime import datetime
-        ts = datetime.now().strftime("%H:%M:%S")
-        line = f"[{ts}]  {msg}\n"
-        self.log_box.configure(state="normal")
-        self.log_box.insert("end", line)
-        self.log_box.see("end")
-        self.log_box.configure(state="disabled")
-
-    def _toggle(self):
-        if self._running:
-            self._stop()
-        else:
-            self._start()
-
-    def _start(self):
-        capa  = self.var_capa.get().strip()
-        pasta = self.var_pasta.get().strip()
-
-        if not capa or not Path(capa).exists():
-            self._log("ERRO: Selecione o PDF de Capa válido.")
-            return
-        if not pasta or not Path(pasta).exists():
-            self._log("ERRO: Selecione a Pasta de Orçamentos válida.")
-            return
-
-        self.cfg["capa_pdf"] = capa
-        self.cfg["pasta_orcamentos"] = pasta
-        save_config(self.cfg)
-
-        self._handler  = PropostaHandler(capa_pdf=capa, log_fn=self._log)
-        self._observer = Observer()
-        self._observer.schedule(self._handler, pasta, recursive=True)
-        self._observer.start()
-        self._running = True
-
-        self.btn.configure(text="■  PARAR MONITORAMENTO", bg="#c0392b")
-        self.lbl_status.configure(text="● Monitorando...", fg="#27ae60")
-        self._log(f"Monitorando: {pasta}")
-        self._log(f"Capa: {Path(capa).name}")
-        self._tick()
-
-    def _stop(self):
-        if self._observer:
-            self._observer.stop()
-            self._observer.join()
-            self._observer = None
-        if self._tick_after:
-            self.after_cancel(self._tick_after)
-            self._tick_after = None
-        self._running = False
-        self.btn.configure(text="▶  INICIAR MONITORAMENTO", bg="#27ae60")
-        self.lbl_status.configure(text="● Parado", fg="#888")
-        self._log("Monitor parado.")
-
-    def _tick(self):
-        if self._running and self._handler:
-            self._handler.tick()
-        if self._running:
-            self._tick_after = self.after(1000, self._tick)
-
-    def _on_close(self):
-        self._stop()
-        self.destroy()
+    observer.join()
+    print("\nMonitor encerrado.")
 
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    main()
