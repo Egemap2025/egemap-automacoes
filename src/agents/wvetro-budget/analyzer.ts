@@ -77,7 +77,7 @@ REGRAS:
 - Portas internas de madeira NÃO incluir (apenas portas de alumínio externas/principais)`;
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'google/gemini-flash-1.5:free';
+const MODEL = 'google/gemini-2.0-flash-exp:free';
 
 export class FloorPlanAnalyzer {
   private apiKey: string;
@@ -95,39 +95,48 @@ export class FloorPlanAnalyzer {
 
     logger.info('Enviando imagem para análise com IA...');
 
-    const response = await axios.post(
-      OPENROUTER_URL,
-      {
-        model: MODEL,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:image/png;base64,${imagemBase64}`,
+    let response;
+    try {
+      response = await axios.post(
+        OPENROUTER_URL,
+        {
+          model: MODEL,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/png;base64,${imagemBase64}`,
+                  },
                 },
-              },
-              {
-                type: 'text',
-                text: PROMPT_ANALISE,
-              },
-            ],
-          },
-        ],
-        max_tokens: 4096,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/Egemap2025/egemap-automacoes',
-          'X-Title': 'Egemap Automações',
+                {
+                  type: 'text',
+                  text: PROMPT_ANALISE,
+                },
+              ],
+            },
+          ],
+          max_tokens: 4096,
         },
-        timeout: 120000,
+        {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/Egemap2025/egemap-automacoes',
+            'X-Title': 'Egemap Automações',
+          },
+          timeout: 120000,
+        }
+      );
+    } catch (axiosErr: unknown) {
+      if (axios.isAxiosError(axiosErr) && axiosErr.response) {
+        const detail = JSON.stringify(axiosErr.response.data).substring(0, 400);
+        throw new Error(`OpenRouter ${axiosErr.response.status}: ${detail}`);
       }
-    );
+      throw axiosErr;
+    }
 
     const rawText: string = response.data.choices[0]?.message?.content?.trim() ?? '';
 
