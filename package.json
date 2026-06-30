@@ -1,0 +1,14 @@
+{
+  "name": "wvetro-automacao",
+  "version": "1.0.0",
+  "description": "Automação para alteração de orçamentos no sistema W-vetro",
+  "main": "src/alterar-orcamento.js",
+  "scripts": {
+    "start": "node src/alterar-orcamento.js",
+    "alterar": "node src/alterar-orcamento.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "playwright": "^1.44.0"
+  }
+}
