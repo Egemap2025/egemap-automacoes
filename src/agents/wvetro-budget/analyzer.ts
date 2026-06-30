@@ -1,6 +1,7 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GoogleAIFileManager } from '@google/generative-ai/server';
+import { chromium } from 'playwright';
 import * as fs from 'fs';
+import * as path from 'path';
+import axios from 'axios';
 import { logger } from '../../utils/logger';
 
 export type TipoAbertura = 'janela' | 'porta' | 'maxim-ar' | 'porta-janela';
@@ -72,61 +73,62 @@ REGRAS:
 - Agrupe aberturas iguais no mesmo ambiente (use quantidade > 1)
 - Portas internas de madeira NÃO incluir (apenas portas de alumínio externas/principais)`;
 
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+// Modelo gratuito no OpenRouter com boa capacidade de visão
+const MODEL = 'google/gemini-flash-1.5:free';
+
 export class FloorPlanAnalyzer {
-  private genAI: GoogleGenerativeAI;
-  private fileManager: GoogleAIFileManager;
+  private apiKey: string;
 
   constructor() {
-    const apiKey = process.env.GOOGLE_AI_API_KEY;
-    if (!apiKey) throw new Error('GOOGLE_AI_API_KEY não configurado no .env');
-    this.genAI = new GoogleGenerativeAI(apiKey);
-    this.fileManager = new GoogleAIFileManager(apiKey);
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error('OPENROUTER_API_KEY não configurado no .env');
+    this.apiKey = apiKey;
   }
 
   async analisar(pdfPath: string): Promise<AnaliseFloorPlan> {
     logger.info(`Analisando planta: ${pdfPath}`);
 
-    // Envia o PDF para o Google AI File API
-    logger.info('Fazendo upload do PDF para o Google AI...');
-    const uploadResult = await this.fileManager.uploadFile(pdfPath, {
-      mimeType: 'application/pdf',
-      displayName: 'Planta Baixa',
-    });
+    // Converte PDF para imagem usando o Chromium já instalado
+    const imagemBase64 = await this.pdfParaImagem(pdfPath);
 
-    logger.info(`Upload concluído: ${uploadResult.file.uri}`);
+    logger.info('Enviando imagem para análise com IA...');
 
-    // Aguarda o processamento do arquivo
-    let file = uploadResult.file;
-    while (file.state === 'PROCESSING') {
-      await new Promise((r) => setTimeout(r, 2000));
-      file = await this.fileManager.getFile(file.name);
-    }
-
-    if (file.state === 'FAILED') {
-      throw new Error('Falha ao processar o PDF no Google AI');
-    }
-
-    // Analisa com Gemini 1.5 Flash (gratuito)
-    const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const result = await model.generateContent([
+    const response = await axios.post(
+      OPENROUTER_URL,
       {
-        fileData: {
-          mimeType: uploadResult.file.mimeType,
-          fileUri: uploadResult.file.uri,
-        },
+        model: MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/png;base64,${imagemBase64}`,
+                },
+              },
+              {
+                type: 'text',
+                text: PROMPT_ANALISE,
+              },
+            ],
+          },
+        ],
+        max_tokens: 4096,
       },
-      { text: PROMPT_ANALISE },
-    ]);
+      {
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/Egemap2025/egemap-automacoes',
+          'X-Title': 'Egemap Automações',
+        },
+        timeout: 120000,
+      }
+    );
 
-    const rawText = result.response.text().trim();
-
-    // Remove o arquivo após análise
-    try {
-      await this.fileManager.deleteFile(uploadResult.file.name);
-    } catch {
-      // Limpeza opcional, não interrompe o fluxo
-    }
+    const rawText: string = response.data.choices[0]?.message?.content?.trim() ?? '';
 
     try {
       const parsed = JSON.parse(rawText) as AnaliseFloorPlan;
@@ -137,7 +139,40 @@ export class FloorPlanAnalyzer {
       if (match) {
         return JSON.parse(match[0]) as AnaliseFloorPlan;
       }
-      throw new Error(`Resposta inválida do Gemini: ${rawText.substring(0, 300)}`);
+      throw new Error(`Resposta inválida da IA: ${rawText.substring(0, 300)}`);
+    }
+  }
+
+  private async pdfParaImagem(pdfPath: string): Promise<string> {
+    logger.info('Convertendo PDF para imagem via Chromium...');
+
+    const browser = await chromium.launch({
+      headless: true,
+      executablePath: process.env.CHROMIUM_PATH || undefined,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
+    });
+
+    try {
+      const page = await browser.newPage();
+      // Viewport largo para capturar planta inteira com boa resolução
+      await page.setViewportSize({ width: 1920, height: 2560 });
+
+      const fileUrl = `file://${path.resolve(pdfPath)}`;
+      await page.goto(fileUrl, { waitUntil: 'networkidle', timeout: 30000 });
+
+      // Aguarda o PDF renderizar completamente no Chromium
+      await page.waitForTimeout(3000);
+
+      const screenshot = await page.screenshot({
+        fullPage: true,
+        type: 'png',
+      });
+
+      const base64 = screenshot.toString('base64');
+      logger.info(`Imagem gerada: ${Math.round(base64.length / 1024)} KB`);
+      return base64;
+    } finally {
+      await browser.close();
     }
   }
 }
