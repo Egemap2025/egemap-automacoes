@@ -1,126 +1,89 @@
 # Egemap — Agente de Orçamentos no Drive
 
-Sobe automaticamente os PDFs de orçamento para o Google Drive assim que entram na pasta do computador. Roda em segundo plano, sem precisar abrir nada.
+Sobe automaticamente os PDFs de orçamento para o Google Drive assim que entram na pasta do computador. Roda em segundo plano, sem precisar abrir nada, sem precisar fazer nada.
 
 ---
 
 ## Como funciona
 
-Você salva o PDF na pasta do computador normalmente:
+Você salva o PDF na pasta normalmente:
 ```
-Orçamentos / Sombrio / João Silva / orcamento.pdf
+Orçamentos \ Sombrio \ João Silva \ orcamento.pdf
 ```
 
-O agente detecta em segundos e cria automaticamente no Drive:
+O agente detecta e envia para o Drive automaticamente:
 ```
 Pedidos e Contratos / 2026 / Sombrio / João Silva / orcamento.pdf
 ```
-
-Se a pasta do cliente já existir no Drive, só joga o arquivo lá dentro — não duplica nada.
 
 ---
 
 ## Instalação (só uma vez)
 
-### Passo 1 — Instalar o Python
+### O que você precisa ter no computador
 
-Baixe em **[python.org/downloads](https://www.python.org/downloads/)**
+Só uma coisa: **conexão com a internet**.
 
-> Durante a instalação, marque obrigatoriamente: **"Add Python to PATH"**
-
----
-
-### Passo 2 — Baixar as credenciais do Google
-
-Precisa baixar um arquivo do Google que permite ao agente acessar o seu Drive.
-
-1. Acesse **[console.cloud.google.com](https://console.cloud.google.com/)**
-2. Clique em **"Selecionar projeto"** → **"Novo projeto"**
-   - Nome: `Egemap` → clique em **Criar**
-3. No menu lateral: **APIs e Serviços → Biblioteca**
-   - Pesquise `Google Drive API` → clique nela → **Ativar**
-4. **APIs e Serviços → Credenciais → Criar credencial**
-   - Escolha: **ID do cliente OAuth 2.0**
-   - Tipo de aplicativo: **Aplicativo para computador**
-   - Nome: `Agente Orçamentos` → **Criar**
-5. Clique em **Baixar JSON** → renomeie o arquivo para `credentials.json`
-6. Salve o `credentials.json` **dentro da pasta deste projeto**
+O instalador baixa tudo que precisa automaticamente.
 
 ---
 
-### Passo 3 — Instalar o agente
+### Passo único: clique duas vezes em `INSTALAR.bat`
 
-Clique duas vezes em:
-```
-instalar_inicio_automatico.bat
-```
+O que vai acontecer automaticamente:
 
-O que vai acontecer:
-- Instala as dependências Python automaticamente
-- Pergunta o caminho da sua pasta de orçamentos no computador
-- Abre o navegador para fazer login no Google (uma única vez)
-- Configura o agente para iniciar junto com o Windows
-- Inicia o agente imediatamente
+1. Baixa o **rclone** (programa que faz a ponte com o Google Drive)
+2. Pergunta o **caminho da sua pasta** de orçamentos no computador
+3. Abre o **navegador para você fazer login** no Google e clicar em "Permitir"
+4. Configura o agente para **iniciar junto com o Windows**
+5. Inicia o agente imediatamente
+
+Depois desse único clique, nunca mais precisa fazer nada.
 
 ---
 
-### Passo 4 — Testar
+## Testar se está funcionando
 
-Clique duas vezes em:
-```
-testar_agente.bat
-```
-
-Se aparecer **"Tudo funcionando!"** está pronto. Ele cria uma pasta `_TESTE_AGENTE` no Drive só para confirmar — pode apagar depois.
+Clique duas vezes em `TESTAR.bat` — se aparecer a mensagem verde, está tudo certo.
 
 ---
 
-## Uso no dia a dia
+## Estrutura de pastas
 
-Não precisa fazer nada. O agente fica rodando invisível em segundo plano.
-
-Basta salvar o PDF na estrutura correta de pastas:
+O agente lê a **cidade** e o **cliente** pelo nome das pastas:
 
 ```
-📁 Orçamentos              ← sua pasta configurada
- └── 📁 Sombrio            ← cidade
-      └── 📁 João Silva    ← nome do cliente
-           └── 📄 orcamento.pdf   ← arquivo detectado → vai pro Drive
-```
-
-O Drive recebe na hora:
-```
-Pedidos e Contratos / 2026 / Sombrio / João Silva / orcamento.pdf
+📁 Orçamentos               ← pasta que você configurou no INSTALAR
+ └── 📁 Sombrio             ← cidade
+      └── 📁 João Silva     ← cliente
+           └── 📄 arq.pdf  ← detectado aqui → vai pro Drive na hora
 ```
 
 ---
 
-## Acompanhar o que o agente fez
+## Acompanhar o que aconteceu
 
-Abra o arquivo `watcher.log` — ele registra tudo:
+Abra `watcher.log` para ver o histórico:
 
 ```
-2026-06-29 14:32  Novo arquivo detectado: orcamento.pdf
-2026-06-29 14:32    Cidade:  Sombrio
-2026-06-29 14:32    Cliente: João Silva
-2026-06-29 14:32    [OK]     Pasta João Silva já existe no Drive
-2026-06-29 14:32    [ENVIADO] orcamento.pdf
+2026-06-30 08:15  Novo arquivo: orcamento_001.pdf
+2026-06-30 08:15    Cidade:  Sombrio
+2026-06-30 08:15    Cliente: João Silva
+2026-06-30 08:15    [ENVIADO] orcamento_001.pdf
 ```
 
 ---
 
-## Arquivos do projeto
+## Arquivos
 
 | Arquivo | O que faz |
 |---|---|
-| `watcher.py` | O agente que monitora a pasta |
-| `drive_agent.py` | Funções de Drive (não executar direto) |
-| `configurar_credenciais.py` | Configuração inicial |
+| `INSTALAR.bat` | **Instala tudo — execute uma vez** |
+| `TESTAR.bat` | Confirma que está funcionando |
+| `INICIAR.bat` | Inicia o agente manualmente (se necessário) |
+| `PARAR.bat` | Para o agente |
+| `watcher.ps1` | O agente em si |
 | `config.json` | Caminho da pasta e configurações |
-| `instalar_inicio_automatico.bat` | **Instalação — executar uma vez** |
-| `testar_agente.bat` | **Teste — confirmar que funciona** |
-| `iniciar_agente.bat` | Iniciar manualmente se precisar |
-| `parar_agente.bat` | Parar o agente |
 | `watcher.log` | Registro de atividade |
-| `credentials.json` | Baixado do Google — **não compartilhar** |
-| `token.pickle` | Gerado automaticamente — **não compartilhar** |
+| `rclone.exe` | Baixado automaticamente pelo instalador |
+| `rclone.conf` | Credenciais do Drive — não compartilhar |
