@@ -105,61 +105,52 @@ async function abrirOrcamento(page, numero) {
   log(`Orçamento ${numero} aberto.`);
 }
 
-// ── Clicar no menu de 3 pontos do item ───────────────────────────────────────
+// ── Clicar no botão de ações da linha do item (ícone de lista, 3ª coluna) ────
 
 async function abrirMenuDoItem(page, itemIdx) {
-  // Aguarda os itens do detalhe aparecerem
+  // Aguarda a tabela de detalhe carregar
   await page.waitForSelector('text=/detalhe do orçamento/i', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(300);
 
-  // Seletores comuns para o botão ⋮ em tabelas Angular Material / Bootstrap
-  const seletoresBotao = [
-    'button[mat-icon-button]',
-    'button.mat-icon-button',
-    'button:has(mat-icon)',
-    'td button',
-    'table button',
-    '[class*="mais"]',
-    '[class*="menu"]  button',
-    '[mattooltip] button',
-    'button[aria-label*="opções" i]',
-    'button[aria-label*="ação" i]',
-    'button[aria-label*="menu" i]',
-  ];
+  // Cada linha da tabela tem na 3ª célula (td:nth-child(3)) o botão de ações
+  // (ícone de documento/lista). Localizamos a linha pelo índice e clicamos nesse botão.
+  const linhas = page.locator('tbody tr');
+  const qtdLinhas = await linhas.count().catch(() => 0);
 
-  for (const sel of seletoresBotao) {
-    const botoes = page.locator(sel);
-    const qtd = await botoes.count().catch(() => 0);
-    if (qtd > itemIdx) {
-      const botao = botoes.nth(itemIdx);
-      if (await botao.isVisible({ timeout: 800 }).catch(() => false)) {
-        await botao.scrollIntoViewIfNeeded();
-        await botao.click();
-        await page.waitForTimeout(600);
+  if (qtdLinhas > itemIdx) {
+    const linha = linhas.nth(itemIdx);
+    await linha.scrollIntoViewIfNeeded();
 
-        // Verifica se algum menu abriu
-        const menuAberto = page.locator('[role="menu"], [class*="dropdown-menu"], mat-menu, .mat-menu-panel').first();
-        if (await menuAberto.isVisible({ timeout: 1500 }).catch(() => false)) {
-          return; // ✓ menu aberto
-        }
-        // Se não abriu, desfaz e tenta próximo seletor
-        await page.keyboard.press('Escape');
+    // Tenta o botão na 3ª coluna primeiro (padrão W-vetro)
+    const btnColuna3 = linha.locator('td:nth-child(3) button, td:nth-child(3) [role="button"]').first();
+    const temBtn3 = await btnColuna3.isVisible({ timeout: 1500 }).catch(() => false);
+
+    if (temBtn3) {
+      await btnColuna3.click();
+    } else {
+      // Fallback: qualquer botão na linha
+      const btnLinha = linha.locator('button, [role="button"]').first();
+      const temBtnLinha = await btnLinha.isVisible({ timeout: 1500 }).catch(() => false);
+      if (temBtnLinha) {
+        await btnLinha.click();
+      } else {
+        // Último recurso: clique direito na linha
+        await linha.click({ button: 'right' });
       }
     }
-  }
 
-  // Fallback: clique direito na linha da tabela
-  log(`Tentando clique direito na linha ${itemIdx + 1}…`);
-  const linhas = page.locator('tbody tr, tr.item-row, tr[class*="ng-star"]');
-  const qtdLinhas = await linhas.count().catch(() => 0);
-  if (qtdLinhas > itemIdx) {
-    await linhas.nth(itemIdx).click({ button: 'right' });
     await page.waitForTimeout(600);
-    return;
+
+    // Verifica se o menu abriu
+    const menu = page.locator('[role="menu"], .mat-menu-panel, [class*="dropdown"]').first();
+    if (await menu.isVisible({ timeout: 2000 }).catch(() => false)) {
+      return; // ✓
+    }
   }
 
   throw new Error(
     `Não consegui abrir o menu do item ${itemIdx + 1}.\n` +
-    `Verifique se o número do item está correto e se o orçamento está carregado.`
+    `Verifique se o número do item está correto e se o orçamento está aberto.`
   );
 }
 
@@ -169,10 +160,10 @@ async function editarItem(page, itemIdx, campos) {
   log(`Editando item ${itemIdx + 1}…`);
   await abrirMenuDoItem(page, itemIdx);
 
-  // Clica em "Editar Itens do Orç."
+  // Clica em "Editar Item do Orç." (nome exato do menu no W-vetro)
   const opcaoEditar = page
-    .getByRole('menuitem', { name: /editar itens do orç/i })
-    .or(page.getByText(/editar itens do orç/i).first());
+    .getByRole('menuitem', { name: /editar item do orç/i })
+    .or(page.getByText(/editar item do orç/i).first());
   await opcaoEditar.click({ timeout: 6000 });
 
   // Aguarda modal "Altera Medida da Esquadria do Orçamento"
