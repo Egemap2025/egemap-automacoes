@@ -1,16 +1,15 @@
 param([string]$Config = "$PSScriptRoot\config.json")
 
-$cfg     = Get-Content $Config -Raw | ConvertFrom-Json
-$pasta   = $cfg.pasta_orcamentos
-$rclone  = "$PSScriptRoot\rclone.exe"
-$conf    = "$PSScriptRoot\rclone.conf"
-$log     = "$PSScriptRoot\watcher.log"
-$vistos  = "$PSScriptRoot\enviados.json"
-$ano     = (Get-Date).Year.ToString()
+$cfg    = Get-Content $Config -Raw | ConvertFrom-Json
+$pasta  = $cfg.pasta_orcamentos.TrimEnd("/\")
+$rclone = "$PSScriptRoot\rclone.exe"
+$conf   = "$PSScriptRoot\rclone.conf"
+$log    = "$PSScriptRoot\watcher.log"
+$vistos = "$PSScriptRoot\enviados.json"
 
 function Log($m) {
     $l = "$(Get-Date -f 'yyyy-MM-dd HH:mm')  $m"
-    Add-Content $log $l
+    Add-Content $log $l -Encoding UTF8
     Write-Host $l
 }
 
@@ -23,46 +22,62 @@ function Enviados {
 
 function Salvar($h) { $h | ConvertTo-Json | Set-Content $vistos -Encoding UTF8 }
 
-if (-not (Test-Path $pasta))  { Log "ERRO: pasta nao encontrada: $pasta"; Read-Host; exit 1 }
-if (-not (Test-Path $rclone)) { Log "ERRO: rclone.exe nao encontrado. Rode INSTALAR.bat"; Read-Host; exit 1 }
+if (-not (Test-Path $pasta))  { Log "ERRO: pasta nao encontrada: $pasta"; Read-Host "Enter para fechar"; exit 1 }
+if (-not (Test-Path $rclone)) { Log "ERRO: rclone.exe ausente. Rode EGEMAP_INSTALAR.bat"; Read-Host "Enter para fechar"; exit 1 }
 
-Log "===================================================="
-Log "  Agente Egemap - Drive rodando"
-Log "===================================================="
-Log "Pasta: $pasta"
+Log "======================================================="
+Log "  Agente Egemap - Drive"
+Log "======================================================="
+Log "Monitorando: $pasta"
+Log "Estrutura:   Orcamentos / Ano / Estado / Cidade / Cliente / PDF"
 Log ""
 
 $ok = Enviados
 
 while ($true) {
-    $anoAtual = (Get-Date).Year.ToString()
-    if ($ano -ne $anoAtual) { $ano = $anoAtual; Log "Ano: $ano" }
-
     Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
         $arq = $_.FullName
         if ($ok.ContainsKey($arq)) { return }
 
-        $rel   = $arq.Substring($pasta.TrimEnd("/\").Length).TrimStart("\", "/")
+        # Estrutura esperada:
+        #  {pasta} / {Ano} / {Estado} / {Cidade} / {Cliente} / arquivo.pdf
+        #  partes:    [0]      [1]        [2]        [3]         [4=nome]
+        $rel   = $arq.Substring($pasta.Length).TrimStart("\", "/")
         $p     = $rel -split "[\\/]"
-        if ($p.Count -lt 3) { $ok[$arq] = "ignorado"; Salvar $ok; return }
 
-        $cidade  = $p[0]
-        $cliente = $p[1]
+        if ($p.Count -lt 5) {
+            # Arquivo fora da estrutura correta — ignora sem logar
+            $ok[$arq] = "ignorado"
+            Salvar $ok
+            return
+        }
+
+        $ano     = $p[0]
+        # $estado = $p[1]  # existe no computador mas nao vai pro Drive
+        $cidade  = $p[2]
+        $cliente = $p[3]
         $nome    = $p[-1]
 
-        Start-Sleep 2
+        # Aguarda o arquivo terminar de ser gravado
+        Start-Sleep 3
         if (-not (Test-Path $arq)) { return }
 
-        Log "Novo: $nome"
-        Log "  $cidade / $cliente"
+        Log "Arquivo novo: $nome"
+        Log "  Ano:     $ano"
+        Log "  Cidade:  $cidade"
+        Log "  Cliente: $cliente"
 
-        $r = & $rclone copy $arq "egemap:$ano/$cidade/$cliente" --config $conf 2>&1
+        # Destino no Drive: Pedidos e Contratos / Ano / Cidade / Cliente /
+        $destino = "$ano/$cidade/$cliente"
+
+        $r = & $rclone copy $arq "egemap:$destino" --config $conf 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Log "  [OK] Enviado"
+            Log "  [OK] Enviado para o Drive"
             $ok[$arq] = "ok"
             Salvar $ok
         } else {
-            Log "  [ERRO] Vai tentar de novo"
+            Log "  [ERRO] Falha - vai tentar de novo em 10s"
+            Log "  Detalhe: $r"
         }
         Log ""
     }
