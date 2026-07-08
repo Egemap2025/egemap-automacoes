@@ -305,6 +305,22 @@ class PropostaHandler(FileSystemEventHandler):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def validar_capa(capa_pdf):
+    """Retorna None se ok, ou mensagem de erro."""
+    if not Path(capa_pdf).exists():
+        return f"Arquivo nao encontrado: {capa_pdf}"
+    try:
+        doc = fitz.open(capa_pdf)
+        n = len(doc)
+        doc.close()
+        if n < 3:
+            return (f"O PDF de Capa precisa ter 3 paginas (Capa / Resumo / Contra Capa).\n"
+                    f"  '{Path(capa_pdf).name}' tem apenas {n} pagina(s).")
+    except Exception as e:
+        return f"Erro ao abrir PDF de Capa: {e}"
+    return None
+
+
 def main():
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 55)
@@ -313,52 +329,45 @@ def main():
     print()
 
     saved_capa, saved_pasta = load_config()
+    config_ok = (
+        saved_capa and saved_pasta
+        and Path(saved_capa).exists()
+        and Path(saved_pasta).is_dir()
+        and validar_capa(saved_capa) is None
+    )
 
-    # Capa PDF
-    if saved_capa and Path(saved_capa).exists():
-        print(f"Capa PDF salvo: {saved_capa}")
-        resp = input("Usar este? (ENTER = sim, ou cole novo caminho): ").strip()
-        capa_pdf = resp if resp else saved_capa
+    if config_ok:
+        # Inicio automatico: ja tem configuracao valida, nao pergunta nada
+        capa_pdf   = saved_capa
+        pasta_raiz = saved_pasta
+        print(f"Configuracao carregada automaticamente:")
+        print(f"  Capa : {Path(capa_pdf).name}")
+        print(f"  Pasta: {pasta_raiz}")
+        print()
+        print("  (Para alterar, feche e apague o arquivo")
+        print(f"   {CONFIG_FILE})")
+        print()
     else:
-        capa_pdf = input("Cole o caminho do PDF de Capa (ex: C:\\EGEMAP\\Capa.pdf): ").strip()
+        # Primeira vez ou config invalida: pergunta os caminhos
+        if saved_capa and not Path(saved_capa).exists():
+            print(f"Aviso: capa anterior nao encontrada ({saved_capa})")
+            print()
 
-    capa_pdf = capa_pdf.strip('"').strip("'")
-    if not Path(capa_pdf).exists():
-        print(f"\nERRO: Arquivo nao encontrado: {capa_pdf}")
-        input("\nPressione ENTER para fechar.")
-        sys.exit(1)
-
-    # Pasta raiz
-    if saved_pasta and Path(saved_pasta).exists():
-        print(f"\nPasta salva: {saved_pasta}")
-        resp = input("Usar esta? (ENTER = sim, ou cole nova pasta): ").strip()
-        pasta_raiz = resp if resp else saved_pasta
-    else:
-        pasta_raiz = input("\nCole o caminho da pasta de orcamentos: ").strip()
-
-    pasta_raiz = pasta_raiz.strip('"').strip("'")
-    if not Path(pasta_raiz).is_dir():
-        print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
-        input("\nPressione ENTER para fechar.")
-        sys.exit(1)
-
-    # Valida estrutura do capa PDF
-    try:
-        _capa_doc = fitz.open(capa_pdf)
-        n_pages = len(_capa_doc)
-        _capa_doc.close()
-        if n_pages < 3:
-            print(f"\nERRO: O PDF de Capa precisa ter pelo menos 3 paginas")
-            print(f"  Pagina 1 = Capa  |  Pagina 2 = Resumo  |  Pagina 3 = Contra Capa")
-            print(f"  O arquivo '{Path(capa_pdf).name}' tem apenas {n_pages} pagina(s).")
+        capa_pdf = input("Cole o caminho do PDF de Capa (ex: C:\\EGEMAP\\Capa.pdf): ").strip().strip('"').strip("'")
+        erro = validar_capa(capa_pdf)
+        if erro:
+            print(f"\nERRO: {erro}")
             input("\nPressione ENTER para fechar.")
             sys.exit(1)
-    except Exception as e:
-        print(f"\nERRO ao abrir o PDF de Capa: {e}")
-        input("\nPressione ENTER para fechar.")
-        sys.exit(1)
 
-    save_config(capa_pdf, pasta_raiz)
+        pasta_raiz = input("\nCole o caminho da pasta de orcamentos: ").strip().strip('"').strip("'")
+        if not Path(pasta_raiz).is_dir():
+            print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+
+        save_config(capa_pdf, pasta_raiz)
+        print("\nConfiguracao salva! Da proxima vez inicia automaticamente.\n")
 
     print()
     print("=" * 55)
