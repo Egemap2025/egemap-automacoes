@@ -66,7 +66,6 @@ echo  Exemplo:  C:\Users\Egemap\Documents\Orcamentos
 echo.
 set /p PASTA="  Caminho: "
 set PASTA=!PASTA:"=!
-set PASTA=!PASTA: =!
 
 if "!PASTA!"=="" (
     echo  [ERRO] Caminho nao informado.
