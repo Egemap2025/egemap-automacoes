@@ -271,8 +271,8 @@ class PropostaHandler(FileSystemEventHandler):
         has_alm = bool(pdfs["alm"])
 
         client = suggest_client_name(folder)
-        today  = date.today().strftime("%d-%m-%Y")
-        out_name = f"Proposta Comercial {client} - {today}"
+        today  = date.today().strftime("%d-%m")
+        out_name = f"Proposta Comercial {client} {today}"
         output_path = safe_output_path(folder, out_name)
 
         log(f"[{client}] COMPLETO detectado — verificando PDFs...")
