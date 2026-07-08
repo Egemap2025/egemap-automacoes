@@ -321,6 +321,24 @@ def validar_capa(capa_pdf):
     return None
 
 
+def registrar_inicio_automatico():
+    """Registra o proprio exe para abrir com o Windows (so no Windows)."""
+    if os.name != "nt":
+        return
+    try:
+        exe = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+        import winreg
+        chave = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE
+        )
+        winreg.SetValueEx(chave, "EGEMAP-Monitor", 0, winreg.REG_SZ, str(exe))
+        winreg.CloseKey(chave)
+    except Exception:
+        pass  # nao critico se falhar
+
+
 def main():
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 55)
@@ -337,37 +355,35 @@ def main():
     )
 
     if config_ok:
-        # Inicio automatico: ja tem configuracao valida, nao pergunta nada
         capa_pdf   = saved_capa
         pasta_raiz = saved_pasta
-        print(f"Configuracao carregada automaticamente:")
         print(f"  Capa : {Path(capa_pdf).name}")
         print(f"  Pasta: {pasta_raiz}")
         print()
-        print("  (Para alterar, feche e apague o arquivo")
-        print(f"   {CONFIG_FILE})")
-        print()
     else:
-        # Primeira vez ou config invalida: pergunta os caminhos
+        # Primeira vez: faz as duas perguntas e nunca mais pergunta
         if saved_capa and not Path(saved_capa).exists():
-            print(f"Aviso: capa anterior nao encontrada ({saved_capa})")
+            print(f"Aviso: capa anterior nao encontrada.")
             print()
 
-        capa_pdf = input("Cole o caminho do PDF de Capa (ex: C:\\EGEMAP\\Capa.pdf): ").strip().strip('"').strip("'")
+        print("PRIMEIRA CONFIGURACAO (so precisa fazer uma vez)\n")
+
+        capa_pdf = input("1. Cole o caminho do PDF de Capa e aperte Enter:\n> ").strip().strip('"').strip("'")
         erro = validar_capa(capa_pdf)
         if erro:
             print(f"\nERRO: {erro}")
             input("\nPressione ENTER para fechar.")
             sys.exit(1)
 
-        pasta_raiz = input("\nCole o caminho da pasta de orcamentos: ").strip().strip('"').strip("'")
+        pasta_raiz = input("\n2. Cole o caminho da pasta de orcamentos e aperte Enter:\n> ").strip().strip('"').strip("'")
         if not Path(pasta_raiz).is_dir():
             print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
             input("\nPressione ENTER para fechar.")
             sys.exit(1)
 
         save_config(capa_pdf, pasta_raiz)
-        print("\nConfiguracao salva! Da proxima vez inicia automaticamente.\n")
+        registrar_inicio_automatico()
+        print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
 
     print()
     print("=" * 55)
