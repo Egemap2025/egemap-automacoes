@@ -210,11 +210,16 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
 
 # ── Watchdog handler ──────────────────────────────────────────────────────────
 
-WAIT_SECONDS = 4
+WAIT_SECONDS = 8  # espera 8s apos o ultimo evento para garantir que o PDF foi salvo
 
 def log(msg):
     hora = time.strftime("%H:%M:%S")
     print(f"[{hora}] {msg}", flush=True)
+
+
+def _norm(path):
+    """Normaliza caminho para comparacao segura no Windows (resolve maiusculas/minusculas)."""
+    return str(Path(path).resolve()).upper()
 
 
 class PropostaHandler(FileSystemEventHandler):
@@ -228,7 +233,9 @@ class PropostaHandler(FileSystemEventHandler):
     def _queue(self, path):
         p = Path(path)
         if p.suffix.lower() == ".pdf" and self._is_trigger(str(p)):
-            self._pending[str(p.parent)] = (time.time(), str(p))
+            # Armazena com caminho normalizado da pasta e caminho real do trigger
+            folder_key = _norm(p.parent)
+            self._pending[folder_key] = (time.time(), str(p.parent), str(p))
 
     def on_created(self, event):
         if not event.is_directory:
@@ -244,19 +251,21 @@ class PropostaHandler(FileSystemEventHandler):
 
     def tick(self):
         now = time.time()
-        ready = [f for f, (t, _) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
-        for folder in ready:
-            _, trigger_path = self._pending.pop(folder)
+        ready = [k for k, (t, _, __) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
+        for key in ready:
+            _, folder, trigger_path = self._pending.pop(key)
             try:
                 self._process_folder(folder, trigger_path)
             except Exception as e:
+                import traceback
                 log(f"ERRO em {folder}: {e}")
+                log(traceback.format_exc())
 
     def _process_folder(self, folder, trigger_path):
         pdfs = find_pdfs_in_folder(folder)
-        trigger = str(trigger_path)
+        trigger_norm = _norm(trigger_path)
         for key in pdfs:
-            pdfs[key] = [p for p in pdfs[key] if p != trigger]
+            pdfs[key] = [p for p in pdfs[key] if _norm(p) != trigger_norm]
 
         has_pvc = bool(pdfs["pvc"])
         has_alm = bool(pdfs["alm"])
@@ -330,6 +339,22 @@ def main():
     pasta_raiz = pasta_raiz.strip('"').strip("'")
     if not Path(pasta_raiz).is_dir():
         print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
+        input("\nPressione ENTER para fechar.")
+        sys.exit(1)
+
+    # Valida estrutura do capa PDF
+    try:
+        _capa_doc = fitz.open(capa_pdf)
+        n_pages = len(_capa_doc)
+        _capa_doc.close()
+        if n_pages < 3:
+            print(f"\nERRO: O PDF de Capa precisa ter pelo menos 3 paginas")
+            print(f"  Pagina 1 = Capa  |  Pagina 2 = Resumo  |  Pagina 3 = Contra Capa")
+            print(f"  O arquivo '{Path(capa_pdf).name}' tem apenas {n_pages} pagina(s).")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+    except Exception as e:
+        print(f"\nERRO ao abrir o PDF de Capa: {e}")
         input("\nPressione ENTER para fechar.")
         sys.exit(1)
 
