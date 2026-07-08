@@ -1,127 +1,70 @@
-# watcher.ps1
-# Monitora a pasta de orcamentos e envia PDFs automaticamente para o Google Drive.
-# Roda em segundo plano. Nao feche esta janela enquanto quiser o agente ativo.
+param([string]$Config = "$PSScriptRoot\config.json")
 
-param(
-    [string]$ConfigFile = "$PSScriptRoot\config.json"
-)
+$cfg     = Get-Content $Config -Raw | ConvertFrom-Json
+$pasta   = $cfg.pasta_orcamentos
+$rclone  = "$PSScriptRoot\rclone.exe"
+$conf    = "$PSScriptRoot\rclone.conf"
+$log     = "$PSScriptRoot\watcher.log"
+$vistos  = "$PSScriptRoot\enviados.json"
+$ano     = (Get-Date).Year.ToString()
 
-# ── Carregar configuracao ────────────────────────────────────────────────────
-if (-not (Test-Path $ConfigFile)) {
-    Write-Host "[ERRO] config.json nao encontrado. Execute INSTALAR.bat primeiro." -ForegroundColor Red
-    Read-Host "Pressione Enter para fechar"
-    exit 1
+function Log($m) {
+    $l = "$(Get-Date -f 'yyyy-MM-dd HH:mm')  $m"
+    Add-Content $log $l
+    Write-Host $l
 }
 
-$config          = Get-Content $ConfigFile -Raw | ConvertFrom-Json
-$pastaLocal      = $config.pasta_orcamentos
-$rclone          = "$PSScriptRoot\rclone.exe"
-$rcloneConf      = "$PSScriptRoot\rclone.conf"
-$logFile         = "$PSScriptRoot\watcher.log"
-$processados     = "$PSScriptRoot\processados.json"
-$ano             = (Get-Date).Year.ToString()
-
-# ── Funcoes ──────────────────────────────────────────────────────────────────
-function Registrar($msg) {
-    $linha = "$(Get-Date -Format 'yyyy-MM-dd HH:mm')  $msg"
-    Add-Content -Path $logFile -Value $linha -Encoding UTF8
-    Write-Host $linha
-}
-
-function EnviarDrive($arquivo, $cidade, $cliente) {
-    $destino = "$ano/$cidade/$cliente"
-    $resultado = & $rclone copy $arquivo "egemap:$destino" --config $rcloneConf 2>&1
-    return $LASTEXITCODE -eq 0
-}
-
-function CarregarProcessados() {
-    if (Test-Path $processados) {
-        return (Get-Content $processados -Raw | ConvertFrom-Json -AsHashtable)
+function Enviados {
+    if (Test-Path $vistos) {
+        try { return (Get-Content $vistos -Raw | ConvertFrom-Json -AsHashtable) } catch {}
     }
     return @{}
 }
 
-function SalvarProcessados($hash) {
-    $hash | ConvertTo-Json | Set-Content $processados -Encoding UTF8
-}
+function Salvar($h) { $h | ConvertTo-Json | Set-Content $vistos -Encoding UTF8 }
 
-# ── Verificacoes iniciais ────────────────────────────────────────────────────
-if (-not (Test-Path $pastaLocal)) {
-    Registrar "[ERRO] Pasta nao encontrada: $pastaLocal"
-    Registrar "       Corrija o caminho em config.json e reinicie."
-    Read-Host "Pressione Enter para fechar"
-    exit 1
-}
+if (-not (Test-Path $pasta))  { Log "ERRO: pasta nao encontrada: $pasta"; Read-Host; exit 1 }
+if (-not (Test-Path $rclone)) { Log "ERRO: rclone.exe nao encontrado. Rode INSTALAR.bat"; Read-Host; exit 1 }
 
-if (-not (Test-Path $rclone)) {
-    Registrar "[ERRO] rclone.exe nao encontrado. Execute INSTALAR.bat novamente."
-    Read-Host "Pressione Enter para fechar"
-    exit 1
-}
+Log "===================================================="
+Log "  Agente Egemap - Drive rodando"
+Log "===================================================="
+Log "Pasta: $pasta"
+Log ""
 
-# ── Inicio ───────────────────────────────────────────────────────────────────
-Registrar "===================================================="
-Registrar "  Agente de Orcamentos - Drive (em execucao)"
-Registrar "===================================================="
-Registrar "Pasta monitorada: $pastaLocal"
-Registrar "Aguardando novos arquivos..."
-Registrar ""
+$ok = Enviados
 
-$vistos = CarregarProcessados
-
-# ── Loop principal ───────────────────────────────────────────────────────────
 while ($true) {
-    # Atualiza ano automaticamente na virada
     $anoAtual = (Get-Date).Year.ToString()
-    if ($ano -ne $anoAtual) {
-        $ano = $anoAtual
-        Registrar "Ano atualizado para $ano"
-    }
+    if ($ano -ne $anoAtual) { $ano = $anoAtual; Log "Ano: $ano" }
 
-    # Busca todos os PDFs na pasta
-    Get-ChildItem -Path $pastaLocal -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue |
-    ForEach-Object {
-        $arquivo = $_.FullName
+    Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        $arq = $_.FullName
+        if ($ok.ContainsKey($arq)) { return }
 
-        # Pula arquivos ja processados
-        if ($vistos.ContainsKey($arquivo)) { return }
+        $rel   = $arq.Substring($pasta.TrimEnd("/\").Length).TrimStart("\", "/")
+        $p     = $rel -split "[\\/]"
+        if ($p.Count -lt 3) { $ok[$arq] = "ignorado"; Salvar $ok; return }
 
-        # Extrai cidade e cliente do caminho
-        # Estrutura: {pastaLocal}\{Cidade}\{Cliente}\arquivo.pdf
-        $relativo = $arquivo.Substring($pastaLocal.Length).TrimStart("\", "/")
-        $partes   = $relativo -split "[\\/]"
+        $cidade  = $p[0]
+        $cliente = $p[1]
+        $nome    = $p[-1]
 
-        if ($partes.Count -lt 3) {
-            $vistos[$arquivo] = "ignorado"
-            SalvarProcessados $vistos
-            return
-        }
+        Start-Sleep 2
+        if (-not (Test-Path $arq)) { return }
 
-        $cidade  = $partes[0]
-        $cliente = $partes[1]
-        $nome    = $partes[-1]
+        Log "Novo: $nome"
+        Log "  $cidade / $cliente"
 
-        # Aguarda o arquivo terminar de ser gravado
-        Start-Sleep -Seconds 2
-        if (-not (Test-Path $arquivo)) { return }
-
-        Registrar "Novo arquivo: $nome"
-        Registrar "  Cidade:  $cidade"
-        Registrar "  Cliente: $cliente"
-
-        $ok = EnviarDrive $arquivo $cidade $cliente
-
-        if ($ok) {
-            Registrar "  [ENVIADO] $nome"
-            $vistos[$arquivo] = "enviado"
+        $r = & $rclone copy $arq "egemap:$ano/$cidade/$cliente" --config $conf 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Log "  [OK] Enviado"
+            $ok[$arq] = "ok"
+            Salvar $ok
         } else {
-            Registrar "  [ERRO] Falha ao enviar. Vai tentar novamente em breve."
-            # Nao marca como processado para tentar de novo
-            return
+            Log "  [ERRO] Vai tentar de novo"
         }
-        Registrar ""
-        SalvarProcessados $vistos
+        Log ""
     }
-
-    Start-Sleep -Seconds 10
+    Start-Sleep 10
 }
