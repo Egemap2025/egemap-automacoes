@@ -34,6 +34,17 @@ Log ""
 
 $ok = Enviados
 
+# Na primeira execucao (ou apos atualizacao): marca arquivos existentes como ja vistos sem enviar
+if ($ok.Count -eq 0) {
+    Log "Inicializando: registrando arquivos existentes (nao serao enviados)..."
+    Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        $ok[$_.FullName] = "ignorado"
+    }
+    Salvar $ok
+    Log "Pronto. Monitorando apenas arquivos novos a partir de agora."
+    Log ""
+}
+
 while ($true) {
     Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
         $arq = $_.FullName
@@ -56,6 +67,13 @@ while ($true) {
         $cidade  = $p[1]
         $cliente = $p[2]
         $nome    = $p[-1]
+
+        # Somente arquivos com "Proposta Comercial" no nome
+        if ($nome -notlike "*Proposta Comercial*") {
+            $ok[$arq] = "ignorado"
+            Salvar $ok
+            return
+        }
 
         # Aguarda o arquivo terminar de ser gravado
         Start-Sleep 3
