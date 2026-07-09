@@ -63,10 +63,10 @@ while ($true) {
             return
         }
 
-        $ano     = $p[0]
-        $cidade  = $p[2]
-        $cliente = $p[3]
-        $nome    = $p[-1]
+        $ano     = $p[0].Trim()
+        $cidade  = $p[2].Trim()
+        $cliente = $p[3].Trim()
+        $nome    = $p[-1].Trim()
 
         # Somente o ano configurado (ignora pastas de anos anteriores)
         if ($ano -ne $cfg.ano) {
