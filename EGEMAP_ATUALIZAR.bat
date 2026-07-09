@@ -22,7 +22,7 @@ if not exist "%DESTINO%\rclone.exe" (
 )
 
 echo  [1/4] Parando agente antigo...
-taskkill /F /FI "IMAGENAME eq powershell.exe" /FI "WINDOWTITLE eq *watcher*" >nul 2>&1
+powershell -Command "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.CommandLine -like '*watcher.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 timeout /t 2 /nobreak >nul
 echo        OK.
 
