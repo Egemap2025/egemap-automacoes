@@ -218,24 +218,59 @@ def log(msg):
 
 
 def _norm(path):
-    """Normaliza caminho para comparacao segura no Windows (resolve maiusculas/minusculas)."""
     return str(Path(path).resolve()).upper()
+
+
+def _is_proposta_gerada(path):
+    """Ignora PDFs que já foram gerados por este programa."""
+    return Path(path).stem.startswith("Proposta Comercial")
+
+
+def merge_individual(capa_pdf_path, src_pdf_path, output_path):
+    """Envolve um unico PDF (PVC ou ALM) com Capa + conteudo + Contra Capa."""
+    capa_doc = fitz.open(capa_pdf_path)
+    src_doc  = fitz.open(src_pdf_path)
+    result   = fitz.open()
+
+    result.insert_pdf(capa_doc, from_page=0, to_page=0)
+
+    tipo = detect_pdf_type(src_pdf_path)
+    if tipo == "pvc":
+        start = 1 if _has_system_capa(src_doc) else 0
+        if start < len(src_doc):
+            result.insert_pdf(src_doc, from_page=start)
+    else:
+        start, end = _content_range(src_doc)
+        if start <= end:
+            result.insert_pdf(src_doc, from_page=start, to_page=end)
+
+    result.insert_pdf(capa_doc, from_page=2, to_page=2)
+    result.save(output_path)
+    result.close()
 
 
 class PropostaHandler(FileSystemEventHandler):
     def __init__(self, capa_pdf):
         self.capa_pdf = capa_pdf
-        self._pending = {}
-
-    def _is_trigger(self, path):
-        return "COMPLETO" in Path(path).stem.upper()
+        self._pending_single   = {}  # pdf_norm -> (timestamp, caminho_real)
+        self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
 
     def _queue(self, path):
         p = Path(path)
-        if p.suffix.lower() == ".pdf" and self._is_trigger(str(p)):
-            # Armazena com caminho normalizado da pasta e caminho real do trigger
-            folder_key = _norm(p.parent)
-            self._pending[folder_key] = (time.time(), str(p.parent), str(p))
+        if p.suffix.lower() != ".pdf":
+            return
+        if _is_proposta_gerada(str(p)):
+            return  # ignora PDFs que o proprio programa gerou
+
+        stem_upper = p.stem.upper()
+        folder_norm = _norm(p.parent)
+
+        if "COMPLETO" in stem_upper:
+            # Aguarda 8s e monta a versao final com Resumo
+            self._pending_completo[folder_norm] = (time.time(), str(p.parent), str(p))
+        else:
+            # Qualquer outro PDF: aguarda 6s e envolve com Capa + Contra Capa
+            self._pending_single[_norm(str(p))] = (time.time(), str(p))
 
     def on_created(self, event):
         if not event.is_directory:
@@ -250,22 +285,57 @@ class PropostaHandler(FileSystemEventHandler):
             self._queue(event.src_path)
 
     def tick(self):
+        import traceback
         now = time.time()
-        ready = [k for k, (t, _, __) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
-        for key in ready:
-            _, folder, trigger_path = self._pending.pop(key)
+
+        # Processa PDFs individuais (6s de espera)
+        prontos = [k for k, (t, _) in list(self._pending_single.items()) if now - t >= 6]
+        for key in prontos:
+            _, src_path = self._pending_single.pop(key)
             try:
-                self._process_folder(folder, trigger_path)
+                self._process_single(src_path)
             except Exception as e:
-                import traceback
-                log(f"ERRO em {folder}: {e}")
+                log(f"ERRO ao processar {src_path}: {e}")
                 log(traceback.format_exc())
 
-    def _process_folder(self, folder, trigger_path):
+        # Processa COMPLETO (8s de espera)
+        prontos = [k for k, (t, _, __) in list(self._pending_completo.items()) if now - t >= WAIT_SECONDS]
+        for key in prontos:
+            _, folder, trigger_path = self._pending_completo.pop(key)
+            try:
+                self._process_completo(folder, trigger_path)
+            except Exception as e:
+                log(f"ERRO COMPLETO em {folder}: {e}")
+                log(traceback.format_exc())
+
+    def _process_single(self, src_path):
+        """Envolve um PDF recém-salvo com Capa + Contra Capa."""
+        tipo = detect_pdf_type(src_path)
+        if tipo not in ("pvc", "alm"):
+            return  # nao e orcamento, ignora
+
+        folder = str(Path(src_path).parent)
+        client = suggest_client_name(folder)
+        today  = date.today().strftime("%d-%m")
+        sufixo = "PVC" if tipo == "pvc" else "ALM"
+        out_name = f"Proposta Comercial {client} {today} {sufixo}"
+        output_path = safe_output_path(folder, out_name)
+
+        log(f"[{client}] {sufixo} detectado — adicionando Capa e Contra Capa...")
+        merge_individual(self.capa_pdf, src_path, output_path)
+        log(f"[{client}] SALVO: {Path(output_path).name}")
+
+    def _process_completo(self, folder, trigger_path):
+        """Monta proposta final com Resumo somando PVC + ALM."""
         pdfs = find_pdfs_in_folder(folder)
         trigger_norm = _norm(trigger_path)
+
+        # Remove o arquivo COMPLETO e propostas ja geradas da lista de fontes
         for key in pdfs:
-            pdfs[key] = [p for p in pdfs[key] if _norm(p) != trigger_norm]
+            pdfs[key] = [
+                p for p in pdfs[key]
+                if _norm(p) != trigger_norm and not _is_proposta_gerada(p)
+            ]
 
         has_pvc = bool(pdfs["pvc"])
         has_alm = bool(pdfs["alm"])
@@ -275,7 +345,7 @@ class PropostaHandler(FileSystemEventHandler):
         out_name = f"Proposta Comercial {client} {today}"
         output_path = safe_output_path(folder, out_name)
 
-        log(f"[{client}] COMPLETO detectado — verificando PDFs...")
+        log(f"[{client}] COMPLETO detectado — montando proposta final...")
 
         if has_pvc and has_alm:
             pvc_path  = pdfs["pvc"][0]
