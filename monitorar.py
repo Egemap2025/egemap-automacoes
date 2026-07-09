@@ -252,25 +252,21 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path):
 class PropostaHandler(FileSystemEventHandler):
     def __init__(self, capa_pdf):
         self.capa_pdf = capa_pdf
-        self._pending_single   = {}  # pdf_norm -> (timestamp, caminho_real)
-        self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
+        self._pending = {}  # folder_norm -> (timestamp, pasta, trigger_path)
 
     def _queue(self, path):
         p = Path(path)
         if p.suffix.lower() != ".pdf":
             return
         if _is_proposta_gerada(str(p)):
-            return  # ignora PDFs que o proprio programa gerou
+            return  # ignora PDFs que o proprio programa ja gerou
 
-        stem_upper = p.stem.upper()
+        tipo = detect_pdf_type(str(p))
+        if tipo not in ("pvc", "alm"):
+            return  # so processa orcamentos PVC ou ALM
+
         folder_norm = _norm(p.parent)
-
-        if "COMPLETO" in stem_upper:
-            # Aguarda 8s e monta a versao final com Resumo
-            self._pending_completo[folder_norm] = (time.time(), str(p.parent), str(p))
-        else:
-            # Qualquer outro PDF: aguarda 6s e envolve com Capa + Contra Capa
-            self._pending_single[_norm(str(p))] = (time.time(), str(p))
+        self._pending[folder_norm] = (time.time(), str(p.parent), str(p))
 
     def on_created(self, event):
         if not event.is_directory:
@@ -287,50 +283,21 @@ class PropostaHandler(FileSystemEventHandler):
     def tick(self):
         import traceback
         now = time.time()
-
-        # Processa PDFs individuais (6s de espera)
-        prontos = [k for k, (t, _) in list(self._pending_single.items()) if now - t >= 6]
+        prontos = [k for k, (t, _, __) in list(self._pending.items()) if now - t >= WAIT_SECONDS]
         for key in prontos:
-            _, src_path = self._pending_single.pop(key)
+            _, folder, trigger_path = self._pending.pop(key)
             try:
-                self._process_single(src_path)
+                self._process_folder(folder, trigger_path)
             except Exception as e:
-                log(f"ERRO ao processar {src_path}: {e}")
+                log(f"ERRO em {folder}: {e}")
                 log(traceback.format_exc())
 
-        # Processa COMPLETO (8s de espera)
-        prontos = [k for k, (t, _, __) in list(self._pending_completo.items()) if now - t >= WAIT_SECONDS]
-        for key in prontos:
-            _, folder, trigger_path = self._pending_completo.pop(key)
-            try:
-                self._process_completo(folder, trigger_path)
-            except Exception as e:
-                log(f"ERRO COMPLETO em {folder}: {e}")
-                log(traceback.format_exc())
-
-    def _process_single(self, src_path):
-        """Envolve um PDF recém-salvo com Capa + Contra Capa."""
-        tipo = detect_pdf_type(src_path)
-        if tipo not in ("pvc", "alm"):
-            return  # nao e orcamento, ignora
-
-        folder = str(Path(src_path).parent)
-        client = suggest_client_name(folder)
-        today  = date.today().strftime("%d-%m")
-        sufixo = "PVC" if tipo == "pvc" else "ALM"
-        out_name = f"Proposta Comercial {client} {today} {sufixo}"
-        output_path = safe_output_path(folder, out_name)
-
-        log(f"[{client}] {sufixo} detectado — adicionando Capa e Contra Capa...")
-        merge_individual(self.capa_pdf, src_path, output_path)
-        log(f"[{client}] SALVO: {Path(output_path).name}")
-
-    def _process_completo(self, folder, trigger_path):
-        """Monta proposta final com Resumo somando PVC + ALM."""
+    def _process_folder(self, folder, trigger_path):
+        """Verifica pasta e monta a proposta com tudo que encontrar."""
         pdfs = find_pdfs_in_folder(folder)
         trigger_norm = _norm(trigger_path)
 
-        # Remove o arquivo COMPLETO e propostas ja geradas da lista de fontes
+        # Exclui propostas ja geradas e o proprio arquivo que disparou
         for key in pdfs:
             pdfs[key] = [
                 p for p in pdfs[key]
@@ -342,12 +309,9 @@ class PropostaHandler(FileSystemEventHandler):
 
         client = suggest_client_name(folder)
         today  = date.today().strftime("%d-%m")
-        out_name = f"Proposta Comercial {client} {today}"
-        output_path = safe_output_path(folder, out_name)
-
-        log(f"[{client}] COMPLETO detectado — montando proposta final...")
 
         if has_pvc and has_alm:
+            # Dois orcamentos: monta com Resumo somando os totais
             pvc_path  = pdfs["pvc"][0]
             alm_path  = pdfs["alm"][0]
             pvc_total = extract_total_pvc(pvc_path)
@@ -357,21 +321,30 @@ class PropostaHandler(FileSystemEventHandler):
                 log(f"[{client}] Nao foi possivel extrair totais. PVC={pvc_total or 'N/A'}  ALM={alm_total or 'N/A'}")
                 return
 
+            out_name = f"Proposta Comercial {client} {today}"
+            output_path = safe_output_path(folder, out_name)
             log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
             merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
 
-        elif has_alm and not has_pvc:
-            alm_path = pdfs["alm"][0]
+        elif has_alm:
+            # So aluminio: Capa + conteudo + Contra Capa
+            out_name = f"Proposta Comercial {client} {today} ALM"
+            output_path = safe_output_path(folder, out_name)
             log(f"[{client}] Aluminio — montando Capa + Conteudo + Contra Capa...")
-            merge_alm(self.capa_pdf, alm_path, output_path)
+            merge_alm(self.capa_pdf, pdfs["alm"][0], output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
 
-        elif has_pvc and not has_alm:
-            log(f"[{client}] So PVC encontrado — falta o ALM (portas internas).")
+        elif has_pvc:
+            # So PVC: Capa + conteudo + Contra Capa
+            out_name = f"Proposta Comercial {client} {today} PVC"
+            output_path = safe_output_path(folder, out_name)
+            log(f"[{client}] PVC — montando Capa + Conteudo + Contra Capa...")
+            merge_individual(self.capa_pdf, pdfs["pvc"][0], output_path)
+            log(f"[{client}] SALVO: {Path(output_path).name}")
 
         else:
-            log(f"[{client}] Nenhum PDF de orcamento encontrado na pasta.")
+            log(f"[{client}] Nenhum PDF de orcamento reconhecido na pasta.")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
