@@ -101,7 +101,7 @@ while ($true) {
 
         $destino = "$ano/$cidade/$cliente"
 
-        $r = & $rclone copy $arq "egemap:$destino" --config $conf --ignore-times 2>&1
+        $r = & $rclone copyto $arq "egemap:$destino/$nome" --config $conf --ignore-times 2>&1
         if ($LASTEXITCODE -eq 0) {
             Log "  [OK] Enviado para o Drive"
             $ok[$arq] = (Get-Item $arq).LastWriteTime.ToString("o")

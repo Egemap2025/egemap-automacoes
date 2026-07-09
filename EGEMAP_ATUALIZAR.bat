@@ -7,10 +7,6 @@ echo  =============================================
 echo    Egemap - Atualizando agente
 echo  =============================================
 echo.
-echo  Novidades:
-echo    - Substitui PDF no Drive se for atualizado
-echo    - Nomes com espacos nao causam duplicatas
-echo.
 
 set DESTINO=%USERPROFILE%\EgemapDrive
 
@@ -111,20 +107,20 @@ echo V1VpSUgwS0lDQWdJQ0FnSUNCTWIyY2dJaUFnUVc1dk9pQWdJQ0FnSkdGdWJ5SUtJQ0FnSUNBZ0l
 echo Qk1iMmNnSWlBZ1EybGtZV1JsT2lBZ0pHTnBaR0ZrWlNJS0lDQWdJQ0FnSUNCTWIyY2dJaUFnUTJ4
 echo cFpXNTBaVG9nSkdOc2FXVnVkR1VpQ2dvZ0lDQWdJQ0FnSUNSa1pYTjBhVzV2SUQwZ0lpUmhibTh2
 echo SkdOcFpHRmtaUzhrWTJ4cFpXNTBaU0lLQ2lBZ0lDQWdJQ0FnSkhJZ1BTQW1JQ1J5WTJ4dmJtVWdZ
-echo Mjl3ZVNBa1lYSnhJQ0psWjJWdFlYQTZKR1JsYzNScGJtOGlJQzB0WTI5dVptbG5JQ1JqYjI1bUlD
-echo MHRhV2R1YjNKbExYUnBiV1Z6SURJK0pqRUtJQ0FnSUNBZ0lDQnBaaUFvSkV4QlUxUkZXRWxVUTA5
-echo RVJTQXRaWEVnTUNrZ2V3b2dJQ0FnSUNBZ0lDQWdJQ0JNYjJjZ0lpQWdXMDlMWFNCRmJuWnBZV1J2
-echo SUhCaGNtRWdieUJFY21sMlpTSUtJQ0FnSUNBZ0lDQWdJQ0FnSkc5cld5UmhjbkZkSUQwZ0tFZGxk
-echo QzFKZEdWdElDUmhjbkVwTGt4aGMzUlhjbWwwWlZScGJXVXVWRzlUZEhKcGJtY29JbThpS1FvZ0lD
-echo QWdJQ0FnSUNBZ0lDQlRZV3gyWVhJZ0pHOXJDaUFnSUNBZ0lDQWdmU0JsYkhObElIc0tJQ0FnSUNB
-echo Z0lDQWdJQ0FnVEc5bklDSWdJRnRGVWxKUFhTQkdZV3hvWVNBdElIWmhhU0IwWlc1MFlYSWdaR1Vn
-echo Ym05MmJ5QmxiU0F4TUhNaUNpQWdJQ0FnSUNBZ0lDQWdJRXh2WnlBaUlDQkVaWFJoYkdobE9pQWtj
-echo aUlLSUNBZ0lDQWdJQ0I5Q2lBZ0lDQWdJQ0FnVEc5bklDSWlDaUFnSUNCOUNpQWdJQ0JUZEdGeWRD
-echo MVRiR1ZsY0NBeE1BcDlDZz09IgpbSU8uRmlsZV06OldyaXRlQWxsQnl0ZXMoIiREZXN0aW5vXHdh
-echo dGNoZXIucHMxIiwgW0NvbnZlcnRdOjpGcm9tQmFzZTY0U3RyaW5nKCRiNjQpKQppZiAoVGVzdC1Q
-echo YXRoICIkRGVzdGlub1xlbnZpYWRvcy5qc29uIikgeyBSZW1vdmUtSXRlbSAiJERlc3Rpbm9cZW52
-echo aWFkb3MuanNvbiIgfQpXcml0ZS1Ib3N0ICIgIEFnZW50ZSBpbnN0YWxhZG8gY29tIHN1Y2Vzc28u
-echo IiAtRm9yZWdyb3VuZENvbG9yIEdyZWVuCg==
+echo Mjl3ZVhSdklDUmhjbkVnSW1WblpXMWhjRG9rWkdWemRHbHVieThrYm05dFpTSWdMUzFqYjI1bWFX
+echo Y2dKR052Ym1ZZ0xTMXBaMjV2Y21VdGRHbHRaWE1nTWo0bU1Rb2dJQ0FnSUNBZ0lHbG1JQ2drVEVG
+echo VFZFVllTVlJEVDBSRklDMWxjU0F3S1NCN0NpQWdJQ0FnSUNBZ0lDQWdJRXh2WnlBaUlDQmJUMHRk
+echo SUVWdWRtbGhaRzhnY0dGeVlTQnZJRVJ5YVhabElnb2dJQ0FnSUNBZ0lDQWdJQ0FrYjJ0YkpHRnlj
+echo VjBnUFNBb1IyVjBMVWwwWlcwZ0pHRnljU2t1VEdGemRGZHlhWFJsVkdsdFpTNVViMU4wY21sdVp5
+echo Z2lieUlwQ2lBZ0lDQWdJQ0FnSUNBZ0lGTmhiSFpoY2lBa2Iyc0tJQ0FnSUNBZ0lDQjlJR1ZzYzJV
+echo Z2V3b2dJQ0FnSUNBZ0lDQWdJQ0JNYjJjZ0lpQWdXMFZTVWs5ZElFWmhiR2hoSUMwZ2RtRnBJSFJs
+echo Ym5SaGNpQmtaU0J1YjNadklHVnRJREV3Y3lJS0lDQWdJQ0FnSUNBZ0lDQWdURzluSUNJZ0lFUmxk
+echo R0ZzYUdVNklDUnlJZ29nSUNBZ0lDQWdJSDBLSUNBZ0lDQWdJQ0JNYjJjZ0lpSUtJQ0FnSUgwS0lD
+echo QWdJRk4wWVhKMExWTnNaV1Z3SURFd0NuMEsiCltJTy5GaWxlXTo6V3JpdGVBbGxCeXRlcygiJERl
+echo c3Rpbm9cd2F0Y2hlci5wczEiLCBbQ29udmVydF06OkZyb21CYXNlNjRTdHJpbmcoJGI2NCkpCmlm
+echo IChUZXN0LVBhdGggIiREZXN0aW5vXGVudmlhZG9zLmpzb24iKSB7IFJlbW92ZS1JdGVtICIkRGVz
+echo dGlub1xlbnZpYWRvcy5qc29uIiB9CldyaXRlLUhvc3QgIiAgQWdlbnRlIGluc3RhbGFkbyBjb20g
+echo c3VjZXNzby4iIC1Gb3JlZ3JvdW5kQ29sb3IgR3JlZW4K
 ) > "%TMP_B64%"
 certutil -decode "%TMP_B64%" "%TMP_PS1%" >nul 2>&1
 del "%TMP_B64%" >nul 2>&1
@@ -143,6 +139,5 @@ echo        OK.
 echo.
 echo  =============================================
 echo    PRONTO! Esta janela pode ser fechada.
-echo.
 echo    Log: %DESTINO%\watcher.log
 echo  =============================================
