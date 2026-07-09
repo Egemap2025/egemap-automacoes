@@ -4,7 +4,7 @@ chcp 65001 >nul 2>&1
 title Egemap - Instalando agente de orcamentos...
 
 :: ── Pasta onde tudo fica instalado ──────────────────────────────────────────
-set DESTINO=C:\EgemapDrive
+set DESTINO=%USERPROFILE%\EgemapDrive
 if not exist "!DESTINO!" mkdir "!DESTINO!"
 cd /d "!DESTINO!"
 

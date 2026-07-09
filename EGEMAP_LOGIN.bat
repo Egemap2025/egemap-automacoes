@@ -8,7 +8,7 @@ echo    Egemap - Conectar ao Google Drive
 echo  =============================================
 echo.
 
-set DESTINO=C:\EgemapDrive
+set DESTINO=%USERPROFILE%\EgemapDrive
 
 if not exist "%DESTINO%\rclone.exe" (
     echo  [ERRO] Pasta C:\EgemapDrive nao encontrada.
