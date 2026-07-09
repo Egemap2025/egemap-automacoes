@@ -29,7 +29,7 @@ Log "======================================================="
 Log "  Agente Egemap - Drive"
 Log "======================================================="
 Log "Monitorando: $pasta"
-Log "Estrutura:   Orcamentos / 2026 / Cidade / Cliente / PDF"
+Log "Estrutura:   Orcamentos / 2026 / Estado / Cidade / Cliente / PDF"
 Log ""
 
 $ok = Enviados
@@ -51,12 +51,12 @@ while ($true) {
         if ($ok.ContainsKey($arq)) { return }
 
         # Estrutura esperada:
-        #  {pasta} / {Ano} / {Cidade} / {Cliente} / arquivo.pdf
-        #  partes:    [0]      [1]        [2]         [3=nome]
+        #  {pasta} / {Ano} / {Estado} / {Cidade} / {Cliente} / arquivo.pdf
+        #  partes:    [0]      [1]        [2]         [3]        [4=nome]
         $rel   = $arq.Substring($pasta.Length).TrimStart("\", "/")
         $p     = $rel -split "[\\/]"
 
-        if ($p.Count -lt 4) {
+        if ($p.Count -lt 5) {
             # Arquivo fora da estrutura correta — ignora sem logar
             $ok[$arq] = "ignorado"
             Salvar $ok
@@ -64,8 +64,8 @@ while ($true) {
         }
 
         $ano     = $p[0]
-        $cidade  = $p[1]
-        $cliente = $p[2]
+        $cidade  = $p[2]
+        $cliente = $p[3]
         $nome    = $p[-1]
 
         # Somente o ano configurado (ignora pastas de anos anteriores)
