@@ -29,7 +29,7 @@ Log "======================================================="
 Log "  Agente Egemap - Drive"
 Log "======================================================="
 Log "Monitorando: $pasta"
-Log "Estrutura:   Orcamentos / Ano / Estado / Cidade / Cliente / PDF"
+Log "Estrutura:   Orcamentos / 2026 / Cidade / Cliente / PDF"
 Log ""
 
 $ok = Enviados
@@ -40,12 +40,12 @@ while ($true) {
         if ($ok.ContainsKey($arq)) { return }
 
         # Estrutura esperada:
-        #  {pasta} / {Ano} / {Estado} / {Cidade} / {Cliente} / arquivo.pdf
-        #  partes:    [0]      [1]        [2]        [3]         [4=nome]
+        #  {pasta} / {Ano} / {Cidade} / {Cliente} / arquivo.pdf
+        #  partes:    [0]      [1]        [2]         [3=nome]
         $rel   = $arq.Substring($pasta.Length).TrimStart("\", "/")
         $p     = $rel -split "[\\/]"
 
-        if ($p.Count -lt 5) {
+        if ($p.Count -lt 4) {
             # Arquivo fora da estrutura correta — ignora sem logar
             $ok[$arq] = "ignorado"
             Salvar $ok
@@ -53,9 +53,8 @@ while ($true) {
         }
 
         $ano     = $p[0]
-        # $estado = $p[1]  # existe no computador mas nao vai pro Drive
-        $cidade  = $p[2]
-        $cliente = $p[3]
+        $cidade  = $p[1]
+        $cliente = $p[2]
         $nome    = $p[-1]
 
         # Aguarda o arquivo terminar de ser gravado
@@ -67,7 +66,6 @@ while ($true) {
         Log "  Cidade:  $cidade"
         Log "  Cliente: $cliente"
 
-        # Destino no Drive: Pedidos e Contratos / Ano / Cidade / Cliente /
         $destino = "$ano/$cidade/$cliente"
 
         $r = & $rclone copy $arq "egemap:$destino" --config $conf 2>&1
