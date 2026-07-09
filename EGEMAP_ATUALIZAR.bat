@@ -22,8 +22,8 @@ if not exist "%DESTINO%\rclone.exe" (
 )
 
 echo  [1/4] Parando agente antigo...
-powershell -Command "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.CommandLine -like '*watcher.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-timeout /t 2 /nobreak >nul
+taskkill /F /IM powershell.exe >nul 2>&1
+timeout /t 3 /nobreak >nul
 echo        OK.
 
 echo  [2/4] Instalando novo agente...
