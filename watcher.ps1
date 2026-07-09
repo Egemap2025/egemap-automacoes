@@ -48,7 +48,15 @@ if ($ok.Count -eq 0) {
 while ($true) {
     Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
         $arq = $_.FullName
-        if ($ok.ContainsKey($arq)) { return }
+
+        # Ignora arquivos ja processados, a menos que tenham sido modificados
+        $reenvio = $false
+        if ($ok.ContainsKey($arq)) {
+            if ($ok[$arq] -eq "ignorado") { return }
+            $mtime = $_.LastWriteTime.ToString("o")
+            if ($ok[$arq] -eq $mtime) { return }
+            $reenvio = $true
+        }
 
         # Estrutura esperada:
         #  {pasta} / {Ano} / {Estado} / {Cidade} / {Cliente} / arquivo.pdf
@@ -86,17 +94,17 @@ while ($true) {
         Start-Sleep 3
         if (-not (Test-Path $arq)) { return }
 
-        Log "Arquivo novo: $nome"
+        if ($reenvio) { Log "Arquivo atualizado: $nome" } else { Log "Arquivo novo: $nome" }
         Log "  Ano:     $ano"
         Log "  Cidade:  $cidade"
         Log "  Cliente: $cliente"
 
         $destino = "$ano/$cidade/$cliente"
 
-        $r = & $rclone copy $arq "egemap:$destino" --config $conf 2>&1
+        $r = & $rclone copy $arq "egemap:$destino" --config $conf --ignore-times 2>&1
         if ($LASTEXITCODE -eq 0) {
             Log "  [OK] Enviado para o Drive"
-            $ok[$arq] = "ok"
+            $ok[$arq] = (Get-Item $arq).LastWriteTime.ToString("o")
             Salvar $ok
         } else {
             Log "  [ERRO] Falha - vai tentar de novo em 10s"
