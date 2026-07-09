@@ -1,2 +1,3 @@
 @echo off
-powershell -ExecutionPolicy Bypass -File "%~dp0EGEMAP_INSTALAR.ps1"
+title Egemap - Instalando agente de orcamentos...
+powershell -ExecutionPolicy Bypass -Command "& { $p = '$env:TEMP\egemap_instalar.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/Egemap2025/egemap-automacoes/claude/budget-folder-drive-automation-q48tvv/EGEMAP_INSTALAR.ps1' -OutFile $p; & $p }"
