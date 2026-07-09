@@ -266,12 +266,8 @@ class PropostaHandler(FileSystemEventHandler):
         p = Path(path)
         if p.suffix.lower() != ".pdf":
             return
-        if _is_proposta_gerada(str(p)):
-            return  # ignora PDFs que o proprio programa ja gerou
-
-        tipo = detect_pdf_type(str(p))
-        if tipo not in ("pvc", "alm"):
-            return  # so processa orcamentos PVC ou ALM
+        if "COMPLETO" not in p.stem.upper():
+            return  # so age quando o nome tiver COMPLETO
 
         folder_norm = _norm(p.parent)
         self._pending[folder_norm] = (time.time(), str(p.parent), str(p))
