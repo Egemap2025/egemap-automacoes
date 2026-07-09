@@ -17,34 +17,30 @@ if not exist "%DESTINO%\watcher.ps1" (
 )
 
 echo  [1/3] Criando atalho na area de trabalho...
+for /f "delims=" %%i in ('powershell -NoProfile -Command "[Environment]::GetFolderPath(\"Desktop\")"') do set DESKTOP=%%i
 (
 echo @echo off
-echo powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "%DESTINO%\watcher.ps1"
-) > "%USERPROFILE%\Desktop\INICIAR_AGENTE.bat"
-echo        OK.
+echo start "" /B powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "%DESTINO%\watcher.ps1"
+) > "%DESKTOP%\INICIAR_AGENTE.bat"
+echo        OK. Atalho criado em: %DESKTOP%\INICIAR_AGENTE.bat
 
 echo  [2/3] Configurando inicio automatico com o Windows...
-powershell -ExecutionPolicy Bypass -Command ^
-  "$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-WindowStyle Hidden -ExecutionPolicy Bypass -File \"%DESTINO%\watcher.ps1\"'; $t = New-ScheduledTaskTrigger -AtLogOn; $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0; Register-ScheduledTask -TaskName 'EgemapDriveWatcher' -Action $a -Trigger $t -Settings $s -RunLevel Highest -Force | Out-Null"
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "EgemapDriveWatcher" /t REG_SZ /d "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%DESTINO%\watcher.ps1\"" /f >nul 2>&1
 if errorlevel 1 (
-    echo        [AVISO] Nao foi possivel criar tarefa automatica.
+    echo        [AVISO] Nao foi possivel configurar inicio automatico.
 ) else (
     echo        OK. Agente vai iniciar sozinho ao ligar o computador.
 )
 
 echo  [3/3] Iniciando o agente agora...
-powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "%DESTINO%\watcher.ps1"
+start "" /B powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "%DESTINO%\watcher.ps1"
 echo        OK. Agente rodando em segundo plano.
 
 echo.
 echo  =============================================
-echo    PRONTO!
+echo    PRONTO! Esta janela pode ser fechada.
 echo.
-echo    O agente esta rodando agora.
-echo    Salve PDFs assim:
-echo    ORCAMENTOS\Ano\Estado\Cidade\Cliente\arq.pdf
-echo.
-echo    O Drive e atualizado automaticamente.
+echo    O agente esta rodando em segundo plano.
 echo    Log em: %DESTINO%\watcher.log
 echo  =============================================
 echo.
