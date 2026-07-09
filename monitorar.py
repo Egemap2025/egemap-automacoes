@@ -158,15 +158,21 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str):
 
 
 def limpar_campos_vazios_alm(doc):
-    """Remove labels sem valor (EMAIL:, CELULAR:) da primeira pagina do W-Vetro."""
-    CAMPOS_VAZIOS = ["EMAIL:", "CELULAR:"]
+    """Remove labels sem valor (EMAIL:, CELULAR:, TELEFONE:) da primeira pagina do W-Vetro."""
+    CAMPOS_VAZIOS = ["EMAIL:", "CELULAR:", "TELEFONE:"]
     if len(doc) == 0:
         return
     page = doc[0]
-    full_text = page.get_text()
+    blocks = page.get_text("blocks")
+    campos_para_redatar = set()
     for campo in CAMPOS_VAZIOS:
-        if campo not in full_text:
-            continue
+        for b in blocks:
+            txt = b[4].strip()
+            linhas = [l.strip() for l in txt.split('\n') if l.strip()]
+            # Redaciona apenas se o bloco contiver SOMENTE este label (sem valor ao lado)
+            if len(linhas) == 1 and linhas[0] == campo:
+                campos_para_redatar.add(campo)
+    for campo in campos_para_redatar:
         rects = page.search_for(campo)
         for rect in rects:
             page.add_redact_annot(rect, fill=(1, 1, 1))
@@ -352,6 +358,7 @@ class PropostaHandler(FileSystemEventHandler):
         log(f"[{client}] {sufixo} detectado — adicionando Capa e Contra Capa...")
         merge_individual(self.capa_pdf, src_path, output_path)
         log(f"[{client}] SALVO: {Path(output_path).name}")
+        _apagar(src_path, client)
 
     def _process_completo(self, folder, trigger_path):
         """Junta PVC + ALM com Resumo somando os totais."""
