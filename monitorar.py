@@ -217,6 +217,14 @@ def log(msg):
     print(f"[{hora}] {msg}", flush=True)
 
 
+def _apagar(path, client=""):
+    try:
+        Path(path).unlink()
+        log(f"[{client}] Removido original: {Path(path).name}")
+    except Exception as e:
+        log(f"[{client}] Nao foi possivel remover {Path(path).name}: {e}")
+
+
 def _norm(path):
     return str(Path(path).resolve()).upper()
 
@@ -311,7 +319,6 @@ class PropostaHandler(FileSystemEventHandler):
         today  = date.today().strftime("%d-%m")
 
         if has_pvc and has_alm:
-            # Dois orcamentos: monta com Resumo somando os totais
             pvc_path  = pdfs["pvc"][0]
             alm_path  = pdfs["alm"][0]
             pvc_total = extract_total_pvc(pvc_path)
@@ -326,22 +333,26 @@ class PropostaHandler(FileSystemEventHandler):
             log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
             merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
+            _apagar(pvc_path, client)
+            _apagar(alm_path, client)
 
         elif has_alm:
-            # So aluminio: Capa + conteudo + Contra Capa
+            alm_path = pdfs["alm"][0]
             out_name = f"Proposta Comercial {client} {today} ALM"
             output_path = safe_output_path(folder, out_name)
             log(f"[{client}] Aluminio — montando Capa + Conteudo + Contra Capa...")
-            merge_alm(self.capa_pdf, pdfs["alm"][0], output_path)
+            merge_alm(self.capa_pdf, alm_path, output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
+            _apagar(alm_path, client)
 
         elif has_pvc:
-            # So PVC: Capa + conteudo + Contra Capa
+            pvc_path = pdfs["pvc"][0]
             out_name = f"Proposta Comercial {client} {today} PVC"
             output_path = safe_output_path(folder, out_name)
             log(f"[{client}] PVC — montando Capa + Conteudo + Contra Capa...")
-            merge_individual(self.capa_pdf, pdfs["pvc"][0], output_path)
+            merge_individual(self.capa_pdf, pvc_path, output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
+            _apagar(pvc_path, client)
 
         else:
             log(f"[{client}] Nenhum PDF de orcamento reconhecido na pasta.")
