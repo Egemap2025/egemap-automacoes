@@ -68,6 +68,13 @@ while ($true) {
         $cliente = $p[2]
         $nome    = $p[-1]
 
+        # Somente o ano configurado (ignora pastas de anos anteriores)
+        if ($ano -ne $cfg.ano) {
+            $ok[$arq] = "ignorado"
+            Salvar $ok
+            return
+        }
+
         # Somente arquivos com "Proposta Comercial" no nome
         if ($nome -notlike "*Proposta Comercial*") {
             $ok[$arq] = "ignorado"
