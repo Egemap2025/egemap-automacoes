@@ -50,12 +50,12 @@ echo.
 echo  [3/4] Conectando ao Google Drive...
 echo.
 
-:: Escrever config do rclone (pasta raiz = Pedidos e Contratos)
+:: Escrever config do rclone (pasta raiz = Orcamentos)
 (
     echo [egemap]
     echo type = drive
     echo scope = drive
-    echo root_folder_id = 1qtOmTr3KXqSFBwPJyidVcMvEvg7w86L3
+    echo root_folder_id = 1P0EpUNY7F6-j2FX0MmJ0hQZxIQq9nvN5
 ) > "!DESTINO!\rclone.conf"
 
 :: Perguntar pasta de orcamentos
