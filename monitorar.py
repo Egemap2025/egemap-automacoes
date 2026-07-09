@@ -157,6 +157,22 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str):
     return resumo_doc
 
 
+def limpar_campos_vazios_alm(doc):
+    """Remove labels sem valor (EMAIL:, CELULAR:) da primeira pagina do W-Vetro."""
+    CAMPOS_VAZIOS = ["EMAIL:", "CELULAR:"]
+    if len(doc) == 0:
+        return
+    page = doc[0]
+    full_text = page.get_text()
+    for campo in CAMPOS_VAZIOS:
+        if campo not in full_text:
+            continue
+        rects = page.search_for(campo)
+        for rect in rects:
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+    page.apply_redactions()
+
+
 def _has_system_capa(doc):
     if len(doc) == 0:
         return False
@@ -174,6 +190,7 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
     capa_doc = fitz.open(capa_pdf_path)
     pvc_doc  = fitz.open(pvc_pdf_path)
     alm_doc  = fitz.open(alm_pdf_path)
+    limpar_campos_vazios_alm(alm_doc)
     resumo_doc = update_resumo_page(capa_pdf_path, pvc_total, alm_total)
 
     result = fitz.open()
@@ -196,6 +213,7 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
 def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
     capa_doc = fitz.open(capa_pdf_path)
     alm_doc  = fitz.open(alm_pdf_path)
+    limpar_campos_vazios_alm(alm_doc)
 
     result = fitz.open()
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
@@ -238,6 +256,8 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path):
     """Envolve um unico PDF (PVC ou ALM) com Capa + conteudo + Contra Capa."""
     capa_doc = fitz.open(capa_pdf_path)
     src_doc  = fitz.open(src_pdf_path)
+    if detect_pdf_type(src_pdf_path) == "alm":
+        limpar_campos_vazios_alm(src_doc)
     result   = fitz.open()
 
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
