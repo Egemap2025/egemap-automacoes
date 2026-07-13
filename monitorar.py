@@ -258,6 +258,18 @@ def _is_proposta_gerada(path):
     return Path(path).stem.startswith("Proposta Comercial")
 
 
+def _is_proposta_final(path):
+    """Proposta final completa (sem sufixo PVC/ALM) — nao usar como fonte no COMPLETO."""
+    stem = Path(path).stem
+    if not stem.startswith("Proposta Comercial"):
+        return False
+    upper = stem.upper()
+    # Wraps individuais (sufixo PVC ou ALM) PODEM ser usados como fonte
+    if upper.endswith(" PVC") or upper.endswith(" ALM"):
+        return False
+    return True
+
+
 def merge_individual(capa_pdf_path, src_pdf_path, output_path):
     """Envolve um unico PDF (PVC ou ALM) com Capa + conteudo + Contra Capa."""
     capa_doc = fitz.open(capa_pdf_path)
@@ -365,11 +377,11 @@ class PropostaHandler(FileSystemEventHandler):
         pdfs = find_pdfs_in_folder(folder)
         trigger_norm = _norm(trigger_path)
 
-        # Usa apenas PDFs originais (exclui COMPLETO e propostas ja geradas)
+        # Exclui o trigger COMPLETO e propostas finais ja geradas (mas permite wraps PVC/ALM)
         for key in pdfs:
             pdfs[key] = [
                 p for p in pdfs[key]
-                if _norm(p) != trigger_norm and not _is_proposta_gerada(p)
+                if _norm(p) != trigger_norm and not _is_proposta_final(p)
             ]
 
         has_pvc = bool(pdfs["pvc"])
