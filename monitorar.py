@@ -256,8 +256,10 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
 
     pvc_start = 1 if _has_system_capa(pvc_doc) else 0
-    if pvc_start < len(pvc_doc):
-        result.insert_pdf(pvc_doc, from_page=pvc_start)
+    # Se o PVC já é um wrap gerado por nós, a última página é nossa Contra Capa — ignora
+    pvc_end = len(pvc_doc) - 2 if _is_proposta_gerada(pvc_pdf_path) else len(pvc_doc) - 1
+    if pvc_start <= pvc_end:
+        result.insert_pdf(pvc_doc, from_page=pvc_start, to_page=pvc_end)
 
     alm_start, alm_end = _content_range(alm_doc)
     if alm_start <= alm_end:
