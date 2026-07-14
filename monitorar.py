@@ -246,6 +246,13 @@ def _content_range(doc):
     return start, end
 
 
+def _alm_range(alm_doc, alm_pdf_path):
+    """Paginas de conteudo W-Vetro: todas se original, sem capa/contra-capa se ja e wrap."""
+    if _is_proposta_gerada(alm_pdf_path):
+        return _content_range(alm_doc)
+    return 0, len(alm_doc) - 1
+
+
 def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, output_path, alm_subtipo="alm_mad"):
     capa_doc = fitz.open(capa_pdf_path)
     pvc_doc  = fitz.open(pvc_pdf_path)
@@ -261,7 +268,7 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
     if pvc_start <= pvc_end:
         result.insert_pdf(pvc_doc, from_page=pvc_start, to_page=pvc_end)
 
-    alm_start, alm_end = _content_range(alm_doc)
+    alm_start, alm_end = _alm_range(alm_doc, alm_pdf_path)
     if alm_start <= alm_end:
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
@@ -278,7 +285,7 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
     result = fitz.open()
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
 
-    alm_start, alm_end = _content_range(alm_doc)
+    alm_start, alm_end = _alm_range(alm_doc, alm_pdf_path)
     if alm_start <= alm_end:
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
@@ -338,7 +345,7 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path):
         if start < len(src_doc):
             result.insert_pdf(src_doc, from_page=start)
     else:
-        start, end = _content_range(src_doc)
+        start, end = _alm_range(src_doc, src_pdf_path)
         if start <= end:
             result.insert_pdf(src_doc, from_page=start, to_page=end)
 
