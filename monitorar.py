@@ -169,59 +169,77 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
     resumo_doc.insert_pdf(capa_doc, from_page=1, to_page=1)
     page = resumo_doc[0]
 
-    full_text = page.get_text()
-    money = re.findall(r"R\$([\d.,]+)", full_text)
-    found = []
-    seen  = set()
-    for val in money:
-        if val in seen:
-            continue
-        seen.add(val)
-        rects = page.search_for(f"R${val}")
-        if rects:
-            found.append((rects[0].y0, rects[0], val))
-    found.sort(key=lambda x: x[0])
-
-    to_redact = []
-    to_insert = []
-
-    # Valor PVC (1º por y)
-    if len(found) >= 1:
-        _, r, _ = found[0]
-        to_redact.append(r)
-        to_insert.append((r.x0, r.y1 - 1, f"R${format_brl(pvc)}", fn_bold, 20, (0, 0, 0)))
-
-    # Label ALM/MAD + valor (2º por y) — substitui rótulo e valor
-    alm_origin = None
+    # Coleta spans com origem (baseline) para posicionamento exato
+    # Estrutura: { "pvc_val": (origin, font, size, color), "alm_label": ..., "alm_val": ..., "total_val": ... }
+    spans_por_linha = []  # lista de (y_baseline, origin, text, font, size, color)
     for b in page.get_text("dict")["blocks"]:
         if b["type"] != 0:
             continue
         for line in b["lines"]:
             for span in line["spans"]:
                 t = span["text"].strip()
-                if "Esquadrias de" in t and "PVC" not in t:
-                    alm_origin = span["origin"]
-                    for lr in page.search_for(t):
-                        to_redact.append(lr)
+                if not t:
+                    continue
+                spans_por_linha.append({
+                    "text":   t,
+                    "origin": span["origin"],   # (x, y) baseline exato
+                    "font":   span["font"],
+                    "size":   span["size"],
+                    "color":  span["color"],
+                })
 
-    if len(found) >= 2:
-        _, r, _ = found[1]
-        to_redact.append(r)
+    # Identifica os 3 valores R$ por ordem vertical (baseline y)
+    money_spans = sorted(
+        [s for s in spans_por_linha if s["text"].startswith("R$")],
+        key=lambda s: s["origin"][1]
+    )
 
-    if alm_origin:
-        font_reg = fitz.Font(fontfile=fn_reg)
-        lw = font_reg.text_length(novo_label + ":", fontsize=20)
-        lx, ly = alm_origin
-        to_insert.append((lx, ly, novo_label + ":", fn_reg, 20, (0, 0, 0)))
-        if len(found) >= 2:
-            _, r, _ = found[1]
-            to_insert.append((lx + lw + 1, ly, f"R${format_brl(alm)}", fn_bold, 20, (0, 0, 0)))
+    # Identifica label ALM (linha que tem "Esquadrias de" mas nao "PVC")
+    alm_label_span = next(
+        (s for s in spans_por_linha if "Esquadrias de" in s["text"] and "PVC" not in s["text"]),
+        None
+    )
+
+    to_redact = []
+    to_insert = []  # (x, y_baseline, text, fontfile, fontsize, color)
+
+    def _color_tuple(c):
+        """Converte cor int (0xRRGGBB) para tupla (r,g,b) 0-1."""
+        if isinstance(c, int):
+            return ((c >> 16 & 0xFF) / 255, (c >> 8 & 0xFF) / 255, (c & 0xFF) / 255)
+        return c
+
+    # Valor PVC (1º por y)
+    if len(money_spans) >= 1:
+        s = money_spans[0]
+        for r in page.search_for(s["text"]):
+            to_redact.append(r)
+        ox, oy = s["origin"]
+        to_insert.append((ox, oy, f"R${format_brl(pvc)}", fn_bold, s["size"], (0, 0, 0)))
+
+    # Label ALM + valor ALM (2º por y)
+    if alm_label_span:
+        for r in page.search_for(alm_label_span["text"]):
+            to_redact.append(r)
+        lx, ly = alm_label_span["origin"]
+        # Mede largura do novo label para posicionar o valor ao lado
+        font_reg_obj = fitz.Font(fontfile=fn_reg)
+        lw = font_reg_obj.text_length(novo_label + ":", fontsize=alm_label_span["size"])
+        to_insert.append((lx, ly, novo_label + ":", fn_reg, alm_label_span["size"], (0, 0, 0)))
+        if len(money_spans) >= 2:
+            s2 = money_spans[1]
+            for r in page.search_for(s2["text"]):
+                to_redact.append(r)
+            to_insert.append((lx + lw + 4, ly, f"R${format_brl(alm)}", fn_bold, s2["size"], (0, 0, 0)))
 
     # Valor Total (3º por y)
-    if len(found) >= 3:
-        _, r, _ = found[2]
-        to_redact.append(r)
-        to_insert.append((r.x0, r.y1 - 1, f"R${format_brl(total)}", fn_bold, 20, (0, 0, 0)))
+    if len(money_spans) >= 3:
+        s = money_spans[2]
+        for r in page.search_for(s["text"]):
+            to_redact.append(r)
+        ox, oy = s["origin"]
+        col = _color_tuple(s["color"])
+        to_insert.append((ox, oy, f"R${format_brl(total)}", fn_bold, s["size"], col))
 
     for rect in to_redact:
         page.add_redact_annot(rect, fill=(1, 1, 1))
@@ -262,9 +280,14 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
     result = fitz.open()
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
 
-    pvc_start = 1 if _has_system_capa(pvc_doc) else 0
-    # Se o PVC já é um wrap gerado por nós, a última página é nossa Contra Capa — ignora
-    pvc_end = len(pvc_doc) - 2 if _is_proposta_gerada(pvc_pdf_path) else len(pvc_doc) - 1
+    if _is_proposta_gerada(pvc_pdf_path):
+        # Wrap nosso: pula nossa Capa (pg 0) e nossa Contra Capa (ultima pg)
+        pvc_start = 1
+        pvc_end   = len(pvc_doc) - 2
+    else:
+        # PDF original do Sintegra: pula capa do sistema se houver
+        pvc_start = 1 if _has_system_capa(pvc_doc) else 0
+        pvc_end   = len(pvc_doc) - 1
     if pvc_start <= pvc_end:
         result.insert_pdf(pvc_doc, from_page=pvc_start, to_page=pvc_end)
 
