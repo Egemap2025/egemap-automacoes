@@ -124,36 +124,111 @@ def suggest_client_name(folder_path):
     return Path(folder_path).name or "Cliente"
 
 
-def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str):
-    pvc = parse_brl(pvc_total_str)
-    alm = parse_brl(alm_total_str)
-    total = pvc + alm
+LABELS_SUBTIPO = {
+    "alm":     "Esquadrias de Alumínio",
+    "mad":     "Esquadrias de Madeira",
+    "alm_mad": "Esquadrias de Madeira e Alumínio",
+}
 
-    capa_doc = fitz.open(capa_pdf_path)
+
+def _get_resumo_fonts():
+    """Retorna (fn_bold, fn_regular) — Arial no Windows, Liberation Sans no Linux."""
+    win_fonts = Path("C:/Windows/Fonts")
+    ariblk = win_fonts / "ariblk.ttf"
+    arial  = win_fonts / "arial.ttf"
+    if ariblk.exists() and arial.exists():
+        return str(ariblk), str(arial)
+    # Fallback Linux (build/testes)
+    base = Path("/usr/share/fonts/truetype/liberation")
+    return str(base / "LiberationSans-Bold.ttf"), str(base / "LiberationSans-Regular.ttf")
+
+
+def detect_alm_subtipo(pdf_path):
+    """Detecta pelo nome do arquivo se é ALM, MAD ou ambos."""
+    name = Path(pdf_path).name.upper()
+    has_alm = "ALM" in name
+    has_mad = "MAD" in name
+    if has_alm and has_mad:
+        return "alm_mad"
+    if has_alm:
+        return "alm"
+    if has_mad:
+        return "mad"
+    return "alm_mad"
+
+
+def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo="alm_mad"):
+    pvc   = parse_brl(pvc_total_str)
+    alm   = parse_brl(alm_total_str)
+    total = pvc + alm
+    novo_label = LABELS_SUBTIPO.get(alm_subtipo, "Esquadrias de Madeira e Alumínio")
+    fn_bold, fn_reg = _get_resumo_fonts()
+
+    capa_doc   = fitz.open(capa_pdf_path)
     resumo_doc = fitz.open()
     resumo_doc.insert_pdf(capa_doc, from_page=1, to_page=1)
     page = resumo_doc[0]
 
     full_text = page.get_text()
-    money_matches = re.findall(r"R\$([\d.,]+)", full_text)
-
+    money = re.findall(r"R\$([\d.,]+)", full_text)
     found = []
-    for val in money_matches:
-        search_str = f"R${val}"
-        rects = page.search_for(search_str)
+    seen  = set()
+    for val in money:
+        if val in seen:
+            continue
+        seen.add(val)
+        rects = page.search_for(f"R${val}")
         if rects:
             found.append((rects[0].y0, rects[0], val))
-
     found.sort(key=lambda x: x[0])
-    new_values = [format_brl(pvc), format_brl(alm), format_brl(total)]
 
-    for _, rect, _ in found:
+    to_redact = []
+    to_insert = []
+
+    # Valor PVC (1º por y)
+    if len(found) >= 1:
+        _, r, _ = found[0]
+        to_redact.append(r)
+        to_insert.append((r.x0, r.y1 - 1, f"R${format_brl(pvc)}", fn_bold, 20, (0, 0, 0)))
+
+    # Label ALM/MAD + valor (2º por y) — substitui rótulo e valor
+    alm_origin = None
+    for b in page.get_text("dict")["blocks"]:
+        if b["type"] != 0:
+            continue
+        for line in b["lines"]:
+            for span in line["spans"]:
+                t = span["text"].strip()
+                if "Esquadrias de" in t and "PVC" not in t:
+                    alm_origin = span["origin"]
+                    for lr in page.search_for(t):
+                        to_redact.append(lr)
+
+    if len(found) >= 2:
+        _, r, _ = found[1]
+        to_redact.append(r)
+
+    if alm_origin:
+        font_reg = fitz.Font(fontfile=fn_reg)
+        lw = font_reg.text_length(novo_label + ":", fontsize=20)
+        lx, ly = alm_origin
+        to_insert.append((lx, ly, novo_label + ":", fn_reg, 20, (0, 0, 0)))
+        if len(found) >= 2:
+            _, r, _ = found[1]
+            to_insert.append((lx + lw + 1, ly, f"R${format_brl(alm)}", fn_bold, 20, (0, 0, 0)))
+
+    # Valor Total (3º por y)
+    if len(found) >= 3:
+        _, r, _ = found[2]
+        to_redact.append(r)
+        to_insert.append((r.x0, r.y1 - 1, f"R${format_brl(total)}", fn_bold, 20, (0, 0, 0)))
+
+    for rect in to_redact:
         page.add_redact_annot(rect, fill=(1, 1, 1))
     page.apply_redactions()
+    for x, y, text, ff, fs, col in to_insert:
+        page.insert_text((x, y), text, fontfile=ff, fontsize=fs, color=col)
 
-    for (_, rect, _), new_val in zip(found, new_values):
-        page.insert_text((rect.x0, rect.y1 - 1), f"R${new_val}",
-                         fontname="helv", fontsize=20, color=(0, 0, 0))
     return resumo_doc
 
 
@@ -171,11 +246,11 @@ def _content_range(doc):
     return start, end
 
 
-def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, output_path):
+def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, output_path, alm_subtipo="alm_mad"):
     capa_doc = fitz.open(capa_pdf_path)
     pvc_doc  = fitz.open(pvc_pdf_path)
     alm_doc  = fitz.open(alm_pdf_path)
-    resumo_doc = update_resumo_page(capa_pdf_path, pvc_total, alm_total)
+    resumo_doc = update_resumo_page(capa_pdf_path, pvc_total, alm_total, alm_subtipo)
 
     result = fitz.open()
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
@@ -379,7 +454,8 @@ class PropostaHandler(FileSystemEventHandler):
             out_name = f"Proposta Comercial {client} {today}"
             output_path = safe_output_path(folder, out_name)
             log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
-            merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path)
+            alm_subtipo = detect_alm_subtipo(alm_path)
+            merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path, alm_subtipo)
             log(f"[{client}] SALVO: {Path(output_path).name}")
             _apagar(pvc_path, client)
             _apagar(alm_path, client)
