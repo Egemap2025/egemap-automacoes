@@ -436,19 +436,25 @@ class PropostaHandler(FileSystemEventHandler):
         pdfs = find_pdfs_in_folder(folder)
         trigger_norm = _norm(trigger_path)
 
-        # Exclui o trigger COMPLETO e propostas finais ja geradas (mas permite wraps PVC/ALM)
+        # Permite propostas wrap individuais (PVC/ALM) como fontes; exclui propostas finais
         for key in pdfs:
-            pdfs[key] = [
-                p for p in pdfs[key]
-                if _norm(p) != trigger_norm and not _is_proposta_final(p)
-            ]
+            pdfs[key] = [p for p in pdfs[key] if not _is_proposta_final(p)]
+
+        # Se o trigger nao aparece como PVC/ALM (nenhum conteudo reconhecivel), remove-o
+        trigger_in_pvc = any(_norm(p) == trigger_norm for p in pdfs["pvc"])
+        trigger_in_alm = any(_norm(p) == trigger_norm for p in pdfs["alm"])
+        if not trigger_in_pvc and not trigger_in_alm:
+            # Trigger e arquivo de sinal sem conteudo — apaga apos a mesclagem
+            trigger_is_signal = True
+        else:
+            trigger_is_signal = False
 
         has_pvc = bool(pdfs["pvc"])
         has_alm = bool(pdfs["alm"])
         client  = suggest_client_name(folder)
         today   = date.today().strftime("%d-%m")
 
-        log(f"[{client}] COMPLETO detectado — montando proposta final...")
+        log(f"[{client}] COMPLETO detectado — PVC={has_pvc} ALM={has_alm} — montando proposta final...")
 
         if has_pvc and has_alm:
             pvc_path  = pdfs["pvc"][0]
@@ -468,6 +474,8 @@ class PropostaHandler(FileSystemEventHandler):
             log(f"[{client}] SALVO: {Path(output_path).name}")
             _apagar(pvc_path, client)
             _apagar(alm_path, client)
+            if trigger_is_signal:
+                _apagar(trigger_path, client)
 
         elif has_alm:
             alm_path = pdfs["alm"][0]
@@ -477,6 +485,8 @@ class PropostaHandler(FileSystemEventHandler):
             merge_alm(self.capa_pdf, alm_path, output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
             _apagar(alm_path, client)
+            if trigger_is_signal:
+                _apagar(trigger_path, client)
 
         elif has_pvc:
             log(f"[{client}] So PVC encontrado — falta o ALM (portas internas).")
