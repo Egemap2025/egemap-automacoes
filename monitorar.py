@@ -243,6 +243,7 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
                 spans_por_linha.append({
                     "text":   t,
                     "origin": span["origin"],   # (x, y) baseline exato
+                    "bbox":   span["bbox"],     # (x0, y0, x1, y1)
                     "font":   span["font"],
                     "size":   span["size"],
                     "color":  span["color"],
@@ -260,6 +261,12 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
         None
     )
 
+    # Identifica label PVC (linha que tem "Esquadrias de" e "PVC")
+    pvc_label_span = next(
+        (s for s in spans_por_linha if "Esquadrias de" in s["text"] and "PVC" in s["text"]),
+        None
+    )
+
     to_redact = []
     to_insert = []  # (x, y_baseline, text, fontfile, fontsize, color)
 
@@ -274,7 +281,13 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
         s = money_spans[0]
         for r in page.search_for(s["text"]):
             to_redact.append(r)
-        ox, oy = s["origin"]
+        if pvc_label_span:
+            # Posiciona a partir da borda direita real do label "Esquadrias de PVC:"
+            # (a posicao original do placeholder ficava colada/sobreposta ao label)
+            ox = pvc_label_span["bbox"][2] + 4
+            oy = pvc_label_span["origin"][1]
+        else:
+            ox, oy = s["origin"]
         to_insert.append((ox, oy, f"R${format_brl(pvc)}", fn_bold, s["size"], (0, 0, 0)))
 
     # Label ALM + valor ALM (2º por y)
@@ -414,8 +427,8 @@ def _is_proposta_final(path):
     if not stem.startswith("Proposta Comercial"):
         return False
     upper = stem.upper()
-    # Wraps individuais (sufixo PVC ou ALM) PODEM ser usados como fonte
-    if upper.endswith(" PVC") or upper.endswith(" ALM"):
+    # Wraps individuais (sufixo PVC, ALM, MAD ou MAD ALM) PODEM ser usados como fonte
+    if upper.endswith(" PVC") or upper.endswith(" ALM") or upper.endswith(" MAD"):
         return False
     return True
 
@@ -511,7 +524,13 @@ class PropostaHandler(FileSystemEventHandler):
         folder = str(Path(src_path).parent)
         client = suggest_client_name(folder)
         today  = date.today().strftime("%d-%m")
-        sufixo = "PVC" if tipo == "pvc" else "ALM"
+        if tipo == "pvc":
+            sufixo = "PVC"
+        else:
+            # Preserva MAD/ALM do nome original no arquivo renomeado, senao a
+            # informacao de madeira+aluminio se perde e o COMPLETO usa so "ALM"
+            subtipo = detect_alm_subtipo(src_path)
+            sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
         out_name = f"Proposta Comercial {client} {today} {sufixo}"
         output_path = safe_output_path(folder, out_name)
 
