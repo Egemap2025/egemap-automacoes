@@ -143,9 +143,17 @@ def _extract_font_from_capa(capa_pdf_path, want_black: bool):
     try:
         doc = fitz.open(capa_pdf_path)
         page = doc[1]
-        for xref, ext, _t, basename, _name, _enc, _ref in page.get_fonts():
-            is_black = "Black" in basename or "black" in basename
-            matches = is_black if want_black else (not is_black and "Arial" in basename)
+        for finfo in page.get_fonts():
+            # get_fonts() retorna 6 ou 7 campos dependendo da versao do PyMuPDF
+            xref, ext, _t, basename, _name, _enc = finfo[:6]
+            lower = basename.lower()
+            is_black  = "black" in lower
+            is_bold   = "bold" in lower
+            is_italic = "italic" in lower
+            if want_black:
+                matches = is_black
+            else:
+                matches = "arial" in lower and not is_black and not is_bold and not is_italic
             if matches:
                 data = doc.extract_font(xref)
                 if data and data[3]:
