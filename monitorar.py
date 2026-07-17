@@ -131,16 +131,69 @@ LABELS_SUBTIPO = {
 }
 
 
-def _get_resumo_fonts():
-    """Retorna (fn_bold, fn_regular) — Arial no Windows, Liberation Sans no Linux."""
-    win_fonts = Path("C:/Windows/Fonts")
-    ariblk = win_fonts / "ariblk.ttf"
-    arial  = win_fonts / "arial.ttf"
-    if ariblk.exists() and arial.exists():
-        return str(ariblk), str(arial)
-    # Fallback Linux (build/testes)
-    base = Path("/usr/share/fonts/truetype/liberation")
-    return str(base / "LiberationSans-Bold.ttf"), str(base / "LiberationSans-Regular.ttf")
+_FONT_CACHE: dict = {}
+
+def _extract_font_from_capa(capa_pdf_path, want_black: bool):
+    """Extrai Arial-Black ou ArialMT do PDF da capa e salva em temp."""
+    import tempfile
+    cache_key = (str(capa_pdf_path), want_black)
+    if cache_key in _FONT_CACHE:
+        return _FONT_CACHE[cache_key]
+    result = None
+    try:
+        doc = fitz.open(capa_pdf_path)
+        page = doc[1]
+        for xref, ext, _t, basename, _name, _enc, _ref in page.get_fonts():
+            is_black = "Black" in basename or "black" in basename
+            matches = is_black if want_black else (not is_black and "Arial" in basename)
+            if matches:
+                data = doc.extract_font(xref)
+                if data and data[3]:
+                    fname = "ariblk" if want_black else "arialmt"
+                    tmp = Path(tempfile.gettempdir()) / f"egemap_{fname}.{ext or 'ttf'}"
+                    tmp.write_bytes(data[3])
+                    result = str(tmp)
+                    break
+    except Exception:
+        pass
+    _FONT_CACHE[cache_key] = result
+    return result
+
+
+def _get_resumo_fonts(capa_pdf_path=None):
+    """Retorna (fn_bold, fn_regular) — busca no sistema e extrai da capa como fallback."""
+    fn_bold = fn_reg = None
+
+    if os.name == "nt":
+        win_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+        # Arial Black (ariblk) ou Arial Bold (arialbd) como fallback
+        for f in ("ariblk.ttf", "arialbd.ttf"):
+            p = win_dir / f
+            if p.exists():
+                fn_bold = str(p)
+                break
+        p = win_dir / "arial.ttf"
+        if p.exists():
+            fn_reg = str(p)
+    else:
+        for base in (
+            Path("/usr/share/fonts/truetype/liberation"),
+            Path("/usr/share/fonts/liberation"),
+        ):
+            b = base / "LiberationSans-Bold.ttf"
+            r = base / "LiberationSans-Regular.ttf"
+            if b.exists() and r.exists():
+                fn_bold, fn_reg = str(b), str(r)
+                break
+
+    # Se ainda nao achou, extrai do proprio PDF da capa
+    if capa_pdf_path:
+        if fn_bold is None:
+            fn_bold = _extract_font_from_capa(capa_pdf_path, want_black=True)
+        if fn_reg is None:
+            fn_reg = _extract_font_from_capa(capa_pdf_path, want_black=False)
+
+    return fn_bold, fn_reg
 
 
 def detect_alm_subtipo(pdf_path):
@@ -162,9 +215,8 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
     alm   = parse_brl(alm_total_str)
     total = pvc + alm
     novo_label = LABELS_SUBTIPO.get(alm_subtipo, "Esquadrias de Madeira e Alumínio")
-    fn_bold, fn_reg = _get_resumo_fonts()
-
     capa_doc   = fitz.open(capa_pdf_path)
+    fn_bold, fn_reg = _get_resumo_fonts(capa_pdf_path)
     resumo_doc = fitz.open()
     resumo_doc.insert_pdf(capa_doc, from_page=1, to_page=1)
     page = resumo_doc[0]
@@ -245,7 +297,10 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
         page.add_redact_annot(rect, fill=(1, 1, 1))
     page.apply_redactions()
     for x, y, text, ff, fs, col in to_insert:
-        page.insert_text((x, y), text, fontfile=ff, fontsize=fs, color=col)
+        if ff:
+            page.insert_text((x, y), text, fontfile=ff, fontsize=fs, color=col)
+        else:
+            page.insert_text((x, y), text, fontname="helv", fontsize=fs, color=col)
 
     return resumo_doc
 
