@@ -22,6 +22,40 @@ function Enviados {
 
 function Salvar($h) { $h | ConvertTo-Json | Set-Content $vistos -Encoding UTF8 }
 
+function EnviarParaDrive($arq, $nome, $destino, $reenvio) {
+    Start-Sleep 3
+    if (-not (Test-Path $arq)) { return }
+
+    # Remove PDFs do mesmo dia ja existentes na pasta do cliente no Drive
+    $hoje = (Get-Date).ToString("yyyy-MM-dd")
+    $jsonDrive = (& $rclone lsjson "egemap:$destino" --config $conf 2>&1) | Out-String
+    if ($LASTEXITCODE -eq 0 -and $jsonDrive -match '\[') {
+        try {
+            $arquivos = $jsonDrive | ConvertFrom-Json
+            foreach ($f in $arquivos) {
+                if ($f.Name -like "*.pdf" -and $f.Name -ne $nome) {
+                    $modTime = [DateTime]::Parse($f.ModTime, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                    if ($modTime.ToLocalTime().ToString("yyyy-MM-dd") -eq $hoje) {
+                        Log "  Apagando PDF anterior do mesmo dia: $($f.Name)"
+                        & $rclone deletefile "egemap:$destino/$($f.Name)" --config $conf 2>&1 | Out-Null
+                    }
+                }
+            }
+        } catch {}
+    }
+
+    $r = & $rclone copyto $arq "egemap:$destino/$nome" --config $conf --ignore-times 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Log "  [OK] Enviado para o Drive"
+        $ok[$arq] = (Get-Item $arq).LastWriteTime.ToString("o")
+        Salvar $ok
+    } else {
+        Log "  [ERRO] Falha no envio"
+        Log "  Detalhe: $r"
+    }
+    Log ""
+}
+
 if (-not (Test-Path $pasta))  { Log "ERRO: pasta nao encontrada: $pasta"; Read-Host "Enter para fechar"; exit 1 }
 if (-not (Test-Path $rclone)) { Log "ERRO: rclone.exe ausente. Rode EGEMAP_INSTALAR.bat"; Read-Host "Enter para fechar"; exit 1 }
 
@@ -94,6 +128,8 @@ while ($true) {
         # PDF de material: nome termina com pvc ou alm
         $ehMaterial = $nomeSemExt -match '(?i)(pvc|alm)$'
 
+        $destino = "$ano/$cidade/$cliente"
+
         if ($ehCompleto) {
             # PDF final com dois orcamentos unidos - envia imediatamente
             # Cancela e ignora os PDFs pvc/alm desta pasta de cliente
@@ -110,43 +146,18 @@ while ($true) {
             }
             Salvar $ok
 
-            Start-Sleep 3
-            if (-not (Test-Path $arq)) { return }
             if ($reenvio) { Log "PDF completo atualizado: $nome" } else { Log "PDF completo (dois orcamentos): $nome" }
             Log "  Cliente: $cliente | Cidade: $cidade"
-
-            $destino = "$ano/$cidade/$cliente"
-            $r = & $rclone copyto $arq "egemap:$destino/$nome" --config $conf --ignore-times 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Log "  [OK] Enviado para o Drive"
-                $ok[$arq] = (Get-Item $arq).LastWriteTime.ToString("o")
-                Salvar $ok
-            } else {
-                Log "  [ERRO] Falha no envio"
-                Log "  Detalhe: $r"
-            }
-            Log ""
+            EnviarParaDrive $arq $nome $destino $reenvio
 
         } elseif ($ehMaterial) {
             # PDF de material unico (pvc ou alm)
 
             # Se o arquivo foi modificado apos ja ter sido enviado, reenvia diretamente
             if ($reenvio) {
-                Start-Sleep 3
-                if (-not (Test-Path $arq)) { return }
                 Log "PDF material atualizado: $nome"
                 Log "  Cliente: $cliente | Cidade: $cidade"
-                $destino = "$ano/$cidade/$cliente"
-                $r = & $rclone copyto $arq "egemap:$destino/$nome" --config $conf --ignore-times 2>&1
-                if ($LASTEXITCODE -eq 0) {
-                    Log "  [OK] Enviado para o Drive"
-                    $ok[$arq] = (Get-Item $arq).LastWriteTime.ToString("o")
-                    Salvar $ok
-                } else {
-                    Log "  [ERRO] Falha no envio"
-                    Log "  Detalhe: $r"
-                }
-                Log ""
+                EnviarParaDrive $arq $nome $destino $reenvio
                 return
             }
 
@@ -186,21 +197,9 @@ while ($true) {
             }
 
             # Confirmado: material unico, nenhum PDF completo apareceu - envia
-            Start-Sleep 3
-            if (-not (Test-Path $arq)) { return }
             Log "PDF material unico: $nome"
             Log "  Cliente: $cliente | Cidade: $cidade"
-            $destino = "$ano/$cidade/$cliente"
-            $r = & $rclone copyto $arq "egemap:$destino/$nome" --config $conf --ignore-times 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Log "  [OK] Enviado para o Drive"
-                $ok[$arq] = (Get-Item $arq).LastWriteTime.ToString("o")
-                Salvar $ok
-            } else {
-                Log "  [ERRO] Falha no envio"
-                Log "  Detalhe: $r"
-            }
-            Log ""
+            EnviarParaDrive $arq $nome $destino $reenvio
 
         } else {
             # Nome nao reconhecido como PDF final - ignora
