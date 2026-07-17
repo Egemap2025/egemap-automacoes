@@ -1,8 +1,1 @@
-node_modules/
-dist/
-.env
-uploads/
-outputs/
-logs/
-*.log
-.DS_Store
+__pycache__/
