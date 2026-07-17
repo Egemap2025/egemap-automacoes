@@ -298,7 +298,10 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
     page.apply_redactions()
     for x, y, text, ff, fs, col in to_insert:
         if ff:
-            page.insert_text((x, y), text, fontfile=ff, fontsize=fs, color=col)
+            # fontname precisa ser explicito: sem ele o PyMuPDF ignora o
+            # fontfile e cai no Helvetica padrao (fontname="helv" e o default).
+            alias = re.sub(r"[^A-Za-z0-9]+", "_", Path(ff).stem)
+            page.insert_text((x, y), text, fontfile=ff, fontname=alias, fontsize=fs, color=col)
         else:
             page.insert_text((x, y), text, fontname="helv", fontsize=fs, color=col)
 
