@@ -146,22 +146,8 @@ while ($true) {
             EnviarParaDrive $arq $nome $destino $reenvio
 
         } elseif ($ehMaterial) {
-            # PDF de material (pvc ou alm)
-            # Verifica se ja existe PDF completo (com data) na pasta local do cliente
-            $pastaCliente = Split-Path $arq -Parent
-            $temCompleto = Get-ChildItem -Path $pastaCliente -Filter "*.pdf" -ErrorAction SilentlyContinue |
-                           Where-Object { [System.IO.Path]::GetFileNameWithoutExtension($_.Name) -match '\d{2}-\d{2}$' } |
-                           Select-Object -First 1
-
-            if ($temCompleto) {
-                # PDF completo ja existe na pasta - este e intermediario, ignora
-                $ok[$arq] = "ignorado"
-                Salvar $ok
-                return
-            }
-
-            # Sem PDF completo: envia imediatamente
-            # Se vier um PDF completo depois no mesmo dia, o cleanup apaga este do Drive automaticamente
+            # PDF de material (pvc ou alm) - envia imediatamente
+            # Se vier um PDF completo depois no mesmo dia, o cleanup do Drive apaga este automaticamente
             if ($reenvio) { Log "PDF material atualizado: $nome" } else { Log "PDF material (pvc/alm): $nome" }
             Log "  Cliente: $cliente | Cidade: $cidade"
             EnviarParaDrive $arq $nome $destino $reenvio
