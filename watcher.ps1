@@ -81,7 +81,7 @@ $ok = Enviados
 if ($ok.Count -eq 0) {
     Log "Inicializando: registrando arquivos existentes (nao serao enviados)..."
     Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-        $ok[$_.FullName] = "ignorado"
+        $ok[$_.FullName] = $_.LastWriteTime.ToString("o")
     }
     Salvar $ok
     Log "Pronto. Monitorando apenas arquivos novos a partir de agora."
