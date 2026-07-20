@@ -131,8 +131,8 @@ while ($true) {
         # PDF completo: nome termina com data DD-MM (ex: "Proposta Comercial Joao 17-07")
         $ehCompleto = $nomeSemExt -match '\d{2}-\d{2}$'
 
-        # PDF de material: nome termina com pvc ou alm
-        $ehMaterial = $nomeSemExt -match '(?i)(pvc|alm)$'
+        # PDF de material: nome termina com pvc ou alm (exceto "mad alm")
+        $ehMaterial = $nomeSemExt -match '(?i)(pvc|alm)$' -and $nomeSemExt -notmatch '(?i)mad[\s_]alm$'
 
         $destino = "$ano/$cidade/$cliente"
 
