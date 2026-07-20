@@ -1,1 +1,8 @@
 __pycache__/
+
+# Drive watcher: arquivos gerados/sensiveis, nao versionar
+config.json
+rclone.conf
+rclone.exe
+watcher.log
+enviados.json
