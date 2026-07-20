@@ -108,16 +108,15 @@ def format_brl(value):
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def safe_output_path(folder, name):
-    base = Path(folder) / f"{name}.pdf"
-    if not base.exists():
-        return str(base)
-    i = 1
-    while True:
-        candidate = Path(folder) / f"{name} ({i}).pdf"
-        if not candidate.exists():
-            return str(candidate)
-        i += 1
+def output_path_do_dia(folder, name, client=""):
+    """Caminho de saida da proposta. O nome ja inclui a data (DD-MM), entao
+    se ja existe um arquivo com esse nome e porque a proposta deste cliente
+    foi refeita hoje (ex: cliente pediu alteracao) -- substitui a versao
+    anterior de hoje em vez de criar um "(1)" duplicado."""
+    path = Path(folder) / f"{name}.pdf"
+    if path.exists():
+        _apagar(str(path), client)
+    return str(path)
 
 
 def suggest_client_name(folder_path):
@@ -605,7 +604,7 @@ class PropostaHandler(FileSystemEventHandler):
             subtipo = detect_alm_subtipo(src_path)
             sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
         out_name = f"Proposta Comercial {client} {today} {sufixo}"
-        output_path = safe_output_path(folder, out_name)
+        output_path = output_path_do_dia(folder, out_name, client)
 
         log(f"[{client}] {sufixo} detectado — adicionando Capa e Contra Capa...")
         merge_individual(self.capa_pdf, src_path, output_path)
@@ -648,7 +647,7 @@ class PropostaHandler(FileSystemEventHandler):
                 return
 
             out_name = f"Proposta Comercial {client} {today}"
-            output_path = safe_output_path(folder, out_name)
+            output_path = output_path_do_dia(folder, out_name, client)
             log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
             alm_subtipo = detect_alm_subtipo(alm_path)
             merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path, alm_subtipo)
@@ -661,7 +660,7 @@ class PropostaHandler(FileSystemEventHandler):
         elif has_alm:
             alm_path = pdfs["alm"][0]
             out_name = f"Proposta Comercial {client} {today}"
-            output_path = safe_output_path(folder, out_name)
+            output_path = output_path_do_dia(folder, out_name, client)
             log(f"[{client}] Aluminio — montando Capa + Conteudo + Contra Capa...")
             merge_alm(self.capa_pdf, alm_path, output_path)
             log(f"[{client}] SALVO: {Path(output_path).name}")
