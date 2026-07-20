@@ -1,1 +1,7 @@
 __pycache__/
+
+# Agente de Drive (watcher.ps1) - gerados na instalacao, nao versionar
+rclone.exe
+rclone.conf
+enviados.json
+watcher.log
