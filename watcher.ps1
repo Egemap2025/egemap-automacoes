@@ -26,8 +26,11 @@ function EnviarParaDrive($arq, $nome, $destino, $reenvio) {
     Start-Sleep 3
     if (-not (Test-Path $arq)) { return }
 
-    # Remove PDFs do mesmo dia ja existentes na pasta do cliente no Drive
     $hoje = (Get-Date).ToString("yyyy-MM-dd")
+    $nomeSemExt = [System.IO.Path]::GetFileNameWithoutExtension($nome)
+    $ehPVC      = $nomeSemExt -match '(?i)pvc$'
+    $ehALM      = $nomeSemExt -match '(?i)alm$'
+
     $jsonDrive = (& $rclone lsjson "egemap:$destino" --config $conf 2>&1) | Out-String
     if ($LASTEXITCODE -eq 0 -and $jsonDrive -match '\[') {
         try {
@@ -36,8 +39,15 @@ function EnviarParaDrive($arq, $nome, $destino, $reenvio) {
                 if ($f.Name -like "*.pdf" -and $f.Name -ne $nome) {
                     $modTime = [DateTime]::Parse($f.ModTime, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
                     if ($modTime.ToLocalTime().ToString("yyyy-MM-dd") -eq $hoje) {
-                        Log "  Apagando PDF anterior do mesmo dia: $($f.Name)"
-                        & $rclone deletefile "egemap:$destino/$($f.Name)" --config $conf 2>&1 | Out-Null
+                        $fSemExt = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
+                        $apagar  = $false
+                        if ($ehPVC)      { $apagar = $fSemExt -match '(?i)pvc$' }
+                        elseif ($ehALM)  { $apagar = $fSemExt -match '(?i)alm$' }
+                        else             { $apagar = $true }  # completo: remove tudo do dia
+                        if ($apagar) {
+                            Log "  Apagando PDF anterior do mesmo dia: $($f.Name)"
+                            & $rclone deletefile "egemap:$destino/$($f.Name)" --config $conf 2>&1 | Out-Null
+                        }
                     }
                 }
             }
