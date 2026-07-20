@@ -43,7 +43,7 @@ function EnviarParaDrive($arq, $nome, $destino, $reenvio) {
                         $apagar  = $false
                         if ($ehPVC)      { $apagar = $fSemExt -match '(?i)pvc$' }
                         elseif ($ehALM)  { $apagar = $fSemExt -match '(?i)alm$' }
-                        else             { $apagar = $true }  # completo: remove tudo do dia
+                        else             { $apagar = $fSemExt -notmatch '(?i)(pvc|alm)$' }  # completo: remove só outro completo do dia
                         if ($apagar) {
                             Log "  Apagando PDF anterior do mesmo dia: $($f.Name)"
                             & $rclone deletefile "egemap:$destino/$($f.Name)" --config $conf 2>&1 | Out-Null
