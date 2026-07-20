@@ -110,7 +110,7 @@ while ($true) {
             return
         }
 
-        if ($nome -notlike "*Proposta Comercial*") {
+        if ($nome -notlike "*Proposta Comercial*" -and $nome -notlike "*Proposta_Comercial*") {
             $ok[$arq] = "ignorado"
             Salvar $ok
             return
