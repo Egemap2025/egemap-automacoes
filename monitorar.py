@@ -124,6 +124,79 @@ def suggest_client_name(folder_path):
     return Path(folder_path).name or "Cliente"
 
 
+def _color_tuple(c):
+    """Converte cor int (0xRRGGBB) para tupla (r,g,b) 0-1."""
+    if isinstance(c, int):
+        return ((c >> 16 & 0xFF) / 255, (c >> 8 & 0xFF) / 255, (c & 0xFF) / 255)
+    return c
+
+
+CAMPOS_LABEL_VAZIO = ("EMAIL:", "TELEFONE:", "CELULAR:", "CEP:")
+
+
+def limpar_campos_vazios_alm(doc, page_index=0):
+    """Remove do cabecalho do W-Vetro os campos sem resposta (EMAIL/TELEFONE/
+    CELULAR/CEP). So remove o que realmente esta vazio -- se o cliente
+    preencheu o campo, ele permanece intocado."""
+    if page_index >= len(doc):
+        return
+    page = doc[page_index]
+
+    linhas = []
+    for b in page.get_text("dict")["blocks"]:
+        if b["type"] != 0:
+            continue
+        for line in b["lines"]:
+            texto = "".join(s["text"] for s in line["spans"]).strip()
+            if texto:
+                linhas.append({"text": texto, "bbox": line["bbox"], "spans": line["spans"]})
+
+    def _rect_encolhido(bbox):
+        # O bbox de uma linha inclui folga de entrelinha que pode encostar na
+        # linha vizinha (acima/abaixo); encolhe para nao redatar o vizinho.
+        x0, y0, x1, y1 = bbox
+        return fitz.Rect(x0, y0 + 2, x1, y1 - 1)
+
+    to_redact = []
+    to_insert = []  # (origin, texto, fontname, size, color)
+
+    for linha in linhas:
+        texto = linha["text"]
+        x0, y0, x1, y1 = linha["bbox"]
+        ymid = (y0 + y1) / 2
+
+        if texto in CAMPOS_LABEL_VAZIO:
+            # So remove se nao houver nenhum valor a direita, na mesma linha
+            tem_valor = any(
+                o is not linha
+                and abs((o["bbox"][1] + o["bbox"][3]) / 2 - ymid) < 3
+                and o["bbox"][0] >= x1 - 1
+                for o in linhas
+            )
+            if not tem_valor:
+                to_redact.append(_rect_encolhido(linha["bbox"]))
+            continue
+
+        # Linha "CEP: - CIDADE/UF -" com numero do CEP vazio (o rotulo "CEP:"
+        # vem embutido nesta linha de novo, junto com a cidade/UF)
+        m = re.match(r"^CEP:\s*-\s*(.+?)\s*-\s*$", texto)
+        if m:
+            to_redact.append(_rect_encolhido(linha["bbox"]))
+            span = linha["spans"][0]
+            fontname = "hebo" if "Bold" in span["font"] else "helv"
+            to_insert.append((span["origin"], m.group(1), fontname, span["size"], _color_tuple(span["color"])))
+
+    if not to_redact:
+        return
+
+    for r in to_redact:
+        page.add_redact_annot(r, fill=(1, 1, 1))
+    page.apply_redactions()
+
+    for origin, texto, fontname, size, color in to_insert:
+        page.insert_text(origin, texto, fontname=fontname, fontsize=size, color=color)
+
+
 LABELS_SUBTIPO = {
     "alm":     "Esquadrias de Alumínio",
     "mad":     "Esquadrias de Madeira",
@@ -270,12 +343,6 @@ def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo=
     to_redact = []
     to_insert = []  # (x, y_baseline, text, fontfile, fontsize, color)
 
-    def _color_tuple(c):
-        """Converte cor int (0xRRGGBB) para tupla (r,g,b) 0-1."""
-        if isinstance(c, int):
-            return ((c >> 16 & 0xFF) / 255, (c >> 8 & 0xFF) / 255, (c & 0xFF) / 255)
-        return c
-
     # Valor PVC (1º por y)
     if len(money_spans) >= 1:
         s = money_spans[0]
@@ -371,6 +438,8 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
         result.insert_pdf(pvc_doc, from_page=pvc_start, to_page=pvc_end)
 
     alm_start, alm_end = _alm_range(alm_doc, alm_pdf_path)
+    if not _is_proposta_gerada(alm_pdf_path):
+        limpar_campos_vazios_alm(alm_doc, alm_start)
     if alm_start <= alm_end:
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
@@ -388,6 +457,8 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
     result.insert_pdf(capa_doc, from_page=0, to_page=0)
 
     alm_start, alm_end = _alm_range(alm_doc, alm_pdf_path)
+    if not _is_proposta_gerada(alm_pdf_path):
+        limpar_campos_vazios_alm(alm_doc, alm_start)
     if alm_start <= alm_end:
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
@@ -448,6 +519,8 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path):
             result.insert_pdf(src_doc, from_page=start)
     else:
         start, end = _alm_range(src_doc, src_pdf_path)
+        if not _is_proposta_gerada(src_pdf_path):
+            limpar_campos_vazios_alm(src_doc, start)
         if start <= end:
             result.insert_pdf(src_doc, from_page=start, to_page=end)
 
