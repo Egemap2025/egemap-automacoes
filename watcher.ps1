@@ -78,10 +78,6 @@ if ($ok.Count -eq 0) {
     Log ""
 }
 
-# PDFs pvc/alm aguardam 5 minutos antes de enviar,
-# para ver se aparece um PDF completo com data (dois orcamentos unidos)
-$aguardando = @{}
-
 while ($true) {
     Get-ChildItem -Path $pasta -Filter "*.pdf" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
         $arq = $_.FullName
@@ -132,7 +128,7 @@ while ($true) {
 
         if ($ehCompleto) {
             # PDF final com dois orcamentos unidos - envia imediatamente
-            # Cancela e ignora os PDFs pvc/alm desta pasta de cliente
+            # Marca os PDFs pvc/alm desta pasta como ignorados (nao precisam mais subir)
             $pastaCliente = Split-Path $arq -Parent
             Get-ChildItem -Path $pastaCliente -Filter "*.pdf" -ErrorAction SilentlyContinue | ForEach-Object {
                 $outro = $_.FullName
@@ -140,7 +136,6 @@ while ($true) {
                     $outroSemExt = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
                     if ($outroSemExt -match '(?i)(pvc|alm)$') {
                         $ok[$outro] = "ignorado"
-                        $aguardando.Remove($outro)
                     }
                 }
             }
@@ -151,53 +146,23 @@ while ($true) {
             EnviarParaDrive $arq $nome $destino $reenvio
 
         } elseif ($ehMaterial) {
-            # PDF de material unico (pvc ou alm)
-
-            # Se o arquivo foi modificado apos ja ter sido enviado, reenvia diretamente
-            if ($reenvio) {
-                Log "PDF material atualizado: $nome"
-                Log "  Cliente: $cliente | Cidade: $cidade"
-                EnviarParaDrive $arq $nome $destino $reenvio
-                return
-            }
-
-            # Verifica se ja existe PDF completo (com data) na pasta do cliente
+            # PDF de material (pvc ou alm)
+            # Verifica se ja existe PDF completo (com data) na pasta local do cliente
             $pastaCliente = Split-Path $arq -Parent
             $temCompleto = Get-ChildItem -Path $pastaCliente -Filter "*.pdf" -ErrorAction SilentlyContinue |
                            Where-Object { [System.IO.Path]::GetFileNameWithoutExtension($_.Name) -match '\d{2}-\d{2}$' } |
                            Select-Object -First 1
 
             if ($temCompleto) {
-                $ok[$arq] = "ignorado"
-                $aguardando.Remove($arq)
-                Salvar $ok
-                return
-            }
-
-            # Aguarda 5 minutos para ver se aparece o PDF completo
-            if (-not $aguardando.ContainsKey($arq)) {
-                $aguardando[$arq] = Get-Date
-                Log "Aguardando 5 min (verificando se sera gerado PDF completo): $nome"
-                return
-            }
-
-            $elapsed = (Get-Date) - $aguardando[$arq]
-            if ($elapsed.TotalMinutes -lt 5) { return }
-
-            # Verifica novamente apos 5 minutos
-            $temCompleto = Get-ChildItem -Path $pastaCliente -Filter "*.pdf" -ErrorAction SilentlyContinue |
-                           Where-Object { [System.IO.Path]::GetFileNameWithoutExtension($_.Name) -match '\d{2}-\d{2}$' } |
-                           Select-Object -First 1
-            $aguardando.Remove($arq)
-
-            if ($temCompleto) {
+                # PDF completo ja existe na pasta - este e intermediario, ignora
                 $ok[$arq] = "ignorado"
                 Salvar $ok
                 return
             }
 
-            # Confirmado: material unico, nenhum PDF completo apareceu - envia
-            Log "PDF material unico: $nome"
+            # Sem PDF completo: envia imediatamente
+            # Se vier um PDF completo depois no mesmo dia, o cleanup apaga este do Drive automaticamente
+            if ($reenvio) { Log "PDF material atualizado: $nome" } else { Log "PDF material (pvc/alm): $nome" }
             Log "  Cliente: $cliente | Cidade: $cidade"
             EnviarParaDrive $arq $nome $destino $reenvio
 
