@@ -402,6 +402,19 @@ def _has_system_capa(doc):
     return "PROPOSTA" in doc[0].get_text().upper()
 
 
+def _saida_valida(output_path, minimo_paginas):
+    """Confere se a proposta final saiu com um numero razoavel de paginas
+    antes de apagar os originais -- protege contra perder o orcamento do
+    cliente se algo der errado na montagem."""
+    try:
+        doc = fitz.open(output_path)
+        n = len(doc)
+        doc.close()
+        return n >= minimo_paginas
+    except Exception:
+        return False
+
+
 def _content_range(doc):
     n = len(doc)
     start = 1 if n > 1 else 0
@@ -475,11 +488,18 @@ def log(msg):
 
 
 def _apagar(path, client=""):
-    try:
-        Path(path).unlink()
-        log(f"[{client}] Removido original: {Path(path).name}")
-    except Exception as e:
-        log(f"[{client}] Nao foi possivel remover {Path(path).name}: {e}")
+    # Tenta algumas vezes: o Windows pode segurar o arquivo por um instante
+    # (antivirus escaneando, gravacao ainda nao liberada, etc.)
+    for tentativa in range(5):
+        try:
+            Path(path).unlink()
+            log(f"[{client}] Removido original: {Path(path).name}")
+            return
+        except Exception as e:
+            if tentativa == 4:
+                log(f"[{client}] Nao foi possivel remover {Path(path).name}: {e}")
+            else:
+                time.sleep(1)
 
 
 def _norm(path):
@@ -608,6 +628,9 @@ class PropostaHandler(FileSystemEventHandler):
 
         log(f"[{client}] {sufixo} detectado — adicionando Capa e Contra Capa...")
         merge_individual(self.capa_pdf, src_path, output_path)
+        if not _saida_valida(output_path, 3):
+            log(f"[{client}] ATENCAO: arquivo envolvido saiu com poucas paginas — mantendo o original por seguranca.")
+            return
         log(f"[{client}] SALVO: {Path(output_path).name}")
         _apagar(src_path, client)
 
@@ -651,6 +674,9 @@ class PropostaHandler(FileSystemEventHandler):
             log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
             alm_subtipo = detect_alm_subtipo(alm_path)
             merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path, alm_subtipo)
+            if not _saida_valida(output_path, 4):
+                log(f"[{client}] ATENCAO: proposta final saiu com poucas paginas — mantendo os arquivos originais por seguranca.")
+                return
             log(f"[{client}] SALVO: {Path(output_path).name}")
             _apagar(pvc_path, client)
             _apagar(alm_path, client)
@@ -663,6 +689,9 @@ class PropostaHandler(FileSystemEventHandler):
             output_path = output_path_do_dia(folder, out_name, client)
             log(f"[{client}] Aluminio — montando Capa + Conteudo + Contra Capa...")
             merge_alm(self.capa_pdf, alm_path, output_path)
+            if not _saida_valida(output_path, 3):
+                log(f"[{client}] ATENCAO: proposta final saiu com poucas paginas — mantendo os arquivos originais por seguranca.")
+                return
             log(f"[{client}] SALVO: {Path(output_path).name}")
             _apagar(alm_path, client)
             if trigger_is_signal:
