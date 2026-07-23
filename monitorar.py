@@ -165,9 +165,12 @@ def limpar_campos_vazios_alm(doc, page_index=0):
         ymid = (y0 + y1) / 2
 
         if texto in CAMPOS_LABEL_VAZIO:
-            # So remove se nao houver nenhum valor a direita, na mesma linha
+            # So remove se nao houver nenhum valor a direita, na mesma linha.
+            # Outro rotulo (ex: "CELULAR:" do lado de "TELEFONE:") nao conta
+            # como valor -- senao os dois nunca seriam removidos.
             tem_valor = any(
                 o is not linha
+                and o["text"] not in CAMPOS_LABEL_VAZIO
                 and abs((o["bbox"][1] + o["bbox"][3]) / 2 - ymid) < 3
                 and o["bbox"][0] >= x1 - 1
                 for o in linhas
@@ -176,9 +179,11 @@ def limpar_campos_vazios_alm(doc, page_index=0):
                 to_redact.append(_rect_encolhido(linha["bbox"]))
             continue
 
-        # Linha "CEP: - CIDADE/UF -" com numero do CEP vazio (o rotulo "CEP:"
-        # vem embutido nesta linha de novo, junto com a cidade/UF)
-        m = re.match(r"^CEP:\s*-\s*(.+?)\s*-\s*$", texto)
+        # Linha "CEP: - CIDADE/UF -" ou "CEP: - CIDADE/UF - complemento" com
+        # numero do CEP vazio (o rotulo "CEP:" vem embutido nesta linha de
+        # novo, junto com a cidade/UF e as vezes um complemento de endereco).
+        # O traco final e opcional -- nem sempre aparece.
+        m = re.match(r"^CEP:\s*-\s*(.+?)\s*-?\s*$", texto)
         if m:
             to_redact.append(_rect_encolhido(linha["bbox"]))
             span = linha["spans"][0]
