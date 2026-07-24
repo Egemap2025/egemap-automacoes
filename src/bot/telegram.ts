@@ -73,12 +73,95 @@ export class TelegramBot {
       return;
     }
 
+    if (text === '/teste-wvetro') {
+      await this.testarWVetro(chatId);
+      return;
+    }
+
     if (text && !text.startsWith('/')) {
       await this.bot.sendMessage(
         chatId,
         '📎 Envie o arquivo da planta em *PDF* para eu analisar.',
         { parse_mode: 'Markdown' }
       );
+    }
+  }
+
+  private async testarWVetro(chatId: number): Promise<void> {
+    const { WVETRO_URL, WVETRO_EMAIL, WVETRO_SENHA, WVETRO_CODIGO_EMPRESA } = process.env;
+    if (!WVETRO_URL || !WVETRO_EMAIL || !WVETRO_SENHA) {
+      await this.bot.sendMessage(chatId, '❌ Variáveis WVETRO não configuradas.');
+      return;
+    }
+
+    await this.bot.sendMessage(chatId, '🔍 Abrindo W-Vetro para explorar a interface...');
+
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+
+    const enviarScreen = async (page: import('playwright').Page, label: string) => {
+      try {
+        const buf = await page.screenshot({ fullPage: false, type: 'png' });
+        await this.bot.sendPhoto(chatId, buf, { caption: `📸 ${label}\n🔗 ${page.url()}` });
+      } catch { /* ignore */ }
+    };
+
+    try {
+      const page = await browser.newPage();
+      await page.setViewportSize({ width: 1366, height: 768 });
+
+      // 1. Tela de login
+      await page.goto(`${WVETRO_URL}/login`, { waitUntil: 'networkidle', timeout: 30000 });
+      await enviarScreen(page, '1. Tela de login');
+
+      // Preenche código da empresa se houver
+      if (WVETRO_CODIGO_EMPRESA) {
+        for (const sel of ['input[name="codigo"]', '#codigo', 'input[name="empresa"]', '#empresa', 'input[placeholder*="código" i]']) {
+          try { await page.fill(sel, WVETRO_CODIGO_EMPRESA, { timeout: 2000 }); break; } catch { /* tenta próximo */ }
+        }
+      }
+
+      // Preenche email e senha
+      for (const sel of ['input[type="email"]', 'input[name="email"]', 'input[name="login"]', '#email']) {
+        try { await page.fill(sel, WVETRO_EMAIL, { timeout: 2000 }); break; } catch { /* tenta próximo */ }
+      }
+      for (const sel of ['input[type="password"]', 'input[name="password"]', 'input[name="senha"]', '#senha']) {
+        try { await page.fill(sel, WVETRO_SENHA, { timeout: 2000 }); break; } catch { /* tenta próximo */ }
+      }
+      await enviarScreen(page, '2. Login preenchido');
+
+      // Clica em entrar
+      for (const sel of ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Entrar")', 'button:has-text("Login")']) {
+        try { await page.click(sel, { timeout: 3000 }); break; } catch { /* tenta próximo */ }
+      }
+      await page.waitForLoadState('networkidle', { timeout: 20000 });
+      await enviarScreen(page, '3. Após login (dashboard)');
+
+      // Envia HTML do dashboard para análise
+      const url = page.url();
+      await this.bot.sendMessage(chatId, `📍 URL após login: ${url}`);
+
+      // Tenta navegar para novo orçamento
+      for (const rota of ['/orcamentos/novo', '/orcamento/novo', '/vendas/orcamentos/criar', '/pedidos/novo', '/orcamentos', '/orcamento']) {
+        try {
+          await page.goto(`${WVETRO_URL}${rota}`, { waitUntil: 'networkidle', timeout: 8000 });
+          if (!page.url().includes('/login')) {
+            await enviarScreen(page, `4. Rota: ${rota}`);
+            await this.bot.sendMessage(chatId, `✅ Rota funcionou: ${WVETRO_URL}${rota}\n🔗 URL atual: ${page.url()}`);
+            break;
+          }
+        } catch { /* tenta próximo */ }
+      }
+
+      await this.bot.sendMessage(chatId, '✅ Exploração concluída! Me manda as fotos para eu analisar os seletores.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.bot.sendMessage(chatId, `❌ Erro durante exploração: ${msg.substring(0, 300)}`);
+    } finally {
+      await browser.close();
     }
   }
 
