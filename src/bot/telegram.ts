@@ -113,8 +113,9 @@ export class TelegramBot {
       const page = await browser.newPage();
       await page.setViewportSize({ width: 1366, height: 768 });
 
-      // 1. Tela de login
-      await page.goto(`${WVETRO_URL}/login`, { waitUntil: 'networkidle', timeout: 30000 });
+      // 1. Tela de login — usa domcontentloaded que é mais rápido que networkidle
+      await page.goto(`${WVETRO_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(2000);
       await enviarScreen(page, '1. Tela de login');
 
       // Preenche código da empresa se houver
@@ -137,7 +138,8 @@ export class TelegramBot {
       for (const sel of ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Entrar")', 'button:has-text("Login")']) {
         try { await page.click(sel, { timeout: 3000 }); break; } catch { /* tenta próximo */ }
       }
-      await page.waitForLoadState('networkidle', { timeout: 20000 });
+      await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
+      await page.waitForTimeout(2000);
       await enviarScreen(page, '3. Após login (dashboard)');
 
       // Envia HTML do dashboard para análise
@@ -147,7 +149,7 @@ export class TelegramBot {
       // Tenta navegar para novo orçamento
       for (const rota of ['/orcamentos/novo', '/orcamento/novo', '/vendas/orcamentos/criar', '/pedidos/novo', '/orcamentos', '/orcamento']) {
         try {
-          await page.goto(`${WVETRO_URL}${rota}`, { waitUntil: 'networkidle', timeout: 8000 });
+          await page.goto(`${WVETRO_URL}${rota}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
           if (!page.url().includes('/login')) {
             await enviarScreen(page, `4. Rota: ${rota}`);
             await this.bot.sendMessage(chatId, `✅ Rota funcionou: ${WVETRO_URL}${rota}\n🔗 URL atual: ${page.url()}`);

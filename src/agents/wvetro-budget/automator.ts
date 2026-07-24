@@ -88,7 +88,8 @@ export class WVetroAutomator {
     sessionId: string
   ): Promise<void> {
     logger.info('W-Vetro: iniciando login...');
-    await page.goto(`${baseUrl}/login`, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(`${baseUrl}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(2000);
     await this.screenshot(page, sessionId, '01-login-page');
 
     // Preenche código da empresa se o campo existir
@@ -118,7 +119,8 @@ export class WVetroAutomator {
     await this.screenshot(page, sessionId, '02-login-preenchido');
 
     await page.click('button[type="submit"], input[type="submit"], .btn-login, button:has-text("Entrar"), button:has-text("Login")');
-    await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForLoadState('domcontentloaded', { timeout: 60000 });
+    await page.waitForTimeout(2000);
     await this.screenshot(page, sessionId, '03-pos-login');
 
     if (page.url().includes('/login')) {
@@ -146,7 +148,7 @@ export class WVetroAutomator {
 
     for (const rota of rotas) {
       try {
-        await page.goto(`${baseUrl}${rota}`, { waitUntil: 'networkidle', timeout: 10000 });
+        await page.goto(`${baseUrl}${rota}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
         if (!page.url().includes('/login')) break;
       } catch {
         continue;
