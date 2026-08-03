@@ -29,29 +29,34 @@ async function handleLogin(page) {
   if (!isLoginPage) { log('Sessão ativa, continuando…'); return; }
 
   log('Tela de login detectada.');
-  const usuario = process.env.WVETRO_USUARIO;
-  const senha   = process.env.WVETRO_SENHA;
-  const licenca = process.env.WVETRO_LICENCA;
 
-  if (usuario && senha) {
-    const campoUsuario = page.locator('input[placeholder*="usuário"], input[placeholder*="usuario"], input[name*="user"], input[name*="login"]').first();
-    if (await campoUsuario.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await campoUsuario.fill(usuario);
-    }
-    await page.locator('input[type="password"]').first().fill(senha);
-    if (licenca) {
-      const campoLicenca = page.locator('input[placeholder*="licen"], input[name*="licen"]').first();
-      if (await campoLicenca.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await campoLicenca.fill(licenca);
-      }
-    }
-    await page.getByRole('button', { name: /entrar|login|acessar/i }).click({ timeout: 5000 });
-    await aguardar(page);
-    log('Login realizado.');
-  } else {
-    console.log('\n⚠️  Faça login no Chrome que abriu e pressione ENTER aqui.');
-    await ask('Pressione ENTER depois de entrar no sistema… ');
+  // Usa .env se existir, senão pergunta no terminal
+  let usuario = process.env.WVETRO_USUARIO;
+  let senha   = process.env.WVETRO_SENHA;
+  let licenca = process.env.WVETRO_LICENCA;
+
+  if (!usuario || !senha) {
+    console.log('\n── Login W-vetro ─────────────────');
+    if (!usuario) usuario = (await ask('  Usuário:  ')).trim();
+    if (!senha)   senha   = (await ask('  Senha:    ')).trim();
+    if (!licenca) licenca = (await ask('  Licença (número):  ')).trim();
+    console.log('──────────────────────────────────\n');
   }
+
+  const campoUsuario = page.locator('input[placeholder*="usuário"], input[placeholder*="usuario"], input[name*="user"], input[name*="login"]').first();
+  if (await campoUsuario.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await campoUsuario.fill(usuario);
+  }
+  await page.locator('input[type="password"]').first().fill(senha);
+  if (licenca) {
+    const campoLicenca = page.locator('input[placeholder*="licen"], input[name*="licen"]').first();
+    if (await campoLicenca.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await campoLicenca.fill(licenca);
+    }
+  }
+  await page.getByRole('button', { name: /entrar|login|acessar/i }).click({ timeout: 5000 });
+  await aguardar(page);
+  log('Login realizado.');
 }
 
 // ── Abrir orçamento pelo número ───────────────────────────────────────────────
