@@ -64,8 +64,20 @@ async function abrirOrcamento(page, numero) {
     await valorInput.fill(numero);
   }
 
-  // Procura
-  await page.getByRole('button', { name: /procurar/i }).click({ timeout: 8000 });
+  // Clica no botão de pesquisa (tenta vários nomes) ou pressiona Enter
+  let clicou = false;
+  for (const nome of [/procurar/i, /pesquisar/i, /buscar/i, /filtrar/i, /^ok$/i, /search/i]) {
+    const btn = page.getByRole('button', { name: nome });
+    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await btn.click();
+      clicou = true;
+      break;
+    }
+  }
+  if (!clicou) {
+    // Fallback: pressiona Enter no campo de valor
+    await valorInput.press('Enter').catch(() => {});
+  }
   await aguardar(page);
 
   // Clica na linha do resultado
