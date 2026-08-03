@@ -131,8 +131,9 @@ async function abrirOrcamento(page, numero) {
 // ── Botão de ações (ícone de lista, 3ª coluna de cada linha) ─────────────────
 
 async function abrirMenuDoItem(page, itemIdx) {
-  await page.waitForSelector('text=/detalhe do orçamento/i', { timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(300);
+  // Aguarda a tabela de itens carregar completamente
+  await page.waitForSelector('tbody tr', { timeout: 15000 });
+  await page.waitForTimeout(1000);
 
   const linhas = page.locator('tbody tr');
   const total  = await linhas.count();
@@ -142,22 +143,41 @@ async function abrirMenuDoItem(page, itemIdx) {
 
   const linha = linhas.nth(itemIdx);
   await linha.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
 
-  // O botão de ações fica na 3ª célula da linha
-  const btn = linha.locator('td:nth-child(3) button, td:nth-child(3) [role="button"]').first();
-  if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await btn.click();
-  } else {
-    // Fallback: primeiro botão visível na linha
-    await linha.locator('button').first().click({ timeout: 3000 });
+  // Tenta encontrar o botão de ação em várias posições/tipos
+  const seletores = [
+    'td:nth-child(3) button',
+    'td:nth-child(3) [role="button"]',
+    'td:nth-child(3) a',
+    'td:nth-child(3) img',
+    'td:nth-child(3) span',
+    'td:nth-child(3) i',
+    'td:nth-child(2) button',
+    'td:nth-child(2) [role="button"]',
+    'td:nth-child(2) a',
+    'button',
+    'a[href*="editar"], a[href*="menu"], a[href*="opcao"]',
+  ];
+
+  for (const sel of seletores) {
+    const el = linha.locator(sel).first();
+    if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
+      await el.click();
+      await page.waitForTimeout(800);
+      // Verifica se algum menu ou modal abriu
+      const menuAbriu = await page.locator('[role="menu"], ul.dropdown-menu, .mat-menu-panel, .dropdown-menu').first()
+        .isVisible({ timeout: 1500 }).catch(() => false);
+      const textoMenu = await page.getByText(/editar item|substituir projeto/i).first()
+        .isVisible({ timeout: 1500 }).catch(() => false);
+      if (menuAbriu || textoMenu) return;
+    }
   }
 
-  await page.waitForTimeout(600);
-
-  const menu = page.locator('[role="menu"], ul.dropdown-menu, .mat-menu-panel').first();
-  if (!await menu.isVisible({ timeout: 2000 }).catch(() => false)) {
-    throw new Error(`Menu do item ${itemIdx + 1} não abriu.`);
-  }
+  // Último recurso: pede ao usuário para clicar manualmente
+  log(`⚠️  Não encontrei o botão de ações do item ${itemIdx + 1}.`);
+  console.log('   Clique no ícone de ações do item no Chrome e pressione ENTER.');
+  await ask('   Pressione ENTER após abrir o menu do item… ');
 }
 
 // ── EDITAR ITEM DO ORÇ. (modal "Altera Medida da Esquadria") ─────────────────
