@@ -1,31 +1,35 @@
 @echo off
 cd /d "%~dp0"
+title W-vetro - Editor de Orcamentos
 
 echo.
 echo  ==========================================
-echo   W-vetro - Automacao de Orcamentos
+echo   W-vetro - Editor de Orcamentos
 echo  ==========================================
 echo.
 
-if not exist "node_modules" (
-    echo  Primeira execucao: instalando dependencias...
-    echo  (isso so acontece uma vez, aguarde)
+where node >nul 2>&1
+if errorlevel 1 (
+    echo  ERRO: Node.js nao esta instalado!
+    echo  Baixe em: https://nodejs.org/
     echo.
-    npm install
+    pause
+    exit /b 1
+)
+
+if not exist "%~dp0node_modules" (
+    echo  Instalando dependencias pela primeira vez...
+    echo.
+    call npm install
     if errorlevel 1 (
         echo.
-        echo  ERRO ao instalar dependencias.
-        echo  Verifique se o Node.js esta instalado: https://nodejs.org/
-        echo.
+        echo  ERRO na instalacao!
         pause
         exit /b 1
     )
     echo.
-    echo  Instalacao concluida!
-    echo.
 )
 
-npm start
-
+echo  Iniciando...
 echo.
-pause
+cmd /k node "%~dp0src\alterar-orcamento.js"
