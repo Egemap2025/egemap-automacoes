@@ -43,7 +43,7 @@ async function handleLogin(page) {
 
 async function abrirOrcamento(page, numero) {
   log('Abrindo lista de orçamentos…');
-  await page.goto(URL_LISTA, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(URL_LISTA, { waitUntil: 'commit', timeout: 60000 });
   await aguardar(page);
   log(`Filtrando por orçamento ${numero}…`);
 
@@ -293,7 +293,7 @@ async function substituirProjeto(page, itemIdx, dados) {
   // Volta para o orçamento se necessário
   if (!await page.locator('text=DADOS DO ORÇAMENTO').isVisible({ timeout: 3000 }).catch(() => false)) {
     log('Voltando para o orçamento…');
-    await page.goto(urlOrcamento, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(urlOrcamento, { waitUntil: 'commit', timeout: 60000 });
     await aguardar(page);
   }
 
@@ -443,7 +443,7 @@ async function main() {
   const page = await ctx.newPage();
 
   try {
-    await page.goto(URL_HOME, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(URL_HOME, { waitUntil: 'commit', timeout: 60000 });
     await handleLogin(page);
     await abrirOrcamento(page, numero);
 
