@@ -22,19 +22,34 @@ async function aguardar(page, timeout = 12000) {
 // ── Login ─────────────────────────────────────────────────────────────────────
 
 async function handleLogin(page) {
-  const pwd = page.locator('input[type="password"]');
-  if (!await pwd.isVisible({ timeout: 4000 }).catch(() => false)) {
-    log('Sessão ativa, continuando…'); return;
-  }
+  await page.waitForTimeout(2000); // aguarda possível redirecionamento para login
+  const isLoginPage = page.url().includes('login') ||
+    await page.locator('input[type="password"]').isVisible({ timeout: 5000 }).catch(() => false);
+
+  if (!isLoginPage) { log('Sessão ativa, continuando…'); return; }
+
   log('Tela de login detectada.');
-  const senha = process.env.WVETRO_SENHA;
-  if (senha) {
-    await pwd.fill(senha);
-    await page.keyboard.press('Enter');
+  const usuario = process.env.WVETRO_USUARIO;
+  const senha   = process.env.WVETRO_SENHA;
+  const licenca = process.env.WVETRO_LICENCA;
+
+  if (usuario && senha) {
+    const campoUsuario = page.locator('input[placeholder*="usuário"], input[placeholder*="usuario"], input[name*="user"], input[name*="login"]').first();
+    if (await campoUsuario.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await campoUsuario.fill(usuario);
+    }
+    await page.locator('input[type="password"]').first().fill(senha);
+    if (licenca) {
+      const campoLicenca = page.locator('input[placeholder*="licen"], input[name*="licen"]').first();
+      if (await campoLicenca.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await campoLicenca.fill(licenca);
+      }
+    }
+    await page.getByRole('button', { name: /entrar|login|acessar/i }).click({ timeout: 5000 });
     await aguardar(page);
     log('Login realizado.');
   } else {
-    console.log('\n⚠️  Faça login no Chrome que abriu.');
+    console.log('\n⚠️  Faça login no Chrome que abriu e pressione ENTER aqui.');
     await ask('Pressione ENTER depois de entrar no sistema… ');
   }
 }
@@ -453,7 +468,7 @@ async function coletarDados() {
   }
 
   const calc = (await ask('\nCalcular o orçamento ao finalizar? (s/n): ')).trim().toLowerCase();
-  rl.close();
+  // Não fecha rl aqui — ainda precisamos dele para inputs manuais durante a automação
   return { numero, alteracoes, calcular: calc === 's' };
 }
 
