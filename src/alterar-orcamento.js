@@ -7,7 +7,7 @@ require('dotenv').config();
 
 const URL_BASE  = 'https://sistema.wvetro.com.br';
 const URL_HOME  = `${URL_BASE}/concept/app.wvetro.home`;
-const URL_LISTA = `${URL_BASE}/concept/app.core.orcorcamento`;
+const URL_LISTA = `${URL_BASE}/concept/app.core.wworcamento`;
 
 // ── Utilitários ───────────────────────────────────────────────────────────────
 
@@ -62,69 +62,48 @@ async function handleLogin(page) {
 // ── Abrir orçamento pelo número ───────────────────────────────────────────────
 
 async function abrirOrcamento(page, numero) {
-  log('Procurando link de orçamentos no menu…');
-
-  // Tenta clicar no item de menu "Orçamento" na navegação lateral/topo
-  const linkMenu = page.getByRole('link', { name: /^orçamento|orcamento/i }).first();
-  if (await linkMenu.isVisible({ timeout: 4000 }).catch(() => false)) {
-    await linkMenu.click();
-    await aguardar(page);
-  } else {
-    // Fallback: pede para o usuário navegar manualmente
-    log('Link de orçamentos não encontrado no menu.');
-    console.log('\n⚠️  Abra a lista de orçamentos manualmente no Chrome.');
-    console.log('   (Menu → Orçamentos ou equivalente)');
-    await ask('   Pressione ENTER quando estiver na tela de lista de orçamentos… ');
-  }
+  log('Abrindo lista de orçamentos…');
+  await page.goto(URL_LISTA, { waitUntil: 'commit', timeout: 60000 });
+  await aguardar(page);
 
   log(`Filtrando por orçamento ${numero}…`);
 
-  // Encontra o select "Filtrar por" e seleciona "Nro Orçamento"
+  // Seleciona "Nro.Orçamento" no filtro
   const selects = page.locator('select');
   const qtd = await selects.count();
-  let valorInput = null;
   for (let i = 0; i < qtd; i++) {
     const sel = selects.nth(i);
     const opts = await sel.locator('option').allTextContents().catch(() => []);
-    const opt  = opts.find(o => /nro.or[çc]amento|nr.or[çc]amento|número/i.test(o));
-    if (opt) {
-      await sel.selectOption({ label: opt });
-      await page.waitForTimeout(400);
+    const opt  = opts.find(o => /nro.or[çc]amento|nr.or[çc]amento/i.test(o));
+    if (opt) { await sel.selectOption({ label: opt }); await page.waitForTimeout(400); break; }
+  }
+
+  // Preenche o valor e clica em Procurar
+  const inputs = page.locator('input[type="text"], input:not([type])');
+  const nInputs = await inputs.count();
+  for (let i = nInputs - 1; i >= 0; i--) {
+    const inp = inputs.nth(i);
+    if (await inp.isVisible({ timeout: 500 }).catch(() => false)) {
+      await inp.clear();
+      await inp.fill(numero);
       break;
     }
   }
 
-  // Preenche o campo de valor do filtro
-  valorInput = page.locator('input[type="text"]').last();
-  if (await valorInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await valorInput.fill(numero);
-  }
-
-  // Clica no botão de pesquisa ou pressiona Enter
-  let clicou = false;
-  for (const nome of [/procurar/i, /pesquisar/i, /buscar/i, /filtrar/i, /^ok$/i, /search/i]) {
-    const btn = page.getByRole('button', { name: nome });
-    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await btn.click();
-      clicou = true;
-      break;
-    }
-  }
-  if (!clicou) {
-    await valorInput.press('Enter').catch(() => {});
-  }
+  await page.getByRole('button', { name: /procurar/i }).click({ timeout: 5000 });
   await aguardar(page);
 
-  // Clica na linha do resultado
-  const linhaResult = page.locator('tr').filter({ hasText: numero }).first();
-  if (!await linhaResult.isVisible({ timeout: 8000 }).catch(() => false)) {
-    log('Linha do orçamento não encontrada — aguardando navegação manual…');
-    console.log(`\n⚠️  Não encontrei o orçamento ${numero} na lista.`);
-    await ask('   Clique no orçamento manualmente e pressione ENTER… ');
-  } else {
+  // Clica na linha do resultado (qualquer célula da linha com o número)
+  const linhaResult = page.locator('tbody tr').filter({ hasText: numero }).first();
+  if (await linhaResult.isVisible({ timeout: 8000 }).catch(() => false)) {
     await linhaResult.click();
     await aguardar(page);
+  } else {
+    log('Linha não encontrada — aguardando clique manual…');
+    console.log(`\n⚠️  Clique no orçamento ${numero} na lista e pressione ENTER.`);
+    await ask('   Pressione ENTER após clicar no orçamento… ');
   }
+  await page.waitForTimeout(2000);
   log(`Orçamento ${numero} aberto.`);
 }
 
