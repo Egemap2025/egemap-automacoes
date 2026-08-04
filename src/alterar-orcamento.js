@@ -5,516 +5,267 @@ const readline = require('readline');
 const path = require('path');
 require('dotenv').config();
 
-const URL_BASE  = 'https://sistema.wvetro.com.br';
-const URL_HOME  = `${URL_BASE}/concept/app.wvetro.home`;
-const URL_LISTA = `${URL_BASE}/concept/app.core.wworcamento`;
-
-// ── Utilitários ───────────────────────────────────────────────────────────────
-
 const rl  = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (p) => new Promise(r => rl.question(p, r));
-const log = (m) => console.log(`[${new Date().toLocaleTimeString('pt-BR')}] ${m}`);
-
-async function aguardar(page, timeout = 12000) {
-  try { await page.waitForLoadState('networkidle', { timeout }); } catch {}
-}
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 
-async function handleLogin(page) {
-  await page.waitForTimeout(2000); // aguarda possível redirecionamento para login
-  const isLoginPage = page.url().includes('login') ||
-    await page.locator('input[type="password"]').isVisible({ timeout: 5000 }).catch(() => false);
+async function fazerLogin(page) {
+  await page.waitForTimeout(3000);
+  const temLogin = page.url().includes('login') ||
+    await page.locator('input[type="password"]').isVisible({ timeout: 4000 }).catch(() => false);
+  if (!temLogin) return;
 
-  if (!isLoginPage) { log('Sessão ativa, continuando…'); return; }
-
-  log('Tela de login detectada.');
-
-  // Usa .env se existir, senão pergunta no terminal
   let usuario = process.env.WVETRO_USUARIO;
   let senha   = process.env.WVETRO_SENHA;
   let licenca = process.env.WVETRO_LICENCA;
 
   if (!usuario || !senha) {
-    console.log('\n── Login W-vetro ─────────────────');
-    if (!usuario) usuario = (await ask('  Usuário:  ')).trim();
-    if (!senha)   senha   = (await ask('  Senha:    ')).trim();
-    if (!licenca) licenca = (await ask('  Licença (número):  ')).trim();
-    console.log('──────────────────────────────────\n');
+    console.log('\n── Informe seu login do W-vetro ──');
+    if (!usuario) usuario = (await ask('  Usuário: ')).trim();
+    if (!senha)   senha   = (await ask('  Senha:   ')).trim();
+    if (!licenca) licenca = (await ask('  Licença: ')).trim();
+    console.log('─────────────────────────────────\n');
   }
 
-  const campoUsuario = page.locator('input[placeholder*="usuário"], input[placeholder*="usuario"], input[name*="user"], input[name*="login"]').first();
-  if (await campoUsuario.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await campoUsuario.fill(usuario);
-  }
+  const campoUsuario = page.locator('input').filter({ hasNot: page.locator('[type="password"]') }).first();
+  if (await campoUsuario.isVisible({ timeout: 2000 }).catch(() => false)) await campoUsuario.fill(usuario);
   await page.locator('input[type="password"]').first().fill(senha);
   if (licenca) {
-    const campoLicenca = page.locator('input[placeholder*="licen"], input[name*="licen"]').first();
-    if (await campoLicenca.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await campoLicenca.fill(licenca);
-    }
+    const campos = page.locator('input');
+    const n = await campos.count();
+    if (n >= 3) await campos.nth(2).fill(licenca);
   }
   await page.getByRole('button', { name: /entrar|login|acessar/i }).click({ timeout: 5000 });
-  await aguardar(page);
-  log('Login realizado.');
-}
-
-// ── Abrir orçamento pelo número ───────────────────────────────────────────────
-
-async function abrirOrcamento(page, numero) {
-  log('Abrindo lista de orçamentos…');
-  await page.goto(URL_LISTA, { waitUntil: 'commit', timeout: 60000 });
-  await aguardar(page);
-
-  log(`Filtrando por orçamento ${numero}…`);
-
-  // Seleciona "Nro.Orçamento" no filtro
-  const selects = page.locator('select');
-  const qtd = await selects.count();
-  for (let i = 0; i < qtd; i++) {
-    const sel = selects.nth(i);
-    const opts = await sel.locator('option').allTextContents().catch(() => []);
-    const opt  = opts.find(o => /nro.or[çc]amento|nr.or[çc]amento/i.test(o));
-    if (opt) { await sel.selectOption({ label: opt }); await page.waitForTimeout(400); break; }
-  }
-
-  // Preenche o valor e clica em Procurar
-  const inputs = page.locator('input[type="text"], input:not([type])');
-  const nInputs = await inputs.count();
-  for (let i = nInputs - 1; i >= 0; i--) {
-    const inp = inputs.nth(i);
-    if (await inp.isVisible({ timeout: 500 }).catch(() => false)) {
-      await inp.clear();
-      await inp.fill(numero);
-      break;
-    }
-  }
-
-  await page.getByRole('button', { name: /procurar/i }).click({ timeout: 5000 });
-  await aguardar(page);
-
-  // Clica na linha do resultado (qualquer célula da linha com o número)
-  const linhaResult = page.locator('tbody tr').filter({ hasText: numero }).first();
-  if (await linhaResult.isVisible({ timeout: 8000 }).catch(() => false)) {
-    await linhaResult.click();
-    await aguardar(page);
-  } else {
-    log('Linha não encontrada — aguardando clique manual…');
-    console.log(`\n⚠️  Clique no orçamento ${numero} na lista e pressione ENTER.`);
-    await ask('   Pressione ENTER após clicar no orçamento… ');
-  }
-  await page.waitForTimeout(2000);
-  log(`Orçamento ${numero} aberto.`);
-}
-
-// ── Botão de ações (ícone de lista, 3ª coluna de cada linha) ─────────────────
-
-async function abrirMenuDoItem(page, itemIdx) {
-  // Aguarda a tabela de itens carregar completamente
-  await page.waitForSelector('tbody tr', { timeout: 15000 });
-  await page.waitForTimeout(1000);
-
-  const linhas = page.locator('tbody tr');
-  const total  = await linhas.count();
-  if (total <= itemIdx) {
-    throw new Error(`Item ${itemIdx + 1} não encontrado (tabela tem ${total} item(ns)).`);
-  }
-
-  const linha = linhas.nth(itemIdx);
-  await linha.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(500);
-
-  // Tenta encontrar o botão de ação em várias posições/tipos
-  const seletores = [
-    'td:nth-child(3) button',
-    'td:nth-child(3) [role="button"]',
-    'td:nth-child(3) a',
-    'td:nth-child(3) img',
-    'td:nth-child(3) span',
-    'td:nth-child(3) i',
-    'td:nth-child(2) button',
-    'td:nth-child(2) [role="button"]',
-    'td:nth-child(2) a',
-    'button',
-    'a[href*="editar"], a[href*="menu"], a[href*="opcao"]',
-  ];
-
-  for (const sel of seletores) {
-    const el = linha.locator(sel).first();
-    if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
-      await el.click();
-      await page.waitForTimeout(800);
-      // Verifica se algum menu ou modal abriu
-      const menuAbriu = await page.locator('[role="menu"], ul.dropdown-menu, .mat-menu-panel, .dropdown-menu').first()
-        .isVisible({ timeout: 1500 }).catch(() => false);
-      const textoMenu = await page.getByText(/editar item|substituir projeto/i).first()
-        .isVisible({ timeout: 1500 }).catch(() => false);
-      if (menuAbriu || textoMenu) return;
-    }
-  }
-
-  // Último recurso: pede ao usuário para clicar manualmente
-  log(`⚠️  Não encontrei o botão de ações do item ${itemIdx + 1}.`);
-  console.log('   Clique no ícone de ações do item no Chrome e pressione ENTER.');
-  await ask('   Pressione ENTER após abrir o menu do item… ');
-}
-
-// ── EDITAR ITEM DO ORÇ. (modal "Altera Medida da Esquadria") ─────────────────
-
-async function editarItem(page, itemIdx, campos) {
-  log(`Editando item ${itemIdx + 1}…`);
-  await abrirMenuDoItem(page, itemIdx);
-
-  await page.getByText(/editar item do orç/i).first().click({ timeout: 5000 });
-  await page.waitForSelector('text=/altera medida da esquadria/i', { timeout: 10000 });
-  await page.waitForTimeout(400);
-  log('Modal aberto.');
-
-  // VIDRO COR
-  if (campos.vidro) {
-    log(`  → VIDRO COR: ${campos.vidro}`);
-    const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
-    if (sel) {
-      await sel.selectOption({ label: new RegExp(campos.vidro, 'i') });
-    } else {
-      log('  ⚠️  Campo VIDRO COR não encontrado. Preencha manualmente.');
-      await ask('  Pressione ENTER após preencher… ');
-    }
-  }
-
-  // ALUMÍNIO/PERFIL  (janelas alumínio) ou  FOLHA TÊMPERA (portas madeira)
-  if (campos.cor) {
-    log(`  → COR/PERFIL: ${campos.cor}`);
-    const sel = await selectPorLabel(page,
-      'ALUMÍNIO/PERFIL', 'ALUMINIO/PERFIL', 'COR ALUMÍNIO | PERFIL',
-      'FOLHA TÊMPERA', 'FOLHA TEMPERA');
-    if (sel) {
-      await sel.selectOption({ label: new RegExp(campos.cor, 'i') });
-    } else {
-      log('  ⚠️  Campo de cor/perfil não encontrado. Preencha manualmente.');
-      await ask('  Pressione ENTER após preencher… ');
-    }
-  }
-
-  // FERRAGENS/ACESSÓRIOS
-  if (campos.ferragens) {
-    log(`  → FERRAGENS: ${campos.ferragens}`);
-    const sel = await selectPorLabel(page, 'FERRAGENS/ACESSÓRIOS', 'FERRAGENS');
-    if (sel) await sel.selectOption({ label: new RegExp(campos.ferragens, 'i') });
-  }
-
-  await clicarSalvar(page);
-  log(`✓ Item ${itemIdx + 1} editado e salvo.`);
-}
-
-// ── SUBSTITUIR PROJETO (fluxo em nova página) ─────────────────────────────────
-//
-// Fluxo completo:
-//   menu → "Substituir Projeto"
-//   → página /selecioneprojeto   (escolhe LINHA + MODELO + clica Pesquisar)
-//   → página /confirmadosprojeto (preenche VIDRO + clica "Incluir item no orçamento")
-//   → modal "Informe as variáveis" (configura ACIONAMENTO DA ESTEIRA se necessário + CONFIRMAR)
-//   → botão "Calcular o Orçamento" → fecha avisos → volta para DADOS DO ORÇAMENTO
-
-async function substituirProjeto(page, itemIdx, dados) {
-  const urlOrcamento = page.url(); // guarda para poder voltar
-  log(`Substituindo projeto do item ${itemIdx + 1}…`);
-
-  await abrirMenuDoItem(page, itemIdx);
-
-  // "Substituir Projeto" fica no final do menu — Playwright rola e clica
-  await page.getByText(/substituir projeto/i).first().click({ timeout: 6000 });
-
-  // ── Página: ESCOLHA O DESENHO | PROJETO ──────────────────────────────────
-  await page.waitForURL(/selecioneprojeto/i, { timeout: 15000 });
-  await aguardar(page);
-  log('Página de seleção de projeto aberta.');
-
-  if (dados.linha) {
-    log(`  → LINHA: ${dados.linha}`);
-    const sel = await selectPorLabel(page, 'LINHA');
-    if (sel) {
-      await sel.selectOption({ label: new RegExp(dados.linha, 'i') });
-      await page.waitForTimeout(600); // MODELO precisa atualizar após trocar LINHA
-    } else {
-      log('  ⚠️  Campo LINHA não encontrado. Selecione manualmente.');
-      await ask('  Pressione ENTER após selecionar a linha… ');
-    }
-  }
-
-  if (dados.modelo) {
-    log(`  → MODELO: ${dados.modelo}`);
-    const sel = await selectPorLabel(page, 'MODELO');
-    if (sel) {
-      await sel.selectOption({ label: new RegExp(dados.modelo, 'i') });
-    } else {
-      log('  ⚠️  Campo MODELO não encontrado. Selecione manualmente.');
-      await ask('  Pressione ENTER após selecionar o modelo… ');
-    }
-  }
-
-  await page.getByRole('button', { name: /pesquisar/i }).click({ timeout: 5000 });
-  await aguardar(page);
-
-  // Se aparecer lista de resultados, clica no primeiro
-  if (!await page.locator('text=DADOS DO PROJETO PARA O ORÇAMENTO').isVisible({ timeout: 3000 }).catch(() => false)) {
-    const primeiro = page.locator('tbody tr').first();
-    if (await primeiro.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await primeiro.click();
-      await aguardar(page);
-    }
-  }
-
-  // ── Página: DADOS DO PROJETO PARA O ORÇAMENTO ────────────────────────────
-  await page.waitForSelector('text=DADOS DO PROJETO PARA O ORÇAMENTO', { timeout: 15000 });
-  log('Página de detalhes do projeto aberta.');
-
-  // VIDRO (obrigatório — começa como "Selecione uma Cor")
-  if (dados.vidro) {
-    log(`  → VIDRO: ${dados.vidro}`);
-    const sel = await selectPorLabel(page, 'VIDRO');
-    if (sel) {
-      await sel.selectOption({ label: new RegExp(dados.vidro, 'i') });
-    } else {
-      log('  ⚠️  Campo VIDRO não encontrado. Selecione manualmente!');
-      await ask('  Pressione ENTER após selecionar o vidro… ');
-    }
-  } else {
-    log('  ⚠️  VIDRO não informado — selecione manualmente!');
-    await ask('  Selecione o VIDRO no navegador e pressione ENTER… ');
-  }
-
-  // COR ALUMÍNIO | PERFIL (opcional)
-  if (dados.cor) {
-    log(`  → COR ALUMÍNIO | PERFIL: ${dados.cor}`);
-    const sel = await selectPorLabel(page, 'COR ALUMÍNIO | PERFIL', 'COR ALUMÍNIO', 'ALUMÍNIO/PERFIL');
-    if (sel) await sel.selectOption({ label: new RegExp(dados.cor, 'i') });
-  }
-
-  // Incluir item no orçamento
-  await page.getByRole('button', { name: /incluir item no orçamento/i }).click({ timeout: 8000 });
-
-  // ── Modal: Informe as variáveis ───────────────────────────────────────────
-  const temVariaveis = await page
-    .waitForSelector('text=Informe as variáveis', { timeout: 8000 })
-    .then(() => true).catch(() => false);
-
-  if (temVariaveis) {
-    log('Modal de variáveis aberto.');
-
-    // AE — ACIONAMENTO DA ESTEIRA (persiana: RECOLHEDOR FITA ou MOTOR)
-    if (dados.persiana) {
-      log(`  → ACIONAMENTO DA ESTEIRA: ${dados.persiana}`);
-      const aeRow = page.locator('tr').filter({ hasText: /ACIONAMENTO DA ESTEIRA/i }).first();
-      if (await aeRow.isVisible({ timeout: 2000 }).catch(() => false)) {
-        const aeSel = aeRow.locator('select').first();
-        if (await aeSel.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await aeSel.selectOption({ label: new RegExp(dados.persiana, 'i') });
-        }
-      } else {
-        log('  ⚠️  Variável AE não encontrada no modal. Configure manualmente.');
-        await ask('  Pressione ENTER após configurar… ');
-      }
-    }
-
-    await page.getByRole('button', { name: /confirmar/i }).click({ timeout: 5000 });
-    await page.waitForTimeout(1500);
-  }
-
-  // "Calcular o Orçamento" aparece após confirmar as variáveis
-  const calcBtn = page.getByRole('button', { name: /calcular o orçamento/i });
-  if (await calcBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-    log('Calculando orçamento…');
-    await calcBtn.click();
-    await aguardar(page);
-  }
-
-  // Fecha qualquer aviso (ex: "itens sem valor de venda")
-  for (const nome of [/fechar/i, /^ok$/i]) {
-    const btn = page.getByRole('button', { name: nome });
-    if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await btn.click();
-      await aguardar(page);
-      break;
-    }
-  }
-
-  // Volta para o orçamento se necessário
-  if (!await page.locator('text=DADOS DO ORÇAMENTO').isVisible({ timeout: 3000 }).catch(() => false)) {
-    log('Voltando para o orçamento…');
-    await page.goto(urlOrcamento, { waitUntil: 'commit', timeout: 60000 });
-    await aguardar(page);
-  }
-
-  log(`✓ Projeto substituído com sucesso.`);
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  console.log('  → Login realizado!\n');
 }
 
 // ── Encontra <select> pelo texto do label ─────────────────────────────────────
-// Tenta: getByLabel → linha da tabela (<tr>) → célula adjacente (<td> + <td>)
 
 async function selectPorLabel(page, ...labels) {
   for (const label of labels) {
     const re = new RegExp(label.replace(/[|/]/g, '.'), 'i');
-
-    // 1. getByLabel (label com atributo for="id")
     const byLabel = page.getByLabel(re);
     if (await byLabel.isVisible({ timeout: 500 }).catch(() => false)) return byLabel;
-
-    // 2. Linha da tabela contendo o texto → primeiro select da linha
     const row = page.locator('tr').filter({ hasText: re }).first();
     if (await row.isVisible({ timeout: 500 }).catch(() => false)) {
       const sel = row.locator('select').first();
       if (await sel.isVisible({ timeout: 500 }).catch(() => false)) return sel;
     }
-
-    // 3. <td> com o texto → próximo <td> com select
     const tdSel = page.locator(`td:has-text("${label}") + td select`).first();
     if (await tdSel.isVisible({ timeout: 500 }).catch(() => false)) return tdSel;
   }
   return null;
 }
 
-// ── Salvar / Confirmar ────────────────────────────────────────────────────────
+async function escolherOpcao(sel, valor) {
+  if (!sel || !valor) return false;
+  const re = new RegExp(valor, 'i');
+  const opts = await sel.locator('option').allTextContents().catch(() => []);
+  const match = opts.find(o => re.test(o));
+  if (match) { await sel.selectOption({ label: match }); return true; }
+  console.log(`  ⚠  "${valor}" não encontrado nas opções. Opções disponíveis:`);
+  opts.forEach((o, i) => console.log(`     ${i + 1}. ${o}`));
+  await ask('  Escolha manualmente e pressione ENTER… ');
+  return false;
+}
 
-async function clicarSalvar(page) {
-  for (const nome of [/^salvar$/i, /^confirmar$/i, /^aplicar$/i, /^gravar$/i, /^ok$/i]) {
+// ── EDITAR ITEM ───────────────────────────────────────────────────────────────
+
+async function editarItem(page, campos) {
+  // Aguarda o modal abrir (o usuário já clicou em "Editar Item do Orç.")
+  console.log('  Aguardando modal abrir…');
+  await page.waitForSelector('select', { timeout: 15000 });
+  await page.waitForTimeout(800);
+  console.log('  → Modal aberto!\n');
+
+  if (campos.vidro) {
+    const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
+    if (sel) await escolherOpcao(sel, campos.vidro);
+    else { console.log('  ⚠  Campo VIDRO não encontrado — preencha manualmente.'); await ask('  ENTER após preencher… '); }
+  }
+
+  if (campos.cor) {
+    const sel = await selectPorLabel(page, 'ALUMÍNIO/PERFIL', 'ALUMINIO/PERFIL', 'COR ALUMÍNIO | PERFIL', 'FOLHA TÊMPERA', 'FOLHA TEMPERA');
+    if (sel) await escolherOpcao(sel, campos.cor);
+    else { console.log('  ⚠  Campo COR/PERFIL não encontrado — preencha manualmente.'); await ask('  ENTER após preencher… '); }
+  }
+
+  if (campos.ferragens) {
+    const sel = await selectPorLabel(page, 'FERRAGENS/ACESSÓRIOS', 'FERRAGENS');
+    if (sel) await escolherOpcao(sel, campos.ferragens);
+  }
+
+  // Clica em Salvar/Confirmar
+  for (const nome of [/^salvar$/i, /^confirmar$/i, /^gravar$/i, /^ok$/i, /^aplicar$/i]) {
     const btn = page.getByRole('button', { name: nome });
-    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await btn.click();
-      await aguardar(page);
-      return;
-    }
+    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) { await btn.click(); break; }
   }
-  throw new Error('Botão Salvar/Confirmar não encontrado no modal.');
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  console.log('  ✓ Item salvo!\n');
 }
 
-// ── Calcular orçamento (botão "Calcular" na página do orçamento) ──────────────
+// ── SUBSTITUIR PROJETO ────────────────────────────────────────────────────────
 
-async function calcularOrcamento(page) {
-  log('Calculando orçamento…');
-  const btn = page.getByRole('button', { name: /^calcular$/i });
-  if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await btn.click();
-    await aguardar(page);
-    for (const nome of [/fechar/i, /^ok$/i]) {
-      const b = page.getByRole('button', { name: nome });
-      if (await b.isVisible({ timeout: 3000 }).catch(() => false)) { await b.click(); break; }
-    }
-    log('✓ Orçamento calculado.');
+async function substituirProjeto(page, dados) {
+  // Aguarda a página de seleção de projeto (o usuário já clicou em "Substituir Projeto")
+  console.log('  Aguardando página de seleção de projeto…');
+  await page.waitForURL(/selecioneprojeto/i, { timeout: 20000 });
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  console.log('  → Página aberta!\n');
+
+  if (dados.linha) {
+    const sel = await selectPorLabel(page, 'LINHA');
+    if (sel) { await escolherOpcao(sel, dados.linha); await page.waitForTimeout(800); }
+    else { console.log('  ⚠  Campo LINHA não encontrado.'); await ask('  Selecione manualmente e pressione ENTER… '); }
+  }
+
+  if (dados.modelo) {
+    const sel = await selectPorLabel(page, 'MODELO');
+    if (sel) await escolherOpcao(sel, dados.modelo);
+    else { console.log('  ⚠  Campo MODELO não encontrado.'); await ask('  Selecione manualmente e pressione ENTER… '); }
+  }
+
+  await page.getByRole('button', { name: /pesquisar/i }).click({ timeout: 5000 });
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+
+  // Se aparecer lista de resultados clica no primeiro
+  const tabela = page.locator('tbody tr').first();
+  if (await tabela.isVisible({ timeout: 3000 }).catch(() => false) &&
+      !await page.getByText(/DADOS DO PROJETO/i).isVisible({ timeout: 1000 }).catch(() => false)) {
+    await tabela.click();
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  }
+
+  // Página de detalhes
+  await page.waitForSelector('select', { timeout: 15000 });
+  console.log('  → Página de detalhes do projeto!\n');
+
+  if (dados.vidro) {
+    const sel = await selectPorLabel(page, 'VIDRO');
+    if (sel) await escolherOpcao(sel, dados.vidro);
+    else { console.log('  ⚠  Campo VIDRO não encontrado — selecione manualmente!'); await ask('  ENTER após selecionar… '); }
   } else {
-    log('Botão "Calcular" não encontrado — calcule manualmente se necessário.');
+    await ask('  Selecione o VIDRO manualmente e pressione ENTER… ');
   }
-}
 
-// ── Coleta de dados via terminal ──────────────────────────────────────────────
+  if (dados.cor) {
+    const sel = await selectPorLabel(page, 'COR ALUMÍNIO | PERFIL', 'ALUMÍNIO/PERFIL', 'COR ALUMÍNIO');
+    if (sel) await escolherOpcao(sel, dados.cor);
+  }
 
-async function coletarDados() {
-  console.log('\n╔══════════════════════════════════════════════════════════════╗');
-  console.log('║       Automação W-vetro — Alteração de Orçamentos           ║');
-  console.log('╚══════════════════════════════════════════════════════════════╝\n');
+  await page.getByRole('button', { name: /incluir item no orçamento/i }).click({ timeout: 8000 });
+  await page.waitForTimeout(2000);
 
-  const numero = (await ask('Número do orçamento: ')).trim();
-  const alteracoes = [];
-  let continuar = true;
-
-  while (continuar) {
-    console.log('\n┌─ Tipo de alteração ──────────────────────────────────────────────┐');
-    console.log('│  1  Substituir projeto  (nova linha/modelo — abre outra página)   │');
-    console.log('│  2  Editar item         (vidro, cor, ferragens — no mesmo modal)  │');
-    console.log('└──────────────────────────────────────────────────────────────────┘');
-    const tipo = (await ask('Tipo (1 ou 2): ')).trim();
-
-    const itemRaw = (await ask('Número do item no orçamento (1, 2, 3…): ')).trim();
-    const itemIdx = parseInt(itemRaw, 10) - 1;
-    if (isNaN(itemIdx) || itemIdx < 0) { console.log('Número inválido.\n'); continue; }
-
-    if (tipo === '1') {
-      // ── SUBSTITUIR PROJETO ──────────────────────────────────────────────
-      console.log('\n  ── Filtros: página "Escolha o Desenho | Projeto" ──');
-      const linha  = (await ask('  LINHA  (ex: PERFISUD | VERSATIC 25 - QUADRADA): ')).trim();
-      const modelo = (await ask('  MODELO (ex: JANELA DE CORRER 02 FOLHAS): ')).trim();
-
-      console.log('\n  ── Página de detalhes do projeto ──');
-      console.log('  Exemplos: INCOLOR 06MM - TEMPERADO  |  LAMINADO INCOLOR 3+3 - LAPIDADO');
-      const vidro = (await ask('  VIDRO  (obrigatório): ')).trim();
-      const cor   = (await ask('  COR ALUMÍNIO | PERFIL  (Enter = manter atual): ')).trim();
-
-      console.log('\n  ── Modal "Informe as variáveis" — persiana ──');
-      console.log('  Opções: RECOLHEDOR FITA  |  MOTOR  (deixe em branco se não tiver persiana)');
-      const persiana = (await ask('  ACIONAMENTO DA ESTEIRA (Enter = manter padrão): ')).trim();
-
-      alteracoes.push({
-        tipo: 'substituir', itemIdx,
-        dados: { linha, modelo, vidro, cor: cor || null, persiana: persiana || null }
-      });
-
-    } else {
-      // ── EDITAR ITEM ──────────────────────────────────────────────────────
-      const campos = {};
-
-      console.log('\n  Exemplos vidro    : INCOLOR 06MM - TEMPERADO, LAMINADO INCOLOR 3+3 - LAPIDADO');
-      const v = (await ask('  VIDRO COR          (Enter = não alterar): ')).trim();
-      if (v) campos.vidro = v;
-
-      console.log('  Exemplos cor/perf : PINTURA PRETO, BRANCO, NATURAL, PINTURA BRANCO BRILHANTE');
-      const c = (await ask('  ALUMÍNIO / PERFIL  (Enter = não alterar): ')).trim();
-      if (c) campos.cor = c;
-
-      const f = (await ask('  FERRAGENS          (Enter = não alterar): ')).trim();
-      if (f) campos.ferragens = f;
-
-      if (!Object.keys(campos).length) { console.log('Nenhum campo informado.\n'); continue; }
-      alteracoes.push({ tipo: 'editar', itemIdx, campos });
+  // Modal de variáveis (persiana)
+  const temModal = await page.getByText(/informe as variáveis/i).isVisible({ timeout: 4000 }).catch(() => false);
+  if (temModal) {
+    console.log('  → Modal de variáveis aberto.');
+    if (dados.persiana) {
+      const row = page.locator('tr').filter({ hasText: /ACIONAMENTO DA ESTEIRA/i }).first();
+      if (await row.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await escolherOpcao(row.locator('select').first(), dados.persiana);
+      } else { await ask('  Configure o ACIONAMENTO manualmente e pressione ENTER… '); }
     }
-
-    const mais = (await ask('\nOutra alteração neste orçamento? (s/n): ')).trim().toLowerCase();
-    continuar = mais === 's';
+    await page.getByRole('button', { name: /confirmar/i }).click({ timeout: 5000 });
+    await page.waitForTimeout(2000);
   }
 
-  const calc = (await ask('\nCalcular o orçamento ao finalizar? (s/n): ')).trim().toLowerCase();
-  // Não fecha rl aqui — ainda precisamos dele para inputs manuais durante a automação
-  return { numero, alteracoes, calcular: calc === 's' };
+  // Calcular
+  const btnCalc = page.getByRole('button', { name: /calcular o orçamento/i });
+  if (await btnCalc.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await btnCalc.click();
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  }
+
+  // Fecha avisos
+  for (const nome of [/fechar/i, /^ok$/i]) {
+    const btn = page.getByRole('button', { name: nome });
+    if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) { await btn.click(); break; }
+  }
+
+  console.log('  ✓ Projeto substituído!\n');
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { numero, alteracoes, calcular } = await coletarDados();
-  if (!alteracoes.length) { console.log('\nNenhuma alteração informada. Encerrando.'); return; }
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║   W-vetro — Editor de Orçamentos            ║');
+  console.log('╚══════════════════════════════════════════════╝\n');
 
-  log(`\nAbrindo Chrome… (${alteracoes.length} alteração(ões) para orçamento ${numero})`);
+  // Coleta as alterações desejadas
+  const alteracoes = [];
+  let continuar = true;
 
-  const browser = await chromium
-    .launch({ headless: false, channel: 'chrome', args: ['--start-maximized'] })
-    .catch(() => chromium.launch({ headless: false, args: ['--start-maximized'] }));
+  while (continuar) {
+    console.log('Tipo de alteração:');
+    console.log('  1 - Substituir projeto  (nova linha/modelo)');
+    console.log('  2 - Editar item         (vidro, cor, ferragens)');
+    const tipo = (await ask('Escolha [1 ou 2]: ')).trim();
 
-  const ctx  = await browser.newContext({ viewport: null });
-  const page = await ctx.newPage();
+    const itemNum = parseInt((await ask('Número do item no orçamento (1, 2, 3…): ')).trim(), 10);
 
-  try {
-    await page.goto(URL_HOME, { waitUntil: 'commit', timeout: 60000 });
-    await handleLogin(page);
-    await abrirOrcamento(page, numero);
+    let dados = { tipo, itemIdx: itemNum - 1 };
 
-    for (const alt of alteracoes) {
-      if (alt.tipo === 'substituir') {
-        await substituirProjeto(page, alt.itemIdx, alt.dados);
-      } else {
-        await editarItem(page, alt.itemIdx, alt.campos);
-      }
+    if (tipo === '1') {
+      dados.linha    = (await ask('LINHA    (ex: PERFISUD): ')).trim();
+      dados.modelo   = (await ask('MODELO   (ex: JANELA DE CORRER 02 FOLHAS): ')).trim();
+      dados.vidro    = (await ask('VIDRO    (ex: INCOLOR 06MM - TEMPERADO): ')).trim();
+      const cor = (await ask('COR ALUMÍNIO / PERFIL  (Enter para pular): ')).trim();
+      if (cor) dados.cor = cor;
+      const per = (await ask('ACIONAMENTO PERSIANA  (RECOLHEDOR FITA / MOTOR / Enter para pular): ')).trim();
+      if (per) dados.persiana = per;
+    } else {
+      const vidro = (await ask('VIDRO COR          (Enter para não alterar): ')).trim();
+      if (vidro) dados.vidro = vidro;
+      const cor = (await ask('ALUMÍNIO / PERFIL  (Enter para não alterar): ')).trim();
+      if (cor) dados.cor = cor;
+      const ferr = (await ask('FERRAGENS          (Enter para não alterar): ')).trim();
+      if (ferr) dados.ferragens = ferr;
     }
 
-    if (calcular) await calcularOrcamento(page);
-
-    console.log('\n✅  Todas as alterações concluídas!');
-    console.log('   Navegador aberto para revisão.\n');
-
-  } catch (err) {
-    console.error('\n❌  Erro:', err.message);
-    const ss = path.join(process.cwd(), 'erro-wvetro.png');
-    await page.screenshot({ path: ss, fullPage: true }).catch(() => {});
-    console.log(`   Screenshot salvo: ${ss}\n`);
+    alteracoes.push(dados);
+    continuar = (await ask('\nAdicionar outra alteração? [s/n]: ')).trim().toLowerCase() === 's';
   }
+
+  // Abre o Chrome
+  console.log('\nAbrindo Chrome…');
+  const browser = await chromium.launch({ channel: 'chrome', headless: false })
+    .catch(() => chromium.launch({ headless: false }));
+  const page = await browser.newContext({ viewport: null }).then(c => c.newPage());
+
+  await page.goto('https://sistema.wvetro.com.br/concept/app.wvetro.home', { waitUntil: 'commit', timeout: 60000 });
+  await fazerLogin(page);
+
+  // Pede ao usuário para navegar ao orçamento
+  console.log('═══════════════════════════════════════════════');
+  console.log('  No Chrome, abra o orçamento normalmente.');
+  console.log('  (Vendas → Vendas/Orçamentos → Procurar → clique no orçamento)');
+  console.log('═══════════════════════════════════════════════');
+  await ask('  Pressione ENTER quando o orçamento estiver aberto… ');
+  await page.waitForTimeout(1000);
+
+  // Executa as alterações
+  for (const alt of alteracoes) {
+    console.log(`\n── Item ${alt.itemIdx + 1} ──────────────────────────────────`);
+    if (alt.tipo === '1') {
+      console.log(`  No Chrome, clique nos 3 pontos do item ${alt.itemIdx + 1} e escolha "Substituir Projeto".`);
+      await ask('  Pressione ENTER depois de clicar em "Substituir Projeto"… ');
+      await substituirProjeto(page, alt);
+    } else {
+      console.log(`  No Chrome, clique nos 3 pontos do item ${alt.itemIdx + 1} e escolha "Editar Item do Orç.".`);
+      await ask('  Pressione ENTER depois de clicar em "Editar Item do Orç."… ');
+      await editarItem(page, alt);
+    }
+  }
+
+  rl.close();
+  console.log('✅  Concluído! Chrome fica aberto para revisão.\n');
 }
 
-main().catch(console.error);
+main().catch(err => {
+  console.error('\n❌  Erro:', err.message);
+  rl.close();
+});
