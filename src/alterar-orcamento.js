@@ -87,13 +87,12 @@ async function abrirOrcamento(page, numero) {
   }
   await esperar(page, 2000);
 
-  // Encontra a linha do resultado e clica no link do cliente para abrir o orçamento
+  // Encontra a linha e clica no link do cliente (nome azul) para abrir o orçamento
   const linha = page.locator('tbody tr').filter({ hasText: numero }).first();
   if (!await linha.isVisible({ timeout: 8000 }).catch(() => false)) {
     throw new Error(`Orçamento ${numero} não encontrado na lista.`);
   }
 
-  // Clica no link do cliente (âncora azul) para navegar ao detalhe
   const link = linha.locator('a').first();
   if (await link.isVisible({ timeout: 2000 }).catch(() => false)) {
     await link.click();
@@ -106,11 +105,26 @@ async function abrirOrcamento(page, numero) {
   console.log(`  → Orçamento ${numero} aberto!`);
 }
 
-// ── Selecionar ação no Bootstrap Select da linha ──────────────────────────────
+// ── Clicar no botão ≡ e escolher ação no menu dropdown ───────────────────────
 //
-// O W-vetro usa um <select> estilizado com Bootstrap Select em cada linha.
-// Estrutura do dropdown aberto:
-//   ul.dropdown-menu.inner > li > a[role="option"] > i.fa + span.text
+// Estrutura confirmada da linha de item (página detalheorcamento):
+//   td[1]: botão ">"  (expandir a linha)
+//   td[2]: checkbox □
+//   td[3]: botão "≡"  ← abre o menu de ações (aparece ao hover)
+//   td[4]: número de ordem
+//   td[5]: nome do projeto
+//   ...
+//
+// Menu dropdown (HTML comum, não Bootstrap Select):
+//   - Alterar Foto
+//   - Editar Item do Orç.
+//   - Excluir
+//   - Duplicar o Projeto
+//   - Editar Variáveis
+//   - Custo Projeto
+//   - Editar Tipologia
+//   - Alterar Valor
+//   - Substituir Projeto
 
 async function selecionarAcao(page, itemIdx, textoAcao) {
   await page.waitForSelector('tbody tr', { timeout: 15000 });
@@ -122,54 +136,52 @@ async function selecionarAcao(page, itemIdx, textoAcao) {
 
   const linha = linhas.nth(itemIdx);
   await linha.scrollIntoViewIfNeeded();
+
+  // Hover para revelar o botão ≡ (aparece só quando o mouse está sobre a linha)
   await linha.hover();
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(1000);   // aguarda transição CSS
 
-  // ── Tentativa 1: Bootstrap Select — clica no botão .dropdown-toggle da linha
-  const bsTrigger = linha.locator(
-    '.dropdown-toggle, button.selectpicker, .bootstrap-select button, button[data-toggle="dropdown"]'
-  ).first();
+  // Clica no botão ≡ — está na 3ª célula da linha
+  // Tenta vários seletores do mais específico ao mais genérico
+  let clicou = false;
+  for (const sel of [
+    'td:nth-child(3) button',
+    'td:nth-child(3) a',
+    'td:nth-child(3) [role="button"]',
+    'td:nth-child(3) i',
+    'td:nth-child(3) span',
+    'td:nth-child(3)',
+    'td:nth-child(1) button',
+    'td:nth-child(1) i',
+    'button',
+    'i[class*="bars"], i[class*="list"], i[class*="menu"]',
+  ]) {
+    const el = linha.locator(sel).first();
+    if (await el.isVisible({ timeout: 600 }).catch(() => false)) {
+      await el.click();
+      await page.waitForTimeout(800);
 
-  if (await bsTrigger.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await bsTrigger.click();
-    await page.waitForTimeout(600);
-  } else {
-    // ── Tentativa 2: outros elementos clicáveis na 1ª–3ª célula
-    for (const sel of [
-      'td:nth-child(3) button, td:nth-child(3) [role="button"], td:nth-child(3) i, td:nth-child(3) span, td:nth-child(3)',
-      'td:nth-child(1) button, td:nth-child(1) [role="button"], td:nth-child(1) i',
-      'td:nth-child(2) button, td:nth-child(2) [role="button"]',
-      'button, [role="button"]',
-    ]) {
-      const el = linha.locator(sel).first();
-      if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
-        await el.click();
-        await page.waitForTimeout(600);
-        break;
-      }
+      // Verifica se o menu abriu (qualquer opção do menu está visível)
+      const menuAbriu = await page.getByText(/editar item|substituir projeto|alterar foto|duplicar/i)
+        .isVisible({ timeout: 1500 }).catch(() => false);
+      if (menuAbriu) { clicou = true; break; }
     }
   }
 
-  // ── Clica na opção desejada no dropdown (Bootstrap Select ou menu comum)
-  const reAcao = new RegExp(textoAcao, 'i');
+  if (!clicou) {
+    throw new Error(`Não consegui abrir o menu do item ${itemIdx + 1}. Me mande um print da tela para eu ajustar.`);
+  }
 
-  // Opção dentro do Bootstrap Select (ul.dropdown-menu.inner)
-  const bsOpcao = page.locator('ul.dropdown-menu.inner li').filter({ hasText: reAcao }).first();
-  if (await bsOpcao.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await bsOpcao.click();
+  // Clica na opção desejada no dropdown
+  const reAcao = new RegExp(textoAcao.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const opcao = page.getByText(reAcao).first();
+  if (await opcao.isVisible({ timeout: 4000 }).catch(() => false)) {
+    await opcao.click();
     await page.waitForTimeout(500);
     return;
   }
 
-  // Fallback: texto direto na página (dropdown comum / link / botão)
-  const textoEl = page.getByText(reAcao).first();
-  if (await textoEl.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await textoEl.click();
-    await page.waitForTimeout(500);
-    return;
-  }
-
-  throw new Error(`Ação "${textoAcao}" não encontrada no menu do item ${itemIdx + 1}.`);
+  throw new Error(`Opção "${textoAcao}" não apareceu no menu do item ${itemIdx + 1}.`);
 }
 
 // ── Encontra <select> pelo label ──────────────────────────────────────────────
@@ -178,27 +190,27 @@ async function selectPorLabel(page, ...labels) {
   for (const label of labels) {
     const re = new RegExp(label.replace(/[|/]/g, '.'), 'i');
 
-    // 1. getByLabel (Playwright associa label→input/select automaticamente)
+    // 1. getByLabel (Playwright associa label → input/select automaticamente)
     const byLabel = page.getByLabel(re);
     if (await byLabel.isVisible({ timeout: 400 }).catch(() => false)) return byLabel;
 
-    // 2. Linha <tr> com texto do label → select dentro dela
+    // 2. Linha <tr> que contém o label → select dentro dela
     const row = page.locator('tr').filter({ hasText: re }).first();
     if (await row.isVisible({ timeout: 400 }).catch(() => false)) {
       const sel = row.locator('select').first();
       if (await sel.isVisible({ timeout: 400 }).catch(() => false)) return sel;
     }
 
-    // 3. Célula com texto + célula seguinte com select
+    // 3. Célula com texto do label seguida de célula com select
     const tdSel = page.locator(`td:has-text("${label}") + td select`).first();
     if (await tdSel.isVisible({ timeout: 400 }).catch(() => false)) return tdSel;
 
-    // 4. <label> com texto → select pelo atributo "for" ou irmão
+    // 4. <label> com texto → select associado pelo "for"
     const labelEl = page.locator('label').filter({ hasText: re }).first();
     if (await labelEl.isVisible({ timeout: 400 }).catch(() => false)) {
       const forAttr = await labelEl.getAttribute('for').catch(() => null);
       if (forAttr) {
-        const assocSel = page.locator(`select#${CSS.escape(forAttr)}`);
+        const assocSel = page.locator(`select#${forAttr}`);
         if (await assocSel.isVisible({ timeout: 400 }).catch(() => false)) return assocSel;
       }
     }
@@ -211,40 +223,41 @@ async function escolherOpcao(sel, valor) {
   const opts = await sel.locator('option').allTextContents().catch(() => []);
   const match = opts.find(o => re.test(o));
   if (match) { await sel.selectOption({ label: match }); return; }
-  console.log(`  ⚠  "${valor}" não encontrado. Opções: ${opts.slice(0, 8).join(' | ')}`);
+  console.log(`  ⚠  "${valor}" não encontrado. Opções disponíveis: ${opts.slice(0, 8).join(' | ')}`);
 }
 
 // ── EDITAR ITEM ───────────────────────────────────────────────────────────────
 //
-// Modal "Altera Medida da Esquadria do Orçamento"
+// Abre modal "Altera Medida da Esquadria do Orçamento"
 // Campos: FERRAGENS/ACESSÓRIOS, ALUMÍNIO/PERFIL, VIDRO COR
 
 async function editarItem(page, itemIdx, campos) {
-  console.log(`\n  Selecionando "Editar Item" no item ${itemIdx + 1}…`);
-  await selecionarAcao(page, itemIdx, 'editar item');
+  console.log(`\n  Abrindo menu → "Editar Item do Orç." (item ${itemIdx + 1})…`);
+  await selecionarAcao(page, itemIdx, 'editar item do orç');
 
   await page.waitForSelector('select', { timeout: 12000 });
   await page.waitForTimeout(800);
-  console.log('  → Modal aberto!');
+  console.log('  → Modal de edição aberto!');
 
   if (campos.vidro) {
     const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
     if (sel) { await escolherOpcao(sel, campos.vidro); console.log(`     Vidro: ${campos.vidro}`); }
-    else console.log('  ⚠  Campo VIDRO COR não encontrado.');
+    else console.log('  ⚠  Campo VIDRO COR não encontrado no modal.');
   }
 
   if (campos.cor) {
     const sel = await selectPorLabel(page, 'ALUMÍNIO/PERFIL', 'ALUMINIO/PERFIL', 'COR ALUMÍNIO', 'FOLHA TÊMPERA');
     if (sel) { await escolherOpcao(sel, campos.cor); console.log(`     Alumínio: ${campos.cor}`); }
-    else console.log('  ⚠  Campo ALUMÍNIO/PERFIL não encontrado.');
+    else console.log('  ⚠  Campo ALUMÍNIO/PERFIL não encontrado no modal.');
   }
 
   if (campos.ferragens) {
     const sel = await selectPorLabel(page, 'FERRAGENS/ACESSÓRIOS', 'FERRAGENS');
     if (sel) { await escolherOpcao(sel, campos.ferragens); console.log(`     Ferragens: ${campos.ferragens}`); }
-    else console.log('  ⚠  Campo FERRAGENS/ACESSÓRIOS não encontrado.');
+    else console.log('  ⚠  Campo FERRAGENS/ACESSÓRIOS não encontrado no modal.');
   }
 
+  // Clica em Salvar
   for (const nome of [/^salvar$/i, /^gravar$/i, /^confirmar$/i, /^ok$/i, /salvar/i]) {
     const btn = page.getByRole('button', { name: nome });
     if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) { await btn.click(); break; }
@@ -257,7 +270,7 @@ async function editarItem(page, itemIdx, campos) {
 
 async function substituirProjeto(page, itemIdx, dados) {
   const urlOrcamento = page.url();
-  console.log(`\n  Selecionando "Substituir Projeto" no item ${itemIdx + 1}…`);
+  console.log(`\n  Abrindo menu → "Substituir Projeto" (item ${itemIdx + 1})…`);
   await selecionarAcao(page, itemIdx, 'substituir projeto');
 
   await page.waitForURL(/selecioneprojeto/i, { timeout: 20000 });
@@ -286,7 +299,7 @@ async function substituirProjeto(page, itemIdx, dados) {
   }
 
   await page.waitForSelector('select', { timeout: 15000 });
-  console.log('  → Página de detalhes do projeto!');
+  console.log('  → Detalhes do projeto!');
 
   if (dados.vidro) {
     const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
@@ -393,7 +406,7 @@ async function main() {
     console.error('\n❌  Erro:', err.message);
     const ss = path.join(process.cwd(), 'erro-wvetro.png');
     await page.screenshot({ path: ss, fullPage: true }).catch(() => {});
-    console.log(`   Screenshot salvo: ${ss}`);
+    console.log(`   Screenshot salvo em: ${ss}`);
     console.log('   Me mande esse screenshot para eu corrigir.\n');
   }
 }
