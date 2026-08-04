@@ -5,151 +5,234 @@ const readline = require('readline');
 const path = require('path');
 require('dotenv').config();
 
+const URL_HOME  = 'https://sistema.wvetro.com.br/concept/app.wvetro.home';
+const URL_LISTA = 'https://sistema.wvetro.com.br/concept/app.core.wworcamento';
+
 const rl  = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (p) => new Promise(r => rl.question(p, r));
+
+// ── Aguardar página estabilizar ───────────────────────────────────────────────
+
+async function esperar(page, ms = 2000) {
+  await page.waitForTimeout(ms);
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+}
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 
 async function fazerLogin(page) {
   await page.waitForTimeout(3000);
   const temLogin = page.url().includes('login') ||
-    await page.locator('input[type="password"]').isVisible({ timeout: 4000 }).catch(() => false);
-  if (!temLogin) return;
+    await page.locator('input[type="password"]').isVisible({ timeout: 5000 }).catch(() => false);
+  if (!temLogin) { console.log('  → Sessão ativa.'); return; }
 
   let usuario = process.env.WVETRO_USUARIO;
   let senha   = process.env.WVETRO_SENHA;
   let licenca = process.env.WVETRO_LICENCA;
 
   if (!usuario || !senha) {
-    console.log('\n── Informe seu login do W-vetro ──');
+    console.log('\n── Login W-vetro ──────────────');
     if (!usuario) usuario = (await ask('  Usuário: ')).trim();
     if (!senha)   senha   = (await ask('  Senha:   ')).trim();
     if (!licenca) licenca = (await ask('  Licença: ')).trim();
-    console.log('─────────────────────────────────\n');
+    console.log('───────────────────────────────\n');
   }
 
-  const campoUsuario = page.locator('input').filter({ hasNot: page.locator('[type="password"]') }).first();
-  if (await campoUsuario.isVisible({ timeout: 2000 }).catch(() => false)) await campoUsuario.fill(usuario);
-  await page.locator('input[type="password"]').first().fill(senha);
-  if (licenca) {
-    const campos = page.locator('input');
-    const n = await campos.count();
-    if (n >= 3) await campos.nth(2).fill(licenca);
-  }
+  const inputs = page.locator('input');
+  const n = await inputs.count();
+  if (n >= 1) await inputs.nth(0).fill(usuario);
+  if (n >= 2) await inputs.nth(1).fill(senha);
+  if (n >= 3 && licenca) await inputs.nth(2).fill(licenca);
+
   await page.getByRole('button', { name: /entrar|login|acessar/i }).click({ timeout: 5000 });
-  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await esperar(page, 3000);
   console.log('  → Login realizado!\n');
 }
 
-// ── Encontra <select> pelo texto do label ─────────────────────────────────────
+// ── Abrir orçamento pelo número ───────────────────────────────────────────────
+
+async function abrirOrcamento(page, numero) {
+  console.log(`  Navegando para lista de orçamentos…`);
+  await page.goto(URL_LISTA, { waitUntil: 'commit', timeout: 60000 });
+  await esperar(page, 3000);
+
+  // Seleciona "Nro.Orçamento" no dropdown de filtro
+  const selects = page.locator('select');
+  const qtd = await selects.count();
+  for (let i = 0; i < qtd; i++) {
+    const sel = selects.nth(i);
+    const opts = await sel.locator('option').allTextContents().catch(() => []);
+    const opt  = opts.find(o => /nro|número|numero/i.test(o) && /or[çc]/i.test(o));
+    if (opt) { await sel.selectOption({ label: opt }); await page.waitForTimeout(500); break; }
+  }
+
+  // Preenche o número no campo de valor
+  const allInputs = page.locator('input[type="text"], input[type="number"], input:not([type])');
+  const nInputs = await allInputs.count();
+  for (let i = nInputs - 1; i >= 0; i--) {
+    const inp = allInputs.nth(i);
+    if (await inp.isVisible({ timeout: 300 }).catch(() => false)) {
+      await inp.clear();
+      await inp.fill(numero);
+      break;
+    }
+  }
+
+  // Clica em Procurar
+  const btnProcurar = page.locator('button, a, input[type="submit"]').filter({ hasText: /procurar/i }).first();
+  if (await btnProcurar.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await btnProcurar.click();
+  } else {
+    await page.keyboard.press('Enter');
+  }
+  await esperar(page, 2000);
+
+  // Clica na linha do resultado
+  const linha = page.locator('tbody tr').filter({ hasText: numero }).first();
+  if (await linha.isVisible({ timeout: 8000 }).catch(() => false)) {
+    await linha.click();
+    await esperar(page, 3000);
+    console.log(`  → Orçamento ${numero} aberto!`);
+  } else {
+    throw new Error(`Orçamento ${numero} não encontrado na lista.`);
+  }
+}
+
+// ── Clica no botão de ações do item ──────────────────────────────────────────
+
+async function clicarBotaoAcoes(page, itemIdx) {
+  await page.waitForSelector('tbody tr', { timeout: 15000 });
+  await page.waitForTimeout(1500);
+
+  const linhas = page.locator('tbody tr');
+  const total  = await linhas.count();
+  if (total <= itemIdx) throw new Error(`Item ${itemIdx + 1} não encontrado (${total} itens na tabela).`);
+
+  const linha = linhas.nth(itemIdx);
+  await linha.scrollIntoViewIfNeeded();
+
+  // Hover para revelar botão que aparece só ao passar o mouse
+  await linha.hover();
+  await page.waitForTimeout(600);
+
+  // Tenta clicar em qualquer elemento clicável da linha, da 1ª até a 4ª célula
+  for (const sel of [
+    'td:nth-child(1) button, td:nth-child(1) a, td:nth-child(1) [role="button"], td:nth-child(1) i, td:nth-child(1) img, td:nth-child(1) span[class]',
+    'td:nth-child(2) button, td:nth-child(2) a, td:nth-child(2) [role="button"]',
+    'td:nth-child(3) button, td:nth-child(3) a, td:nth-child(3) [role="button"]',
+    'button, [role="button"]',
+  ]) {
+    const el = linha.locator(sel).first();
+    if (await el.isVisible({ timeout: 500 }).catch(() => false)) {
+      await el.click();
+      await page.waitForTimeout(700);
+      const menuAbriu = await page.getByText(/editar item|substituir projeto/i)
+        .isVisible({ timeout: 1500 }).catch(() => false);
+      if (menuAbriu) return;
+    }
+  }
+
+  throw new Error(`Não consegui abrir o menu do item ${itemIdx + 1}. Me mande um print do orçamento aberto para eu ajustar.`);
+}
+
+// ── Encontra <select> pelo label ──────────────────────────────────────────────
 
 async function selectPorLabel(page, ...labels) {
   for (const label of labels) {
     const re = new RegExp(label.replace(/[|/]/g, '.'), 'i');
     const byLabel = page.getByLabel(re);
-    if (await byLabel.isVisible({ timeout: 500 }).catch(() => false)) return byLabel;
+    if (await byLabel.isVisible({ timeout: 400 }).catch(() => false)) return byLabel;
     const row = page.locator('tr').filter({ hasText: re }).first();
-    if (await row.isVisible({ timeout: 500 }).catch(() => false)) {
+    if (await row.isVisible({ timeout: 400 }).catch(() => false)) {
       const sel = row.locator('select').first();
-      if (await sel.isVisible({ timeout: 500 }).catch(() => false)) return sel;
+      if (await sel.isVisible({ timeout: 400 }).catch(() => false)) return sel;
     }
     const tdSel = page.locator(`td:has-text("${label}") + td select`).first();
-    if (await tdSel.isVisible({ timeout: 500 }).catch(() => false)) return tdSel;
+    if (await tdSel.isVisible({ timeout: 400 }).catch(() => false)) return tdSel;
   }
   return null;
 }
 
 async function escolherOpcao(sel, valor) {
-  if (!sel || !valor) return false;
   const re = new RegExp(valor, 'i');
   const opts = await sel.locator('option').allTextContents().catch(() => []);
   const match = opts.find(o => re.test(o));
-  if (match) { await sel.selectOption({ label: match }); return true; }
-  console.log(`  ⚠  "${valor}" não encontrado nas opções. Opções disponíveis:`);
-  opts.forEach((o, i) => console.log(`     ${i + 1}. ${o}`));
-  await ask('  Escolha manualmente e pressione ENTER… ');
-  return false;
+  if (match) { await sel.selectOption({ label: match }); return; }
+  console.log(`  ⚠  "${valor}" não encontrado. Opções: ${opts.slice(0, 6).join(' | ')}`);
 }
 
 // ── EDITAR ITEM ───────────────────────────────────────────────────────────────
 
-async function editarItem(page, campos) {
-  // Aguarda o modal abrir (o usuário já clicou em "Editar Item do Orç.")
-  console.log('  Aguardando modal abrir…');
-  await page.waitForSelector('select', { timeout: 15000 });
+async function editarItem(page, itemIdx, campos) {
+  console.log(`\n  Abrindo menu do item ${itemIdx + 1}…`);
+  await clicarBotaoAcoes(page, itemIdx);
+
+  await page.getByText(/editar item do orç/i).first().click({ timeout: 5000 });
+  await page.waitForSelector('select', { timeout: 12000 });
   await page.waitForTimeout(800);
-  console.log('  → Modal aberto!\n');
+  console.log('  → Modal aberto!');
 
   if (campos.vidro) {
     const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
     if (sel) await escolherOpcao(sel, campos.vidro);
-    else { console.log('  ⚠  Campo VIDRO não encontrado — preencha manualmente.'); await ask('  ENTER após preencher… '); }
   }
-
   if (campos.cor) {
     const sel = await selectPorLabel(page, 'ALUMÍNIO/PERFIL', 'ALUMINIO/PERFIL', 'COR ALUMÍNIO | PERFIL', 'FOLHA TÊMPERA', 'FOLHA TEMPERA');
     if (sel) await escolherOpcao(sel, campos.cor);
-    else { console.log('  ⚠  Campo COR/PERFIL não encontrado — preencha manualmente.'); await ask('  ENTER após preencher… '); }
   }
-
   if (campos.ferragens) {
     const sel = await selectPorLabel(page, 'FERRAGENS/ACESSÓRIOS', 'FERRAGENS');
     if (sel) await escolherOpcao(sel, campos.ferragens);
   }
 
-  // Clica em Salvar/Confirmar
-  for (const nome of [/^salvar$/i, /^confirmar$/i, /^gravar$/i, /^ok$/i, /^aplicar$/i]) {
+  for (const nome of [/^salvar$/i, /^confirmar$/i, /^gravar$/i, /^ok$/i]) {
     const btn = page.getByRole('button', { name: nome });
-    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) { await btn.click(); break; }
+    if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) { await btn.click(); break; }
   }
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-  console.log('  ✓ Item salvo!\n');
+  await esperar(page);
+  console.log(`  ✓ Item ${itemIdx + 1} salvo!`);
 }
 
 // ── SUBSTITUIR PROJETO ────────────────────────────────────────────────────────
 
-async function substituirProjeto(page, dados) {
-  // Aguarda a página de seleção de projeto (o usuário já clicou em "Substituir Projeto")
-  console.log('  Aguardando página de seleção de projeto…');
+async function substituirProjeto(page, itemIdx, dados) {
+  const urlOrcamento = page.url();
+  console.log(`\n  Abrindo menu do item ${itemIdx + 1}…`);
+  await clicarBotaoAcoes(page, itemIdx);
+
+  await page.getByText(/substituir projeto/i).first().click({ timeout: 6000 });
   await page.waitForURL(/selecioneprojeto/i, { timeout: 20000 });
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-  console.log('  → Página aberta!\n');
+  await esperar(page, 2000);
+  console.log('  → Página de seleção de projeto!');
 
   if (dados.linha) {
     const sel = await selectPorLabel(page, 'LINHA');
     if (sel) { await escolherOpcao(sel, dados.linha); await page.waitForTimeout(800); }
-    else { console.log('  ⚠  Campo LINHA não encontrado.'); await ask('  Selecione manualmente e pressione ENTER… '); }
   }
-
   if (dados.modelo) {
     const sel = await selectPorLabel(page, 'MODELO');
     if (sel) await escolherOpcao(sel, dados.modelo);
-    else { console.log('  ⚠  Campo MODELO não encontrado.'); await ask('  Selecione manualmente e pressione ENTER… '); }
   }
 
   await page.getByRole('button', { name: /pesquisar/i }).click({ timeout: 5000 });
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await esperar(page, 2000);
 
-  // Se aparecer lista de resultados clica no primeiro
-  const tabela = page.locator('tbody tr').first();
-  if (await tabela.isVisible({ timeout: 3000 }).catch(() => false) &&
-      !await page.getByText(/DADOS DO PROJETO/i).isVisible({ timeout: 1000 }).catch(() => false)) {
-    await tabela.click();
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  // Se aparecer lista de resultados, clica no primeiro
+  if (!await page.getByText(/DADOS DO PROJETO/i).isVisible({ timeout: 2000 }).catch(() => false)) {
+    const primeiraLinha = page.locator('tbody tr').first();
+    if (await primeiraLinha.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await primeiraLinha.click();
+      await esperar(page, 2000);
+    }
   }
 
-  // Página de detalhes
   await page.waitForSelector('select', { timeout: 15000 });
-  console.log('  → Página de detalhes do projeto!\n');
+  console.log('  → Página de detalhes do projeto!');
 
   if (dados.vidro) {
     const sel = await selectPorLabel(page, 'VIDRO');
     if (sel) await escolherOpcao(sel, dados.vidro);
-    else { console.log('  ⚠  Campo VIDRO não encontrado — selecione manualmente!'); await ask('  ENTER após selecionar… '); }
-  } else {
-    await ask('  Selecione o VIDRO manualmente e pressione ENTER… ');
   }
-
   if (dados.cor) {
     const sel = await selectPorLabel(page, 'COR ALUMÍNIO | PERFIL', 'ALUMÍNIO/PERFIL', 'COR ALUMÍNIO');
     if (sel) await escolherOpcao(sel, dados.cor);
@@ -158,114 +241,100 @@ async function substituirProjeto(page, dados) {
   await page.getByRole('button', { name: /incluir item no orçamento/i }).click({ timeout: 8000 });
   await page.waitForTimeout(2000);
 
-  // Modal de variáveis (persiana)
-  const temModal = await page.getByText(/informe as variáveis/i).isVisible({ timeout: 4000 }).catch(() => false);
-  if (temModal) {
-    console.log('  → Modal de variáveis aberto.');
+  // Modal de variáveis
+  if (await page.getByText(/informe as variáveis/i).isVisible({ timeout: 4000 }).catch(() => false)) {
     if (dados.persiana) {
       const row = page.locator('tr').filter({ hasText: /ACIONAMENTO DA ESTEIRA/i }).first();
       if (await row.isVisible({ timeout: 2000 }).catch(() => false)) {
         await escolherOpcao(row.locator('select').first(), dados.persiana);
-      } else { await ask('  Configure o ACIONAMENTO manualmente e pressione ENTER… '); }
+      }
     }
     await page.getByRole('button', { name: /confirmar/i }).click({ timeout: 5000 });
     await page.waitForTimeout(2000);
   }
 
-  // Calcular
-  const btnCalc = page.getByRole('button', { name: /calcular o orçamento/i });
-  if (await btnCalc.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await btnCalc.click();
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  const calcBtn = page.getByRole('button', { name: /calcular o orçamento/i });
+  if (await calcBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await calcBtn.click();
+    await esperar(page, 3000);
   }
 
-  // Fecha avisos
   for (const nome of [/fechar/i, /^ok$/i]) {
     const btn = page.getByRole('button', { name: nome });
-    if (await btn.isVisible({ timeout: 3000 }).catch(() => false)) { await btn.click(); break; }
+    if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) { await btn.click(); break; }
   }
 
-  console.log('  ✓ Projeto substituído!\n');
+  if (!page.url().includes('detalhe')) {
+    await page.goto(urlOrcamento, { waitUntil: 'commit', timeout: 60000 });
+    await esperar(page, 2000);
+  }
+  console.log(`  ✓ Projeto substituído!`);
+}
+
+// ── Coleta de dados ───────────────────────────────────────────────────────────
+
+async function coletarDados() {
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║   W-vetro — Editor de Orçamentos            ║');
+  console.log('╚══════════════════════════════════════════════╝\n');
+
+  const numero = (await ask('Número do orçamento: ')).trim();
+  const alteracoes = [];
+  let continuar = true;
+
+  while (continuar) {
+    console.log('\nTipo:  1-Substituir projeto   2-Editar item');
+    const tipo = (await ask('Escolha [1 ou 2]: ')).trim();
+    const itemIdx = parseInt((await ask('Número do item (1, 2, 3…): ')).trim(), 10) - 1;
+    const dados = { tipo, itemIdx };
+
+    if (tipo === '1') {
+      dados.linha  = (await ask('LINHA  (ex: PERFISUD): ')).trim();
+      dados.modelo = (await ask('MODELO (ex: JANELA DE CORRER 02 FOLHAS): ')).trim();
+      dados.vidro  = (await ask('VIDRO  (ex: INCOLOR 06MM - TEMPERADO): ')).trim();
+      const cor = (await ask('COR ALUMÍNIO (Enter pular): ')).trim(); if (cor) dados.cor = cor;
+      const per = (await ask('PERSIANA — RECOLHEDOR FITA / MOTOR (Enter pular): ')).trim(); if (per) dados.persiana = per;
+    } else {
+      const v = (await ask('VIDRO COR         (Enter pular): ')).trim(); if (v) dados.vidro = v;
+      const c = (await ask('ALUMÍNIO / PERFIL (Enter pular): ')).trim(); if (c) dados.cor = c;
+      const f = (await ask('FERRAGENS         (Enter pular): ')).trim(); if (f) dados.ferragens = f;
+    }
+    alteracoes.push(dados);
+    continuar = (await ask('\nOutra alteração? [s/n]: ')).trim().toLowerCase() === 's';
+  }
+
+  rl.close();
+  return { numero, alteracoes };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('\n╔══════════════════════════════════════════════╗');
-  console.log('║   W-vetro — Editor de Orçamentos            ║');
-  console.log('╚══════════════════════════════════════════════╝\n');
+  const { numero, alteracoes } = await coletarDados();
 
-  // Coleta as alterações desejadas
-  const alteracoes = [];
-  let continuar = true;
-
-  while (continuar) {
-    console.log('Tipo de alteração:');
-    console.log('  1 - Substituir projeto  (nova linha/modelo)');
-    console.log('  2 - Editar item         (vidro, cor, ferragens)');
-    const tipo = (await ask('Escolha [1 ou 2]: ')).trim();
-
-    const itemNum = parseInt((await ask('Número do item no orçamento (1, 2, 3…): ')).trim(), 10);
-
-    let dados = { tipo, itemIdx: itemNum - 1 };
-
-    if (tipo === '1') {
-      dados.linha    = (await ask('LINHA    (ex: PERFISUD): ')).trim();
-      dados.modelo   = (await ask('MODELO   (ex: JANELA DE CORRER 02 FOLHAS): ')).trim();
-      dados.vidro    = (await ask('VIDRO    (ex: INCOLOR 06MM - TEMPERADO): ')).trim();
-      const cor = (await ask('COR ALUMÍNIO / PERFIL  (Enter para pular): ')).trim();
-      if (cor) dados.cor = cor;
-      const per = (await ask('ACIONAMENTO PERSIANA  (RECOLHEDOR FITA / MOTOR / Enter para pular): ')).trim();
-      if (per) dados.persiana = per;
-    } else {
-      const vidro = (await ask('VIDRO COR          (Enter para não alterar): ')).trim();
-      if (vidro) dados.vidro = vidro;
-      const cor = (await ask('ALUMÍNIO / PERFIL  (Enter para não alterar): ')).trim();
-      if (cor) dados.cor = cor;
-      const ferr = (await ask('FERRAGENS          (Enter para não alterar): ')).trim();
-      if (ferr) dados.ferragens = ferr;
-    }
-
-    alteracoes.push(dados);
-    continuar = (await ask('\nAdicionar outra alteração? [s/n]: ')).trim().toLowerCase() === 's';
-  }
-
-  // Abre o Chrome
   console.log('\nAbrindo Chrome…');
-  const browser = await chromium.launch({ channel: 'chrome', headless: false })
-    .catch(() => chromium.launch({ headless: false }));
+  const browser = await chromium.launch({ channel: 'chrome', headless: false, slowMo: 100 })
+    .catch(() => chromium.launch({ headless: false, slowMo: 100 }));
   const page = await browser.newContext({ viewport: null }).then(c => c.newPage());
 
-  await page.goto('https://sistema.wvetro.com.br/concept/app.wvetro.home', { waitUntil: 'commit', timeout: 60000 });
-  await fazerLogin(page);
+  try {
+    await page.goto(URL_HOME, { waitUntil: 'commit', timeout: 60000 });
+    await fazerLogin(page);
+    await abrirOrcamento(page, numero);
 
-  // Pede ao usuário para navegar ao orçamento
-  console.log('═══════════════════════════════════════════════');
-  console.log('  No Chrome, abra o orçamento normalmente.');
-  console.log('  (Vendas → Vendas/Orçamentos → Procurar → clique no orçamento)');
-  console.log('═══════════════════════════════════════════════');
-  await ask('  Pressione ENTER quando o orçamento estiver aberto… ');
-  await page.waitForTimeout(1000);
-
-  // Executa as alterações
-  for (const alt of alteracoes) {
-    console.log(`\n── Item ${alt.itemIdx + 1} ──────────────────────────────────`);
-    if (alt.tipo === '1') {
-      console.log(`  No Chrome, clique nos 3 pontos do item ${alt.itemIdx + 1} e escolha "Substituir Projeto".`);
-      await ask('  Pressione ENTER depois de clicar em "Substituir Projeto"… ');
-      await substituirProjeto(page, alt);
-    } else {
-      console.log(`  No Chrome, clique nos 3 pontos do item ${alt.itemIdx + 1} e escolha "Editar Item do Orç.".`);
-      await ask('  Pressione ENTER depois de clicar em "Editar Item do Orç."… ');
-      await editarItem(page, alt);
+    for (const alt of alteracoes) {
+      if (alt.tipo === '1') await substituirProjeto(page, alt.itemIdx, alt);
+      else                   await editarItem(page, alt.itemIdx, alt);
     }
-  }
 
-  rl.close();
-  console.log('✅  Concluído! Chrome fica aberto para revisão.\n');
+    console.log('\n✅  Tudo concluído! Chrome fica aberto para revisão.\n');
+  } catch (err) {
+    console.error('\n❌  Erro:', err.message);
+    const ss = path.join(process.cwd(), 'erro-wvetro.png');
+    await page.screenshot({ path: ss, fullPage: true }).catch(() => {});
+    console.log(`   Screenshot salvo: ${ss}`);
+    console.log('   Me mande esse screenshot para eu corrigir.\n');
+  }
 }
 
-main().catch(err => {
-  console.error('\n❌  Erro:', err.message);
-  rl.close();
-});
+main().catch(console.error);
