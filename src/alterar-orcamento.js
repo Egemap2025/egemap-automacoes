@@ -66,7 +66,7 @@ async function abrirOrcamento(page, numero) {
     if (opt) { await sel.selectOption({ label: opt }); await page.waitForTimeout(500); break; }
   }
 
-  // Preenche o número no campo de valor
+  // Preenche o número no campo de valor (último input visível)
   const allInputs = page.locator('input[type="text"], input[type="number"], input:not([type])');
   const nInputs = await allInputs.count();
   for (let i = nInputs - 1; i >= 0; i--) {
@@ -87,18 +87,37 @@ async function abrirOrcamento(page, numero) {
   }
   await esperar(page, 2000);
 
-  // Clica na linha do resultado
+  // Encontra a linha do resultado
   const linha = page.locator('tbody tr').filter({ hasText: numero }).first();
-  if (await linha.isVisible({ timeout: 8000 }).catch(() => false)) {
-    await linha.click();
-    await esperar(page, 3000);
-    console.log(`  → Orçamento ${numero} aberto!`);
-  } else {
+  if (!await linha.isVisible({ timeout: 8000 }).catch(() => false)) {
     throw new Error(`Orçamento ${numero} não encontrado na lista.`);
   }
+
+  // Clica no link do cliente (nome em azul) para abrir o orçamento
+  // A lista mostra: [≡] [Nro] [Situação] [Cliente→link] ...
+  const link = linha.locator('a').first();
+  if (await link.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await link.click();
+  } else {
+    // Fallback: clica na linha inteira
+    await linha.click();
+  }
+
+  // Aguarda navegar para a página de detalhe do orçamento
+  await page.waitForURL(/detalheorcamento/i, { timeout: 25000 });
+  await esperar(page, 3000);
+  console.log(`  → Orçamento ${numero} aberto!`);
 }
 
-// ── Clica no botão de ações do item ──────────────────────────────────────────
+// ── Clica no botão de ações (≡) do item ──────────────────────────────────────
+//
+// Estrutura da linha no detalhe do orçamento:
+//   td[1]: botão ">" (expandir)
+//   td[2]: checkbox □
+//   td[3]: botão "≡" (menu de ações) ← este é o que precisamos clicar
+//   td[4]: número da ordem
+//   td[5]: nome do projeto (link)
+//   ...
 
 async function clicarBotaoAcoes(page, itemIdx) {
   await page.waitForSelector('tbody tr', { timeout: 15000 });
@@ -111,15 +130,19 @@ async function clicarBotaoAcoes(page, itemIdx) {
   const linha = linhas.nth(itemIdx);
   await linha.scrollIntoViewIfNeeded();
 
-  // Hover para revelar botão que aparece só ao passar o mouse
+  // Hover para revelar elementos que aparecem só com mouse sobre a linha
   await linha.hover();
   await page.waitForTimeout(600);
 
-  // Tenta clicar em qualquer elemento clicável da linha, da 1ª até a 4ª célula
+  // Tenta cada possível seletor do botão ≡, da 3ª coluna em diante
   for (const sel of [
-    'td:nth-child(1) button, td:nth-child(1) a, td:nth-child(1) [role="button"], td:nth-child(1) i, td:nth-child(1) img, td:nth-child(1) span[class]',
-    'td:nth-child(2) button, td:nth-child(2) a, td:nth-child(2) [role="button"]',
-    'td:nth-child(3) button, td:nth-child(3) a, td:nth-child(3) [role="button"]',
+    'td:nth-child(3) button',
+    'td:nth-child(3) [role="button"]',
+    'td:nth-child(3) i',
+    'td:nth-child(3) span',
+    'td:nth-child(3)',                    // clica direto na célula
+    'td:nth-child(1) button, td:nth-child(1) [role="button"], td:nth-child(1) i',
+    'td:nth-child(2) button, td:nth-child(2) [role="button"]',
     'button, [role="button"]',
   ]) {
     const el = linha.locator(sel).first();
@@ -140,15 +163,34 @@ async function clicarBotaoAcoes(page, itemIdx) {
 async function selectPorLabel(page, ...labels) {
   for (const label of labels) {
     const re = new RegExp(label.replace(/[|/]/g, '.'), 'i');
+
+    // Estratégia 1: getByLabel (Playwright associa label→input/select)
     const byLabel = page.getByLabel(re);
     if (await byLabel.isVisible({ timeout: 400 }).catch(() => false)) return byLabel;
+
+    // Estratégia 2: linha <tr> que contenha o texto do label → select dentro dela
     const row = page.locator('tr').filter({ hasText: re }).first();
     if (await row.isVisible({ timeout: 400 }).catch(() => false)) {
       const sel = row.locator('select').first();
       if (await sel.isVisible({ timeout: 400 }).catch(() => false)) return sel;
     }
+
+    // Estratégia 3: célula com o texto seguida de célula com select
     const tdSel = page.locator(`td:has-text("${label}") + td select`).first();
     if (await tdSel.isVisible({ timeout: 400 }).catch(() => false)) return tdSel;
+
+    // Estratégia 4: label <label> que contenha o texto → select associado
+    const labelEl = page.locator(`label`).filter({ hasText: re }).first();
+    if (await labelEl.isVisible({ timeout: 400 }).catch(() => false)) {
+      const forAttr = await labelEl.getAttribute('for').catch(() => null);
+      if (forAttr) {
+        const assocSel = page.locator(`select#${forAttr}`);
+        if (await assocSel.isVisible({ timeout: 400 }).catch(() => false)) return assocSel;
+      }
+      // Tenta select irmão/próximo ao label
+      const siblingSel = labelEl.locator('~ select').first();
+      if (await siblingSel.isVisible({ timeout: 400 }).catch(() => false)) return siblingSel;
+    }
   }
   return null;
 }
@@ -162,6 +204,9 @@ async function escolherOpcao(sel, valor) {
 }
 
 // ── EDITAR ITEM ───────────────────────────────────────────────────────────────
+//
+// Modal "Altera Medida da Esquadria do Orçamento"
+// Campos disponíveis: FERRAGENS/ACESSÓRIOS, ALUMÍNIO/PERFIL, VIDRO COR
 
 async function editarItem(page, itemIdx, campos) {
   console.log(`\n  Abrindo menu do item ${itemIdx + 1}…`);
@@ -172,20 +217,29 @@ async function editarItem(page, itemIdx, campos) {
   await page.waitForTimeout(800);
   console.log('  → Modal aberto!');
 
+  // VIDRO COR
   if (campos.vidro) {
     const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
-    if (sel) await escolherOpcao(sel, campos.vidro);
-  }
-  if (campos.cor) {
-    const sel = await selectPorLabel(page, 'ALUMÍNIO/PERFIL', 'ALUMINIO/PERFIL', 'COR ALUMÍNIO | PERFIL', 'FOLHA TÊMPERA', 'FOLHA TEMPERA');
-    if (sel) await escolherOpcao(sel, campos.cor);
-  }
-  if (campos.ferragens) {
-    const sel = await selectPorLabel(page, 'FERRAGENS/ACESSÓRIOS', 'FERRAGENS');
-    if (sel) await escolherOpcao(sel, campos.ferragens);
+    if (sel) { await escolherOpcao(sel, campos.vidro); console.log(`     Vidro: ${campos.vidro}`); }
+    else console.log('  ⚠  Campo VIDRO COR não encontrado.');
   }
 
-  for (const nome of [/^salvar$/i, /^confirmar$/i, /^gravar$/i, /^ok$/i]) {
+  // ALUMÍNIO/PERFIL
+  if (campos.cor) {
+    const sel = await selectPorLabel(page, 'ALUMÍNIO/PERFIL', 'ALUMINIO/PERFIL', 'COR ALUMÍNIO', 'FOLHA TÊMPERA', 'FOLHA TEMPERA');
+    if (sel) { await escolherOpcao(sel, campos.cor); console.log(`     Alumínio: ${campos.cor}`); }
+    else console.log('  ⚠  Campo ALUMÍNIO/PERFIL não encontrado.');
+  }
+
+  // FERRAGENS/ACESSÓRIOS
+  if (campos.ferragens) {
+    const sel = await selectPorLabel(page, 'FERRAGENS/ACESSÓRIOS', 'FERRAGENS');
+    if (sel) { await escolherOpcao(sel, campos.ferragens); console.log(`     Ferragens: ${campos.ferragens}`); }
+    else console.log('  ⚠  Campo FERRAGENS/ACESSÓRIOS não encontrado.');
+  }
+
+  // Botão salvar
+  for (const nome of [/^salvar$/i, /^gravar$/i, /^confirmar$/i, /^ok$/i, /salvar/i]) {
     const btn = page.getByRole('button', { name: nome });
     if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) { await btn.click(); break; }
   }
@@ -230,18 +284,18 @@ async function substituirProjeto(page, itemIdx, dados) {
   console.log('  → Página de detalhes do projeto!');
 
   if (dados.vidro) {
-    const sel = await selectPorLabel(page, 'VIDRO');
+    const sel = await selectPorLabel(page, 'VIDRO COR', 'VIDRO');
     if (sel) await escolherOpcao(sel, dados.vidro);
   }
   if (dados.cor) {
-    const sel = await selectPorLabel(page, 'COR ALUMÍNIO | PERFIL', 'ALUMÍNIO/PERFIL', 'COR ALUMÍNIO');
+    const sel = await selectPorLabel(page, 'ALUMÍNIO/PERFIL', 'COR ALUMÍNIO', 'ALUMINIO/PERFIL');
     if (sel) await escolherOpcao(sel, dados.cor);
   }
 
   await page.getByRole('button', { name: /incluir item no orçamento/i }).click({ timeout: 8000 });
   await page.waitForTimeout(2000);
 
-  // Modal de variáveis
+  // Modal de variáveis (ex: persiana)
   if (await page.getByText(/informe as variáveis/i).isVisible({ timeout: 4000 }).catch(() => false)) {
     if (dados.persiana) {
       const row = page.locator('tr').filter({ hasText: /ACIONAMENTO DA ESTEIRA/i }).first();
@@ -283,7 +337,7 @@ async function coletarDados() {
   let continuar = true;
 
   while (continuar) {
-    console.log('\nTipo:  1-Substituir projeto   2-Editar item');
+    console.log('\nTipo:  1-Substituir projeto   2-Editar item (vidro/cor/ferragens)');
     const tipo = (await ask('Escolha [1 ou 2]: ')).trim();
     const itemIdx = parseInt((await ask('Número do item (1, 2, 3…): ')).trim(), 10) - 1;
     const dados = { tipo, itemIdx };
@@ -292,13 +346,15 @@ async function coletarDados() {
       dados.linha  = (await ask('LINHA  (ex: PERFISUD): ')).trim();
       dados.modelo = (await ask('MODELO (ex: JANELA DE CORRER 02 FOLHAS): ')).trim();
       dados.vidro  = (await ask('VIDRO  (ex: INCOLOR 06MM - TEMPERADO): ')).trim();
-      const cor = (await ask('COR ALUMÍNIO (Enter pular): ')).trim(); if (cor) dados.cor = cor;
-      const per = (await ask('PERSIANA — RECOLHEDOR FITA / MOTOR (Enter pular): ')).trim(); if (per) dados.persiana = per;
+      const cor = (await ask('COR ALUMÍNIO (Enter para pular): ')).trim(); if (cor) dados.cor = cor;
+      const per = (await ask('PERSIANA — ACIONAMENTO (Enter para pular): ')).trim(); if (per) dados.persiana = per;
     } else {
-      const v = (await ask('VIDRO COR         (Enter pular): ')).trim(); if (v) dados.vidro = v;
-      const c = (await ask('ALUMÍNIO / PERFIL (Enter pular): ')).trim(); if (c) dados.cor = c;
-      const f = (await ask('FERRAGENS         (Enter pular): ')).trim(); if (f) dados.ferragens = f;
+      console.log('  (deixe em branco para não alterar o campo)');
+      const v = (await ask('VIDRO COR         : ')).trim(); if (v) dados.vidro = v;
+      const c = (await ask('ALUMÍNIO / PERFIL : ')).trim(); if (c) dados.cor = c;
+      const f = (await ask('FERRAGENS         : ')).trim(); if (f) dados.ferragens = f;
     }
+
     alteracoes.push(dados);
     continuar = (await ask('\nOutra alteração? [s/n]: ')).trim().toLowerCase() === 's';
   }
@@ -313,8 +369,8 @@ async function main() {
   const { numero, alteracoes } = await coletarDados();
 
   console.log('\nAbrindo Chrome…');
-  const browser = await chromium.launch({ channel: 'chrome', headless: false, slowMo: 100 })
-    .catch(() => chromium.launch({ headless: false, slowMo: 100 }));
+  const browser = await chromium.launch({ channel: 'chrome', headless: false, slowMo: 80 })
+    .catch(() => chromium.launch({ headless: false, slowMo: 80 }));
   const page = await browser.newContext({ viewport: null }).then(c => c.newPage());
 
   try {
