@@ -574,6 +574,11 @@ def _opcoes_do_select(sel):
         return []
 
 
+FINISH_WORDS = ("PINTURA", "ANODIZADO", "BRANCO", "PRETO", "BRONZE", "MADEIRA",
+                "NATURAL", "FOSCO", "CINZA", "GRAFITE", "CHAMPAGNE", "CORTEN",
+                "BRILHANTE", "AMADEIRADO", "BICOLOR", "LOURO")
+
+
 def _parece_vidro(opcoes):
     """True se as opcoes parecem de vidro (tem espessura 'MM' + tipo)."""
     if not opcoes:
@@ -583,27 +588,49 @@ def _parece_vidro(opcoes):
     return n >= max(3, len(opcoes) // 2)
 
 
-def _achar_select(frame, rotulo, esperado):
-    """Acha o <select> do rotulo. Como a ordem no DOM varia (as vezes o campo
-    vem ANTES do rotulo), olha o select seguinte E o anterior, e decide pelo
-    CONTEUDO: vidro tem espessuras 'MM'; cor/perfil nao."""
-    candidatos = []
-    for xp in (f"xpath=//*[contains(text(),'{rotulo}')]/following::select[1]",
-               f"xpath=//*[contains(text(),'{rotulo}')]/following::select[2]",
-               f"xpath=//*[contains(text(),'{rotulo}')]/preceding::select[1]"):
+def _parece_cor(opcoes):
+    """True se as opcoes parecem de cor/perfil (varias opcoes de acabamento)."""
+    if len(opcoes) < 3:
+        return False
+    return any(any(w in o.upper() for w in FINISH_WORDS) for o in opcoes)
+
+
+def _candidatos_campo(frame, rotulo, tag, exato=False):
+    """Devolve locators candidatos ao campo (input/select) do rotulo, olhando
+    primeiro DENTRO do mesmo bloco do rotulo e depois vizinhos (antes/depois)."""
+    base = (f"//*[normalize-space(text())='{rotulo}']" if exato
+            else f"//*[contains(text(),'{rotulo}')]")
+    cands = []
+    for xp in (f"xpath={base}/ancestor::*[.//{tag}][1]//{tag}[1]",
+               f"xpath={base}/following::{tag}[1]",
+               f"xpath={base}/preceding::{tag}[1]",
+               f"xpath={base}/following::{tag}[2]"):
         try:
             loc = frame.locator(xp).first
             if loc.count() > 0:
-                candidatos.append(loc)
+                cands.append(loc)
         except Exception:
             pass
-    for loc in candidatos:
-        ev = _parece_vidro(_opcoes_do_select(loc))
-        if esperado == "vidro" and ev:
+    return cands
+
+
+def _achar_select(frame, rotulo, esperado):
+    """Acha o <select> certo do rotulo, decidindo pelo CONTEUDO das opcoes
+    (vidro tem 'MM'; cor tem acabamentos)."""
+    cands = _candidatos_campo(frame, rotulo, "select")
+    for loc in cands:
+        ops = _opcoes_do_select(loc)
+        if esperado == "vidro" and _parece_vidro(ops):
             return loc
-        if esperado == "cor" and not ev and _opcoes_do_select(loc):
+        if esperado == "cor" and _parece_cor(ops):
             return loc
-    return candidatos[0] if candidatos else None
+    return cands[0] if cands else None
+
+
+def _achar_input(frame, rotulo, exato=False):
+    """Acha o <input> do rotulo (dentro do mesmo bloco, senao vizinho)."""
+    cands = _candidatos_campo(frame, rotulo, "input", exato=exato)
+    return cands[0] if cands else None
 
 
 def _trocar_select_campo(frame, rotulo, nome, esperado):
@@ -638,15 +665,8 @@ def _trocar_select_campo(frame, rotulo, nome, esperado):
 
 def _trocar_input_campo(frame, label, nome, exato=False):
     """Troca um campo de digitacao (largura, altura, qtde, tipo, ambiente)."""
-    xp = (f"xpath=//*[normalize-space(text())='{label}']/following::input[1]"
-          if exato else
-          f"xpath=//*[contains(text(),'{label}')]/following::input[1]")
-    try:
-        inp = frame.locator(xp).first
-        if inp.count() == 0:
-            print(f"  Nao encontrei o campo {nome}.")
-            return False
-    except Exception:
+    inp = _achar_input(frame, label, exato)
+    if inp is None:
         print(f"  Nao encontrei o campo {nome}.")
         return False
 
