@@ -553,36 +553,45 @@ def editar_item(page, linha_item, indice=None):
     return True
 
 
+def _frame_tem_campos(fr):
+    """True se o frame contem os campos da janela de edicao."""
+    try:
+        return bool(fr.query_selector("xpath=//*[contains(text(),'VIDRO COR')]")
+                    or fr.query_selector("xpath=//*[contains(text(),'QTDE')]"))
+    except Exception:
+        return False
+
+
 def _frame_do_modal(page, esperar=True):
-    """Retorna o frame (pagina ou iframe) que contem a janela de edicao.
-    Tenta varias palavras-chave e, quando pedido, tenta algumas vezes (o
-    iframe pode demorar a carregar). Prefere o frame cujo campo esta VISIVEL
-    (evita pegar uma janela antiga que ficou detachada apos um recalculo)."""
-    chaves = ("VIDRO COR", "PERFIL", "QTDE")
-    tentativas = 4 if esperar else 1
+    """Retorna o Frame da janela de edicao amarrando ao <iframe> VISIVEL na
+    tela (assim nunca pega uma copia antiga/detachada que ficou na memoria).
+    Se o modal estiver na propria pagina, retorna o frame principal."""
+    tentativas = 5 if esperar else 2
     for t in range(tentativas):
         if esperar and t == 0:
             page.wait_for_timeout(1200)
-        reserva = None
-        for fr in page.frames:
-            for chave in chaves:
+        # 1) iframes visiveis que contenham os campos do modal
+        try:
+            for eh in page.query_selector_all("iframe"):
                 try:
-                    loc = fr.locator(f"xpath=//*[contains(text(),'{chave}')]")
-                    if loc.count() == 0:
+                    if not eh.is_visible():
                         continue
-                except Exception:
-                    continue
-                try:
-                    if loc.first.is_visible():
+                    fr = eh.content_frame()
+                    if fr is not None and _frame_tem_campos(fr):
                         return fr
                 except Exception:
-                    pass
-                reserva = reserva or fr
-                break
-        if reserva is not None:
-            return reserva
-        if esperar:
-            page.wait_for_timeout(900)
+                    continue
+        except Exception:
+            pass
+        # 2) modal direto na pagina principal
+        try:
+            mf = page.main_frame
+            loc = mf.locator("xpath=//*[contains(text(),'VIDRO COR')]")
+            if loc.count() > 0 and loc.first.is_visible():
+                return mf
+        except Exception:
+            pass
+        page.wait_for_timeout(800)
     return None
 
 
