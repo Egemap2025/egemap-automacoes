@@ -225,31 +225,65 @@ def _preencher_numero(page, numero):
 
 
 def _abrir_linha_resultado(page, numero):
-    """Clica na linha do resultado para abrir o detalhe do orcamento.
-    O jeito mais confiavel e clicar no NOME DO CLIENTE (link sublinhado)."""
-    # A) clica no link do nome do cliente, dentro da area de resultado
+    """Abre o detalhe do orcamento clicando no NOME DO CLIENTE, na linha do
+    resultado. Localiza a coluna 'Cliente' pelo cabecalho e clica na celula
+    correspondente da linha que contem o numero."""
+    numero = str(numero)
+
+    # A) Abordagem principal: acha a coluna 'Cliente' e clica na celula da linha.
     try:
-        link = page.locator("table a, tbody a").first
-        link.wait_for(timeout=6000)
+        texto = page.evaluate(
+            """(numero) => {
+                const tabelas = Array.from(document.querySelectorAll('table'));
+                for (const t of tabelas) {
+                    const ths = Array.from(t.querySelectorAll('th'));
+                    if (!ths.length) continue;
+                    let idx = ths.findIndex(th => /^\\s*cliente\\s*$/i.test(th.textContent.trim()));
+                    if (idx < 0) idx = ths.findIndex(th => /cliente/i.test(th.textContent) && !/perfil/i.test(th.textContent));
+                    if (idx < 0) continue;
+                    const linhas = Array.from(t.querySelectorAll('tbody tr'));
+                    for (const tr of linhas) {
+                        if (!tr.textContent.includes(numero)) continue;
+                        const tds = Array.from(tr.querySelectorAll('td'));
+                        if (!tds.length) continue;
+                        // ajusta se houver celula de icone (☰) a mais no inicio
+                        const offset = Math.max(0, tds.length - ths.length);
+                        let cel = tds[idx + offset] || tds[idx];
+                        if (!cel) continue;
+                        const alvo = cel.querySelector('a, [onclick], u, span, div') || cel;
+                        alvo.click();
+                        return (alvo.textContent || '').trim().slice(0, 40) || 'ok';
+                    }
+                }
+                return null;
+            }""",
+            numero,
+        )
+        if texto:
+            log(f"   (cliquei no cliente: {texto})")
+            return True
+    except Exception:
+        pass
+
+    # B) Fallback: clica no primeiro link/elemento clicavel da area de resultado.
+    try:
+        link = page.locator("tbody a, tbody u").first
+        link.wait_for(timeout=4000)
         link.scroll_into_view_if_needed()
         link.click()
         return True
     except Exception:
         pass
-    # B) duplo clique na linha do resultado
+
+    # C) Fallback: duplo clique na linha do resultado.
     try:
-        linha = page.locator("table tbody tr").filter(has_text=str(numero)).first
+        linha = page.locator("table tbody tr").filter(has_text=numero).first
         linha.wait_for(timeout=4000)
         linha.dblclick()
         return True
     except Exception:
         pass
-    # C) clica no icone de menu (☰) da primeira linha
-    try:
-        page.locator("table tbody tr").first.click(timeout=4000)
-        return True
-    except Exception:
-        pass
+
     return False
 
 
