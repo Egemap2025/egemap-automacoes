@@ -550,7 +550,7 @@ def editar_item(page, linha_item, indice=None):
     return True
 
 
-def _frame_do_modal(page, esperar=True):
+def _frame_do_modal(page, esperar=True, diagnostico=False):
     """Retorna o frame (pagina ou iframe) cujos campos da janela de edicao
     estao VISIVEIS. Exigir a visibilidade descarta as copias antigas/mortas
     que ficam na memoria apos recarregar (elas existem mas nao aparecem).
@@ -559,8 +559,11 @@ def _frame_do_modal(page, esperar=True):
     copias do MESMO texto ('VIDRO COR', 'PERFIL'...). Por isso testamos a
     visibilidade de TODAS as ocorrencias, nao so da primeira -- se olhassemos
     so a primeira e ela fosse uma copia morta, perderiamos a janela viva."""
-    chaves = ("VIDRO COR", "PERFIL", "QTDE")
-    tentativas = 8 if esperar else 3
+    # Varias ancoras (basta UMA visivel). Assim, se um rotulo mudar de nome,
+    # ainda achamos a janela por outro.
+    chaves = ("VIDRO COR", "ALUMINIO/PERFIL", "PERFIL", "QTDE",
+              "Dados do Item", "FERRAGENS", "NOME PROJETO")
+    tentativas = 15 if esperar else 3
     for t in range(tentativas):
         if esperar and t == 0:
             page.wait_for_timeout(1500)
@@ -569,7 +572,7 @@ def _frame_do_modal(page, esperar=True):
                 try:
                     loc = fr.locator(f"xpath=//*[contains(text(),'{chave}')]")
                     n = loc.count()
-                    for i in range(n):
+                    for i in range(min(n, 25)):
                         try:
                             if loc.nth(i).is_visible():
                                 return fr
@@ -578,7 +581,47 @@ def _frame_do_modal(page, esperar=True):
                 except Exception:
                     continue
         page.wait_for_timeout(800)
+    if diagnostico:
+        _diagnostico_frames(page)
     return None
+
+
+def _diagnostico_frames(page):
+    """Quando NAO achamos a janela, imprime o que o robo esta vendo em cada
+    frame -- ajuda a descobrir por que a janela de edicao nao foi detectada."""
+    marcas = ("VIDRO COR", "ALUMINIO/PERFIL", "PERFIL", "QTDE", "Dados do Item",
+              "FERRAGENS", "NOME PROJETO", "Confirmar", "Fechar", "Editar Item")
+    print("     ---- diagnostico (o que o robo ve) ----")
+    try:
+        frames = page.frames
+    except Exception:
+        frames = []
+    print(f"     frames abertos: {len(frames)}")
+    for idx, fr in enumerate(frames):
+        achados = []
+        for m in marcas:
+            try:
+                loc = fr.locator(f"xpath=//*[contains(text(),'{m}')]")
+                n = loc.count()
+                if n == 0:
+                    continue
+                vis = 0
+                for i in range(min(n, 25)):
+                    try:
+                        if loc.nth(i).is_visible():
+                            vis += 1
+                    except Exception:
+                        pass
+                achados.append(f"{m}({vis}vis/{n})")
+            except Exception:
+                continue
+        if achados:
+            try:
+                url = fr.url[-45:]
+            except Exception:
+                url = "?"
+            print(f"     frame[{idx}] ...{url}: " + ", ".join(achados))
+    print("     ----------------------------------------")
 
 
 def _esperar_recalculo(page, timeout=9000):
@@ -1063,26 +1106,42 @@ def _itens_por_ordem(page):
     return mapa
 
 
-def aplicar_item_auto(page, linha_item, num, mud):
-    print(f"\n  >> Item {num}:")
-    if not _abrir_menu_item(page, linha_item):
-        print(f"     [!] nao abri o menu do item {num}")
-        return False
-    if not _clicar_texto_visivel(page, "Editar Item do Or", timeout=6000):
-        print(f"     [!] nao abri 'Editar Item' do item {num}")
-        print_tela(page, f"auto_sem_editar_{num}")
-        return False
-    page.wait_for_timeout(1600)
-    frame = _frame_do_modal(page)
-    if frame is None:
-        print(f"     [!] nao achei a janela de edicao do item {num}")
-        print_tela(page, f"auto_sem_modal_{num}")
-        _fechar_modal(page)  # fecha para nao travar o proximo item
+def _abrir_edicao_item(page, linha_item, num, tentativas=3):
+    """Abre o menu do item, clica em 'Editar Item do Orc.' e devolve o frame
+    da janela 'Dados do Item'. TENTA DE NOVO se a janela nao aparecer -- as
+    vezes o 1o clique nao abre, ou a janela demora a carregar no iframe."""
+    for tent in range(1, tentativas + 1):
+        if tent > 1:
+            print(f"     (tentativa {tent} de abrir a janela do item {num}...)")
+        if not _abrir_menu_item(page, linha_item):
+            print(f"     [!] nao abri o menu (☰) do item {num}")
+            page.wait_for_timeout(800)
+            continue
+        if not _clicar_texto_visivel(page, "Editar Item do Or", timeout=6000):
+            print(f"     [!] nao achei 'Editar Item do Orç.' do item {num}")
+            print_tela(page, f"auto_sem_editar_{num}")
+            page.wait_for_timeout(800)
+            continue
+        # Espera a janela abrir (paciente) e diagnostica na ultima tentativa.
+        frame = _frame_do_modal(page, esperar=True, diagnostico=(tent == tentativas))
+        if frame is not None:
+            return frame
+        # nao abriu: tira print, fecha o que tiver e tenta outra vez.
+        print_tela(page, f"auto_sem_modal_{num}_t{tent}")
+        _fechar_modal(page)
+        page.wait_for_timeout(1200)
+        # fecha tambem por ESC, caso o Fechar nao pegue
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
         page.wait_for_timeout(800)
-        return False
+    return None
 
-    # Antes de cada campo reencontramos a janela VIVA. Assim, se o W-Vetro
-    # recarregou a janela (recalculo), nunca escrevemos numa copia morta.
+
+def _preencher_campos_item(page, frame, mud):
+    """Preenche os campos do item na janela 'Dados do Item'. Antes de CADA
+    campo reencontra a janela VIVA, para nunca escrever numa copia morta."""
     def _frame_vivo():
         return _frame_do_modal(page, esperar=False) or frame
 
@@ -1106,6 +1165,19 @@ def aplicar_item_auto(page, linha_item, num, mud):
     if "vidro" in mud:
         _set_select_auto(_frame_vivo(), "VIDRO COR", "vidro", mud["vidro"], "vidro")
         frame = _esperar_recalculo(page) or frame
+    return frame
+
+
+def aplicar_item_auto(page, linha_item, num, mud):
+    """Modo AUTOMATICO: preenche e confirma sozinho."""
+    print(f"\n  >> Item {num}:")
+    frame = _abrir_edicao_item(page, linha_item, num)
+    if frame is None:
+        print(f"     [!] nao achei a janela de edicao do item {num}")
+        print(f"         (veja o diagnostico acima e o print auto_sem_modal_{num}*)")
+        return False
+
+    _preencher_campos_item(page, frame, mud)
 
     print_tela(page, f"auto_item_{num}")
     # Confirma a janela de edicao e, se aparecer, a de variaveis
@@ -1116,6 +1188,32 @@ def aplicar_item_auto(page, linha_item, num, mud):
         print(f"     [!] item {num}: alguma janela nao fechou sozinha.")
         print_tela(page, f"auto_confirmar_travou_{num}")
     page.wait_for_timeout(1500)
+    return True
+
+
+def aplicar_item_semi_auto(page, linha_item, num, mud):
+    """Modo SEGURO: o robo abre e PREENCHE os campos, mas VOCE confere e
+    clica Confirmar (e passa pela janela de variaveis). Bem mais confiavel,
+    porque a parte que mais falha (confirmar/variaveis) fica com voce."""
+    print(f"\n  >> Item {num}: abrindo e preenchendo...")
+    frame = _abrir_edicao_item(page, linha_item, num)
+    if frame is None:
+        print(f"     [!] nao achei a janela de edicao do item {num}")
+        print(f"         (veja o diagnostico acima e o print auto_sem_modal_{num}*)")
+        return False
+
+    _preencher_campos_item(page, frame, mud)
+    print_tela(page, f"semi_item_{num}")
+
+    print()
+    print("  " + "=" * 58)
+    print(f"  ITEM {num} PREENCHIDO PELO ROBO. Agora, NA TELA DO W-VETRO:")
+    print("    1) CONFIRA os campos (ajuste na mao se algo ficou errado).")
+    print("    2) Clique em CONFIRMAR.")
+    print("    3) Se abrir 'Informar Medidas/Quantidades',")
+    print("       clique CONFIRMAR nela tambem.")
+    print("  " + "=" * 58)
+    input("  Quando o item estiver SALVO, aperte ENTER aqui p/ o proximo...  ")
     return True
 
 
@@ -1182,6 +1280,16 @@ def modo_mensagem(page):
         print("  Cancelado.")
         return
 
+    # Escolha do modo. O SEGURO e mais confiavel: o robo preenche e voce
+    # confere/confirma. Recomendado enquanto o automatico nao esta 100%.
+    print()
+    print("  Como aplicar?")
+    print("    S) Modo SEGURO  - o robo preenche, VOCE confere e clica Confirmar (recomendado)")
+    print("    A) Modo AUTOMATICO - o robo faz tudo sozinho (pode falhar no Confirmar)")
+    modo = input("  Opcao [S/A] (Enter = S): ").strip().lower()
+    semi = (modo != "a")
+    print(f"  -> Modo {'SEGURO' if semi else 'AUTOMATICO'} escolhido.")
+
     if not abrir_orcamento(page, orc):
         print("  Nao consegui abrir o orcamento.")
         return
@@ -1192,7 +1300,14 @@ def modo_mensagem(page):
         if linha is None:
             print(f"  [!] item {num} nao existe neste orcamento.")
             continue
-        aplicar_item_auto(page, linha, num, mud)
+        try:
+            if semi:
+                aplicar_item_semi_auto(page, linha, num, mud)
+            else:
+                aplicar_item_auto(page, linha, num, mud)
+        except Exception as e:
+            print(f"  [!] erro inesperado no item {num}: {e}")
+            print_tela(page, f"erro_item_{num}")
         page.wait_for_timeout(1200)
 
     # Ao final, o W-Vetro precisa RECALCULAR os valores do orcamento.
