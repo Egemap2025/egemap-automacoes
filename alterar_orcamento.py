@@ -378,12 +378,166 @@ def ler_itens(page):
     return itens
 
 
+# ── Alteracoes: trocar vidro de um item ───────────────────────────────────────────
+
+def _linhas_itens(page):
+    """Retorna as linhas (locators) que sao itens de projeto do orcamento,
+    na ordem em que aparecem."""
+    resultado = []
+    try:
+        linhas = page.locator("table tbody tr")
+        for i in range(linhas.count()):
+            linha = linhas.nth(i)
+            try:
+                txt = linha.inner_text().upper()
+            except Exception:
+                continue
+            if any(p in txt for p in ("JANELA", "PORTA", "MODULO", "GUARDA")):
+                resultado.append(linha)
+    except Exception:
+        pass
+    return resultado
+
+
+def _abrir_menu_item(page, linha_item):
+    """Abre o menu ☰ da linha do item."""
+    for sel in ("i[class*='fa-bars']", "[class*='fa-bars']", "button", "td"):
+        try:
+            linha_item.locator(sel).first.click(timeout=2500)
+            page.wait_for_timeout(700)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _achar_select_vidro(page):
+    """Localiza o <select> do campo 'VIDRO COR' na janela de edicao do item."""
+    # A) o select logo apos o texto "VIDRO COR"
+    try:
+        s = page.locator(
+            "xpath=//*[contains(text(),'VIDRO COR')]/following::select[1]"
+        ).first
+        s.wait_for(timeout=4000)
+        return s
+    except Exception:
+        pass
+    # B) por label associado
+    try:
+        s = page.get_by_label("VIDRO COR", exact=False)
+        s.wait_for(timeout=2500)
+        return s
+    except Exception:
+        pass
+    # C) qualquer select cujas opcoes pareçam de vidro
+    try:
+        selects = page.locator("select")
+        for i in range(selects.count()):
+            s = selects.nth(i)
+            txt = (s.inner_text() or "").upper()
+            if any(v in txt for v in ("TEMPERADO", "COMUM", "INCOLOR")):
+                return s
+    except Exception:
+        pass
+    return None
+
+
+def trocar_vidro_item(page, linha_item):
+    """Abre o item, mostra as opcoes de vidro e troca pela escolhida.
+    NAO salva -- para para o usuario conferir e salvar na tela."""
+    log("Abrindo o item para editar o vidro...")
+    if not _abrir_menu_item(page, linha_item):
+        log("Nao consegui abrir o menu (☰) do item.")
+        return False
+
+    # Clica em "Editar Item do Orç."
+    try:
+        linha_item.get_by_text("Editar Item", exact=False).first.click(timeout=3000)
+    except Exception:
+        try:
+            page.get_by_text("Editar Item", exact=False).first.click(timeout=3000)
+        except Exception:
+            log("Nao encontrei a opcao 'Editar Item do Orç.'.")
+            print_tela(page, "sem_editar_item")
+            return False
+
+    page.wait_for_timeout(1800)
+    print_tela(page, "editar_item_modal")
+
+    select_vidro = _achar_select_vidro(page)
+    if select_vidro is None:
+        log("Nao encontrei o campo 'VIDRO COR' na janela.")
+        print_tela(page, "sem_campo_vidro")
+        return False
+
+    # Le as opcoes de vidro disponiveis
+    try:
+        opcoes_raw = select_vidro.locator("option").all_inner_texts()
+    except Exception:
+        opcoes_raw = []
+    opcoes = [o.strip() for o in opcoes_raw
+              if o.strip() and "SELECIONE" not in o.strip().upper()]
+
+    if not opcoes:
+        log("Nao consegui ler as opcoes de vidro.")
+        print_tela(page, "vidro_sem_opcoes")
+        return False
+
+    # Mostra a lista numerada para o usuario escolher (sem risco de digitar errado)
+    print()
+    print("  Opcoes de vidro disponiveis:")
+    for i, o in enumerate(opcoes, 1):
+        print(f"    {i:2d}) {o}")
+    print()
+    escolha = input("  Numero do vidro desejado (ou Enter para cancelar): ").strip()
+    if not escolha.isdigit() or not (1 <= int(escolha) <= len(opcoes)):
+        print("  Cancelado -- nenhuma alteracao feita.")
+        return False
+
+    vidro_escolhido = opcoes[int(escolha) - 1]
+    try:
+        select_vidro.select_option(label=vidro_escolhido)
+    except Exception as e:
+        log(f"Nao consegui selecionar o vidro: {e}")
+        return False
+
+    page.wait_for_timeout(600)
+    print_tela(page, "vidro_trocado")
+    print()
+    print("  " + "=" * 56)
+    print(f"  VIDRO alterado para: {vidro_escolhido}")
+    print("  >> CONFIRA na tela do W-Vetro e clique em SALVAR voce mesmo.")
+    print("  >> (O robo NAO salva sozinho, por seguranca.)")
+    print("  " + "=" * 56)
+    input("\n  Aperte ENTER aqui depois de conferir/salvar...  ")
+    return True
+
+
+def menu_alteracoes(page):
+    """Depois de abrir o orcamento, oferece alterar o vidro de um item."""
+    while True:
+        itens = _linhas_itens(page)
+        if not itens:
+            return
+        print()
+        resp = input(f"Alterar o VIDRO de algum item? (1 a {len(itens)}, ou Enter para nao): ").strip()
+        if not resp:
+            return
+        if not resp.isdigit() or not (1 <= int(resp) <= len(itens)):
+            print("  Numero de item invalido.")
+            continue
+        trocar_vidro_item(page, itens[int(resp) - 1])
+        # volta ao detalhe do orcamento para poder alterar outro item
+        page.wait_for_timeout(1200)
+
+
 # ── Programa principal ────────────────────────────────────────────────────────────
 
 def main():
     print("=" * 60)
-    print("   EGEMAP - Robo de Alteracao de Orcamentos (ETAPA 1)")
-    print("   (por enquanto so LE o orcamento -- ainda nao altera nada)")
+    print("   EGEMAP - Robo de Alteracao de Orcamentos")
+    print("   Abre o orcamento, le os itens e troca o vidro (com sua")
+    print("   confirmacao). O robo NAO salva sozinho -- voce confere e salva.")
     print("=" * 60)
     print()
 
@@ -423,8 +577,7 @@ def main():
 
                 if abrir_orcamento(page, numero):
                     ler_itens(page)
-                    print("  >> Confira: os itens acima batem com o orcamento no sistema?")
-                    print("  >> Se sim, a base esta funcionando e partimos para as alteracoes.")
+                    menu_alteracoes(page)
                 else:
                     print("  Nao consegui abrir esse orcamento sozinho.")
                     print(f"  Veja os prints em: {PRINTS_DIR}")
