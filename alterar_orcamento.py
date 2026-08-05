@@ -507,9 +507,9 @@ def editar_item(page, linha_item, indice=None):
         op = input("  Opcao: ").strip()
 
         if op == "1":
-            mudou = _trocar_select_campo(frame, "VIDRO COR", "vidro") or mudou
+            mudou = _trocar_select_campo(frame, "VIDRO COR", "vidro", "vidro") or mudou
         elif op == "2":
-            mudou = _trocar_select_campo(frame, "PERFIL", "cor (aluminio/perfil)") or mudou
+            mudou = _trocar_select_campo(frame, "PERFIL", "cor (aluminio/perfil)", "cor") or mudou
         elif op == "3":
             mudou = _trocar_input_campo(frame, "LARGURA", "largura") or mudou
         elif op == "4":
@@ -566,25 +566,54 @@ def _frame_do_modal(page):
     return None
 
 
-def _trocar_select_campo(frame, label, nome):
-    """Troca um campo do tipo lista (select) mostrando as opcoes numeradas."""
+def _opcoes_do_select(sel):
+    """Le os textos das opcoes de um <select>."""
     try:
-        sel = frame.locator(
-            f"xpath=//*[contains(text(),'{label}')]/following::select[1]"
-        ).first
-        if sel.count() == 0:
-            print(f"  Nao encontrei o campo {nome}.")
-            return False
+        return [o.strip() for o in sel.locator("option").all_inner_texts() if o.strip()]
     except Exception:
+        return []
+
+
+def _parece_vidro(opcoes):
+    """True se as opcoes parecem de vidro (tem espessura 'MM' + tipo)."""
+    if not opcoes:
+        return False
+    n = sum(1 for o in opcoes if "MM" in o.upper()
+            and any(t in o.upper() for t in ("TEMPERADO", "COMUM", "LAMINADO", "REFLETIVO")))
+    return n >= max(3, len(opcoes) // 2)
+
+
+def _achar_select(frame, rotulo, esperado):
+    """Acha o <select> do rotulo. Como a ordem no DOM varia (as vezes o campo
+    vem ANTES do rotulo), olha o select seguinte E o anterior, e decide pelo
+    CONTEUDO: vidro tem espessuras 'MM'; cor/perfil nao."""
+    candidatos = []
+    for xp in (f"xpath=//*[contains(text(),'{rotulo}')]/following::select[1]",
+               f"xpath=//*[contains(text(),'{rotulo}')]/following::select[2]",
+               f"xpath=//*[contains(text(),'{rotulo}')]/preceding::select[1]"):
+        try:
+            loc = frame.locator(xp).first
+            if loc.count() > 0:
+                candidatos.append(loc)
+        except Exception:
+            pass
+    for loc in candidatos:
+        ev = _parece_vidro(_opcoes_do_select(loc))
+        if esperado == "vidro" and ev:
+            return loc
+        if esperado == "cor" and not ev and _opcoes_do_select(loc):
+            return loc
+    return candidatos[0] if candidatos else None
+
+
+def _trocar_select_campo(frame, rotulo, nome, esperado):
+    """Troca um campo do tipo lista (select) mostrando as opcoes numeradas."""
+    sel = _achar_select(frame, rotulo, esperado)
+    if sel is None or sel.count() == 0:
         print(f"  Nao encontrei o campo {nome}.")
         return False
 
-    try:
-        brutas = sel.locator("option").all_inner_texts()
-    except Exception:
-        brutas = []
-    opcoes = [o.strip() for o in brutas
-              if o.strip() and "SELECIONE" not in o.strip().upper()]
+    opcoes = [o for o in _opcoes_do_select(sel) if "SELECIONE" not in o.upper()]
     if not opcoes:
         print(f"  Nao consegui ler as opcoes de {nome}.")
         return False
