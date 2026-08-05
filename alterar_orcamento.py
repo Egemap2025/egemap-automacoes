@@ -155,10 +155,39 @@ def abrir_orcamento(page, numero):
     return True
 
 
+def _escrever_no_campo(campo, numero):
+    """Escreve o numero de forma robusta e confere se ficou certo.
+    Usa fill() (preenche de uma vez, sem perder digito) e, se falhar,
+    tenta limpar e digitar de novo."""
+    numero = str(numero)
+    campo.scroll_into_view_if_needed()
+    campo.click()
+    # limpa qualquer conteudo anterior
+    try:
+        campo.press("Control+a")
+        campo.press("Delete")
+    except Exception:
+        pass
+    # fill preenche o valor inteiro de uma vez (nao perde o 1o digito)
+    campo.fill(numero)
+    campo.wait_for(timeout=1000)
+    if (campo.input_value() or "").strip() == numero:
+        return True
+    # 2a tentativa: limpa e digita de novo
+    try:
+        campo.press("Control+a")
+        campo.press("Delete")
+        campo.fill(numero)
+        campo.wait_for(timeout=800)
+    except Exception:
+        pass
+    return numero in (campo.input_value() or "")
+
+
 def _preencher_numero(page, numero):
-    """Tenta varias estrategias para escrever o numero no campo de valor da busca."""
-    # O campo "valor" e o input que fica IMEDIATAMENTE antes do botao "Procurar".
-    # Mirar por essa relacao evita cair na busca do menu (canto esquerdo).
+    """Escreve o numero no campo 'valor' da busca (o input imediatamente
+    antes do botao 'Procurar'), evitando a busca do menu no canto esquerdo."""
+    numero = str(numero)
 
     # Estrategia A (a boa): o input mais proximo ANTES do botao Procurar.
     try:
@@ -166,12 +195,7 @@ def _preencher_numero(page, numero):
             "xpath=//button[normalize-space()='Procurar']/preceding::input[1]"
         ).first
         campo.wait_for(timeout=5000)
-        campo.scroll_into_view_if_needed()
-        campo.click()
-        campo.fill("")
-        campo.type(str(numero), delay=40)
-        valor = campo.input_value()
-        if str(numero) in (valor or ""):
+        if _escrever_no_campo(campo, numero):
             log(f"   (numero {numero} escrito no campo de busca certo)")
             return True
     except Exception:
@@ -183,10 +207,7 @@ def _preencher_numero(page, numero):
             "xpath=//select[option[normalize-space()='=']]/following::input[1]"
         ).first
         campo.wait_for(timeout=4000)
-        campo.click()
-        campo.fill("")
-        campo.type(str(numero), delay=40)
-        if str(numero) in (campo.input_value() or ""):
+        if _escrever_no_campo(campo, numero):
             return True
     except Exception:
         pass
@@ -195,7 +216,7 @@ def _preencher_numero(page, numero):
     try:
         campo = page.get_by_role("spinbox").last
         campo.wait_for(timeout=3000)
-        campo.fill(str(numero))
+        campo.fill(numero)
         return True
     except Exception:
         pass
