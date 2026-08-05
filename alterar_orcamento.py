@@ -554,10 +554,12 @@ def editar_item(page, linha_item, indice=None):
 
 
 def _frame_tem_campos(fr):
-    """True se o frame contem os campos da janela de edicao."""
+    """True se o frame contem (vivo) os campos da janela de edicao.
+    Usa locator().count(); em frame morto isso lanca excecao (filtra)."""
     try:
-        return bool(fr.query_selector("xpath=//*[contains(text(),'VIDRO COR')]")
-                    or fr.query_selector("xpath=//*[contains(text(),'QTDE')]"))
+        if fr.locator("xpath=//*[contains(text(),'VIDRO COR')]").count() > 0:
+            return True
+        return fr.locator("xpath=//*[contains(text(),'QTDE')]").count() > 0
     except Exception:
         return False
 
@@ -1027,18 +1029,7 @@ def aplicar_item_auto(page, linha_item, num, mud):
         page.wait_for_timeout(800)
         return False
 
-    # Cor e vidro PRIMEIRO: eles recarregam a janela para recalcular. Depois
-    # de cada um, reencontramos a janela boa (esperando carregar). Os campos
-    # digitados vao POR ULTIMO, na janela ja estavel -- assim nao se perdem.
-    if "cor" in mud:
-        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
-        page.wait_for_timeout(1800)
-        frame = _frame_do_modal(page) or frame
-    if "vidro" in mud:
-        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
-        page.wait_for_timeout(1800)
-        frame = _frame_do_modal(page) or frame
-
+    # Campos DIGITADOS primeiro: a janela esta fresca e eles nao recarregam.
     if "largura" in mud:
         _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
     if "altura" in mud:
@@ -1049,6 +1040,15 @@ def aplicar_item_auto(page, linha_item, num, mud):
         _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
     if "ambiente" in mud:
         _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
+
+    # Cor e vidro por ULTIMO (recarregam a janela); reencontra depois de cada.
+    if "cor" in mud:
+        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
+        page.wait_for_timeout(2000)
+        frame = _frame_do_modal(page) or frame
+    if "vidro" in mud:
+        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
+        page.wait_for_timeout(2000)
 
     print_tela(page, f"auto_item_{num}")
     _clicar_confirmar_modal(page)
