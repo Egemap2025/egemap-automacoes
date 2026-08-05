@@ -556,9 +556,14 @@ def editar_item(page, linha_item, indice=None):
 def _frame_do_modal(page, esperar=True):
     """Retorna o frame (pagina ou iframe) cujos campos da janela de edicao
     estao VISIVEIS. Exigir a visibilidade descarta as copias antigas/mortas
-    que ficam na memoria apos recarregar (elas existem mas nao aparecem)."""
+    que ficam na memoria apos recarregar (elas existem mas nao aparecem).
+
+    IMPORTANTE: quando o W-Vetro recalcula (troca de cor/vidro) sobram varias
+    copias do MESMO texto ('VIDRO COR', 'PERFIL'...). Por isso testamos a
+    visibilidade de TODAS as ocorrencias, nao so da primeira -- se olhassemos
+    so a primeira e ela fosse uma copia morta, perderiamos a janela viva."""
     chaves = ("VIDRO COR", "PERFIL", "QTDE")
-    tentativas = 6 if esperar else 3
+    tentativas = 8 if esperar else 3
     for t in range(tentativas):
         if esperar and t == 0:
             page.wait_for_timeout(1500)
@@ -566,14 +571,37 @@ def _frame_do_modal(page, esperar=True):
             for chave in chaves:
                 try:
                     loc = fr.locator(f"xpath=//*[contains(text(),'{chave}')]")
-                    if loc.count() == 0:
-                        continue
-                    if loc.first.is_visible():
-                        return fr
+                    n = loc.count()
+                    for i in range(n):
+                        try:
+                            if loc.nth(i).is_visible():
+                                return fr
+                        except Exception:
+                            continue
                 except Exception:
                     continue
-        page.wait_for_timeout(700)
+        page.wait_for_timeout(800)
     return None
+
+
+def _esperar_recalculo(page, timeout=9000):
+    """Depois de trocar cor/vidro o W-Vetro RECALCULA e RECARREGA a janela.
+    Em vez de esperar um tempo fixo (que as vezes e curto demais, as vezes
+    longo demais), esperamos ativamente a janela viva reaparecer e devolvemos
+    o frame novo. Assim o proximo campo ja e aplicado na janela certa."""
+    import time as _t
+    # da um instante para o recalculo COMECAR (a janela some por um momento)
+    page.wait_for_timeout(900)
+    fim = _t.time() + timeout / 1000
+    while _t.time() < fim:
+        fr = _frame_do_modal(page, esperar=False)
+        if fr is not None:
+            # confirma estabilidade: continua visivel depois de um respiro
+            page.wait_for_timeout(400)
+            if _frame_do_modal(page, esperar=False) is not None:
+                return fr
+        page.wait_for_timeout(400)
+    return _frame_do_modal(page, esperar=False)
 
 
 def _opcoes_do_select(sel):
@@ -624,22 +652,47 @@ def _candidatos_campo(frame, rotulo, tag, exato=False):
     return cands
 
 
+def _visivel(loc):
+    """True se o locator existe e esta visivel (sem estourar excecao)."""
+    try:
+        return loc.count() > 0 and loc.first.is_visible()
+    except Exception:
+        return False
+
+
 def _achar_select(frame, rotulo, esperado):
     """Acha o <select> certo do rotulo, decidindo pelo CONTEUDO das opcoes
-    (vidro tem 'MM'; cor tem acabamentos)."""
+    (vidro tem 'MM'; cor tem acabamentos). Entre os candidatos que batem no
+    conteudo, prefere o que esta VISIVEL (descarta copia morta pos-recalculo)."""
     cands = _candidatos_campo(frame, rotulo, "select")
+    batem = []
     for loc in cands:
         ops = _opcoes_do_select(loc)
         if esperado == "vidro" and _parece_vidro(ops):
+            batem.append(loc)
+        elif esperado == "cor" and _parece_cor(ops):
+            batem.append(loc)
+    # 1o) candidato que bate no conteudo E esta visivel
+    for loc in batem:
+        if _visivel(loc):
             return loc
-        if esperado == "cor" and _parece_cor(ops):
+    # 2o) qualquer que bata no conteudo
+    if batem:
+        return batem[0]
+    # 3o) qualquer candidato visivel
+    for loc in cands:
+        if _visivel(loc):
             return loc
     return cands[0] if cands else None
 
 
 def _achar_input(frame, rotulo, exato=False):
-    """Acha o <input> do rotulo (dentro do mesmo bloco, senao vizinho)."""
+    """Acha o <input> do rotulo (dentro do mesmo bloco, senao vizinho).
+    Prefere o campo VISIVEL para nao pegar uma copia morta da janela."""
     cands = _candidatos_campo(frame, rotulo, "input", exato=exato)
+    for loc in cands:
+        if _visivel(loc):
+            return loc
     return cands[0] if cands else None
 
 
@@ -938,11 +991,20 @@ def _set_select_auto(frame, rotulo, esperado, termo, nome):
         escolha = opcoes[int(r) - 1]
     try:
         sel.select_option(label=escolha)
-        print(f"     {nome} -> {escolha}")
-        return True
     except Exception as e:
         print(f"     [!] {nome}: {e}")
         return False
+
+    # Confere se a escolha realmente ficou marcada (o recalculo as vezes reverte).
+    try:
+        marcado = (sel.locator("option:checked").first.inner_text() or "").strip()
+    except Exception:
+        marcado = ""
+    if marcado and marcado != escolha:
+        print(f"     [!] {nome}: pedi '{escolha}' mas ficou '{marcado}'.")
+        return False
+    print(f"     {nome} -> {escolha}")
+    return True
 
 
 def _set_input_auto(frame, rotulo, valor, nome, exato=False):
@@ -1000,26 +1062,31 @@ def aplicar_item_auto(page, linha_item, num, mud):
         page.wait_for_timeout(800)
         return False
 
+    # Antes de cada campo reencontramos a janela VIVA. Assim, se o W-Vetro
+    # recarregou a janela (recalculo), nunca escrevemos numa copia morta.
+    def _frame_vivo():
+        return _frame_do_modal(page, esperar=False) or frame
+
     # Campos DIGITADOS primeiro: a janela esta fresca e eles nao recarregam.
     if "largura" in mud:
-        _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
+        _set_input_auto(_frame_vivo(), "LARGURA", mud["largura"], "largura")
     if "altura" in mud:
-        _set_input_auto(frame, "ALTURA", mud["altura"], "altura")
+        _set_input_auto(_frame_vivo(), "ALTURA", mud["altura"], "altura")
     if "qtde" in mud:
-        _set_input_auto(frame, "QTDE", mud["qtde"], "quantidade")
+        _set_input_auto(_frame_vivo(), "QTDE", mud["qtde"], "quantidade")
     if "tipo" in mud:
-        _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
+        _set_input_auto(_frame_vivo(), "TIPO", mud["tipo"], "tipo", exato=True)
     if "ambiente" in mud:
-        _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
+        _set_input_auto(_frame_vivo(), "AMBIENTE", mud["ambiente"], "ambiente")
 
-    # Cor e vidro por ULTIMO (recarregam a janela); reencontra depois de cada.
+    # Cor e vidro por ULTIMO (recarregam a janela). Reencontra a janela ANTES
+    # de cada um e ESPERA o recalculo terminar DEPOIS de cada um.
     if "cor" in mud:
-        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
-        page.wait_for_timeout(2000)
-        frame = _frame_do_modal(page) or frame
+        _set_select_auto(_frame_vivo(), "PERFIL", "cor", mud["cor"], "cor")
+        frame = _esperar_recalculo(page) or frame
     if "vidro" in mud:
-        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
-        page.wait_for_timeout(2000)
+        _set_select_auto(_frame_vivo(), "VIDRO COR", "vidro", mud["vidro"], "vidro")
+        frame = _esperar_recalculo(page) or frame
 
     print_tela(page, f"auto_item_{num}")
     _clicar_confirmar_modal(page)
@@ -1029,6 +1096,33 @@ def aplicar_item_auto(page, linha_item, num, mud):
     print(f"     item {num} salvo. ✔")
     page.wait_for_timeout(1500)
     return True
+
+
+def clicar_calcular(page):
+    """Depois de alterar itens, o W-Vetro mostra 'Orcamento Nao Calculado --
+    clique em Calcular'. Esta funcao clica no botao 'Calcular' VISIVEL (em
+    qualquer frame) para atualizar os valores. Retorna True se conseguiu."""
+    alvo = _re.compile(r"^\s*calcular\s*$", _re.I)
+    for _tent in range(3):
+        for fr in page.frames:
+            for getter in ("role", "text"):
+                try:
+                    loc = (fr.get_by_role("button", name=alvo) if getter == "role"
+                           else fr.get_by_text(alvo))
+                    for i in range(loc.count()):
+                        e = loc.nth(i)
+                        try:
+                            if e.is_visible():
+                                e.scroll_into_view_if_needed()
+                                e.click(timeout=3000)
+                                page.wait_for_timeout(3000)
+                                return True
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        page.wait_for_timeout(800)
+    return False
 
 
 def modo_mensagem(page):
@@ -1079,6 +1173,14 @@ def modo_mensagem(page):
             continue
         aplicar_item_auto(page, linha, num, mud)
         page.wait_for_timeout(1200)
+
+    # Ao final, o W-Vetro precisa RECALCULAR os valores do orcamento.
+    print("\n  Atualizando os valores (Calcular)...")
+    if clicar_calcular(page):
+        print("  Cliquei em Calcular -- valores atualizados. ✔")
+    else:
+        print("  (Nao achei o botao 'Calcular'. Se aparecer 'Orcamento Nao")
+        print("   Calculado' na tela, clique em Calcular manualmente.)")
 
     print("\n  Pronto! Alteracoes da mensagem aplicadas. ✔")
 

@@ -1,7 +1,8 @@
 # EGEMAP — Robô de Alteração de Orçamentos (W-Vetro) — CONTEXTO
 
 Documento de contexto para continuar o projeto numa conversa nova.
-**Todo o código está na branch:** `claude/orcamento-2346-alteracao-fmwarh`
+**Código mais recente na branch:** `claude/orcamento-2346-alteracao-fmwarh-7top10`
+(a versão anterior estava em `claude/orcamento-2346-alteracao-fmwarh`)
 Repositório: `Egemap2025/egemap-automacoes`
 
 ---
@@ -54,22 +55,34 @@ Orçamento 2346
 
 ---
 
-## O que ESTÁ EM AJUSTE (o único ponto aberto)
+## Modo mensagem — APLICAR (CORRIGIDO nesta rodada)
 
-**Modo mensagem — APLICAR as alterações** (função `aplicar_item_auto`).
-O preview funciona; falta o robô aplicar campo a campo de forma estável.
+**Sintomas que existiam:** às vezes o robô dizia "não achei a janela de
+edição" mesmo com a janela ABERTA, ou aplicava a cor mas falhava no vidro.
 
-**Sintoma atual:** às vezes o robô diz "não achei a janela de edição" mesmo
-com a janela ABERTA, ou aplica a cor mas falha nos campos seguintes.
+**Causa raiz:** quando muda **cor/vidro**, o W-Vetro **recarrega a janela**
+(recalcular) e sobram "cópias mortas" do texto/campos na memória. O
+`_frame_do_modal` só olhava a **primeira** ocorrência do texto — se ela fosse
+uma cópia morta (invisível), o robô perdia a janela viva e continuava usando a
+janela velha.
 
-**Causa raiz descoberta:** quando muda **cor/vidro**, o W-Vetro **recarrega a
-janela** (recalcular), e sobram "cópias mortas" da janela na memória. O robô
-precisa sempre pegar a **janela viva/visível**, não a cópia velha.
+**O que foi corrigido (`aplicar_item_auto` e ajudantes):**
+- `_frame_do_modal` agora testa a visibilidade de **TODAS** as ocorrências do
+  texto (não só a primeira) → acha a janela viva mesmo com cópias mortas.
+- Novo `_esperar_recalculo`: depois de trocar cor/vidro, **espera ativamente**
+  a janela viva reaparecer (em vez de um tempo fixo) e devolve o frame novo.
+- `aplicar_item_auto` **reencontra a janela viva ANTES de cada campo**
+  (`_frame_vivo()`), então nunca escreve numa cópia morta. Ordem mantida:
+  digitados primeiro, **cor e vidro por último**.
+- `_achar_select` / `_achar_input` preferem o campo **VISÍVEL**.
+- `_set_select_auto` agora **confere** se a opção realmente ficou marcada
+  (avisa se o recálculo reverteu).
+- Novo `clicar_calcular`: ao final do modo mensagem o robô clica em
+  **Calcular** para atualizar os valores do orçamento.
 
-**Abordagem atual (função `_frame_do_modal`):** procura nos frames o campo
-cujo texto está **VISÍVEL** (isso descarta as cópias mortas). Ordem de
-aplicação: **campos digitados primeiro** (janela fresca), **cor e vidro por
-último** (reencontrando a janela depois de cada um).
+> Falta **testar de verdade** no orçamento 2346 (os 2 itens ponta a ponta) —
+> as correções são baseadas na causa raiz documentada, mas não deu para rodar
+> contra o W-Vetro real nesta rodada.
 
 ---
 
@@ -92,14 +105,16 @@ aplicação: **campos digitados primeiro** (janela fresca), **cor e vidro por
 - **Campo de busca do orçamento:** input imediatamente antes do botão "Procurar"
   (não a busca do menu no canto). Preencher com `fill()` (não digitar letra a letra).
 - Depois de aplicar tudo, o W-Vetro mostra **"Orçamento Não Calculado — clique
-  em Calcular"** — pode ser preciso clicar em **Calcular** ao final (a implementar).
+  em Calcular"** — o robô agora clica em **Calcular** ao final (`clicar_calcular`).
 
 ---
 
-## Próximos passos (depois de fechar o modo mensagem)
+## Próximos passos
 
-1. Fechar o **aplicar do modo mensagem** (estável nos 2 itens).
-2. Clicar em **Calcular** ao final para atualizar os valores.
+1. **Testar no PC** o modo mensagem ponta a ponta no orçamento 2346 (os 2
+   itens) e confirmar que ficou estável com as correções desta rodada.
+2. Se algum campo ainda falhar, mandar os **prints** salvos em
+   `~/EGEMAP_robo_prints` (`auto_item_*`, `auto_sem_modal_*`) para ajustar.
 3. Futuro (visão do usuário): robô **montar orçamentos do zero** (já que terá
    toda a navegação dominada) — ex.: "Substituir Projeto" / "Novo Orçamento".
 
