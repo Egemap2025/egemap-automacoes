@@ -555,25 +555,35 @@ def editar_item(page, linha_item, indice=None):
 
 def _frame_do_modal(page, esperar=True):
     """Retorna o frame (pagina ou iframe) que contem a janela de edicao.
-    Prefere o frame cujo rotulo esta VISIVEL (evita pegar uma janela antiga
-    que ficou detachada apos um recalculo)."""
-    if esperar:
-        page.wait_for_timeout(1200)
-    reserva = None
-    for fr in page.frames:
-        try:
-            loc = fr.locator("xpath=//*[contains(text(),'VIDRO COR')]")
-            if loc.count() == 0:
-                continue
-            try:
-                if loc.first.is_visible():
-                    return fr
-            except Exception:
-                pass
-            reserva = reserva or fr
-        except Exception:
-            continue
-    return reserva
+    Tenta varias palavras-chave e, quando pedido, tenta algumas vezes (o
+    iframe pode demorar a carregar). Prefere o frame cujo campo esta VISIVEL
+    (evita pegar uma janela antiga que ficou detachada apos um recalculo)."""
+    chaves = ("VIDRO COR", "PERFIL", "QTDE")
+    tentativas = 4 if esperar else 1
+    for t in range(tentativas):
+        if esperar and t == 0:
+            page.wait_for_timeout(1200)
+        reserva = None
+        for fr in page.frames:
+            for chave in chaves:
+                try:
+                    loc = fr.locator(f"xpath=//*[contains(text(),'{chave}')]")
+                    if loc.count() == 0:
+                        continue
+                except Exception:
+                    continue
+                try:
+                    if loc.first.is_visible():
+                        return fr
+                except Exception:
+                    pass
+                reserva = reserva or fr
+                break
+        if reserva is not None:
+            return reserva
+        if esperar:
+            page.wait_for_timeout(900)
+    return None
 
 
 def _opcoes_do_select(sel):
@@ -996,6 +1006,8 @@ def aplicar_item_auto(page, linha_item, num, mud):
     if frame is None:
         print(f"     [!] nao achei a janela de edicao do item {num}")
         print_tela(page, f"auto_sem_modal_{num}")
+        _fechar_modal(page)  # fecha para nao travar o proximo item
+        page.wait_for_timeout(800)
         return False
 
     # Reencontra a janela antes de CADA campo (ela recarrega apos mudar
