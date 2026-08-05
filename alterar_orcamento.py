@@ -553,55 +553,26 @@ def editar_item(page, linha_item, indice=None):
     return True
 
 
-def _frame_tem_campos(fr):
-    """True se o frame contem (vivo) os campos da janela de edicao.
-    Usa locator().count(); em frame morto isso lanca excecao (filtra)."""
-    try:
-        if fr.locator("xpath=//*[contains(text(),'VIDRO COR')]").count() > 0:
-            return True
-        return fr.locator("xpath=//*[contains(text(),'QTDE')]").count() > 0
-    except Exception:
-        return False
-
-
 def _frame_do_modal(page, esperar=True):
-    """Retorna o Frame da janela de edicao. Prioriza o <iframe> visivel, mas
-    aceita qualquer iframe/quadro VIVO que tenha os campos -- descartando as
-    copias mortas (que ficam na memoria apos recarregar). query_selector so
-    funciona em frames vivos, entao serve de filtro."""
-    tentativas = 5 if esperar else 2
+    """Retorna o frame (pagina ou iframe) cujos campos da janela de edicao
+    estao VISIVEIS. Exigir a visibilidade descarta as copias antigas/mortas
+    que ficam na memoria apos recarregar (elas existem mas nao aparecem)."""
+    chaves = ("VIDRO COR", "PERFIL", "QTDE")
+    tentativas = 6 if esperar else 3
     for t in range(tentativas):
         if esperar and t == 0:
-            page.wait_for_timeout(1200)
-
-        # A) iframes atualmente no DOM (copias mortas nao aparecem aqui)
-        candidato = None
-        try:
-            for eh in page.query_selector_all("iframe"):
+            page.wait_for_timeout(1500)
+        for fr in page.frames:
+            for chave in chaves:
                 try:
-                    fr = eh.content_frame()
-                    if fr is None or not _frame_tem_campos(fr):
+                    loc = fr.locator(f"xpath=//*[contains(text(),'{chave}')]")
+                    if loc.count() == 0:
                         continue
-                    try:
-                        if eh.is_visible():
-                            return fr
-                    except Exception:
-                        pass
-                    candidato = candidato or fr
+                    if loc.first.is_visible():
+                        return fr
                 except Exception:
                     continue
-        except Exception:
-            pass
-        if candidato is not None:
-            return candidato
-
-        # B) qualquer frame vivo com os campos (inclui a pagina principal)
-        for fr in page.frames:
-            if _frame_tem_campos(fr):
-                return fr
-
-        if esperar:
-            page.wait_for_timeout(900)
+        page.wait_for_timeout(700)
     return None
 
 
