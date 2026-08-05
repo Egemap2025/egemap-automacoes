@@ -1010,32 +1010,28 @@ def aplicar_item_auto(page, linha_item, num, mud):
         page.wait_for_timeout(800)
         return False
 
-    # Reencontra a janela antes de CADA campo (ela recarrega apos mudar
-    # cor/vidro). Campos digitados primeiro; cor e vidro por ultimo.
-    def _fr():
-        return _frame_do_modal(page, esperar=False) or frame
+    # Cor e vidro PRIMEIRO: eles recarregam a janela para recalcular. Depois
+    # de cada um, reencontramos a janela boa (esperando carregar). Os campos
+    # digitados vao POR ULTIMO, na janela ja estavel -- assim nao se perdem.
+    if "cor" in mud:
+        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
+        page.wait_for_timeout(1800)
+        frame = _frame_do_modal(page) or frame
+    if "vidro" in mud:
+        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
+        page.wait_for_timeout(1800)
+        frame = _frame_do_modal(page) or frame
 
     if "largura" in mud:
-        _set_input_auto(_fr(), "LARGURA", mud["largura"], "largura")
-        page.wait_for_timeout(300)
+        _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
     if "altura" in mud:
-        _set_input_auto(_fr(), "ALTURA", mud["altura"], "altura")
-        page.wait_for_timeout(300)
+        _set_input_auto(frame, "ALTURA", mud["altura"], "altura")
     if "qtde" in mud:
-        _set_input_auto(_fr(), "QTDE", mud["qtde"], "quantidade")
-        page.wait_for_timeout(300)
+        _set_input_auto(frame, "QTDE", mud["qtde"], "quantidade")
     if "tipo" in mud:
-        _set_input_auto(_fr(), "TIPO", mud["tipo"], "tipo", exato=True)
-        page.wait_for_timeout(300)
+        _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
     if "ambiente" in mud:
-        _set_input_auto(_fr(), "AMBIENTE", mud["ambiente"], "ambiente")
-        page.wait_for_timeout(300)
-    if "cor" in mud:
-        _set_select_auto(_fr(), "PERFIL", "cor", mud["cor"], "cor")
-        page.wait_for_timeout(1800)  # espera o recalculo
-    if "vidro" in mud:
-        _set_select_auto(_fr(), "VIDRO COR", "vidro", mud["vidro"], "vidro")
-        page.wait_for_timeout(1800)
+        _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
 
     print_tela(page, f"auto_item_{num}")
     _clicar_confirmar_modal(page)
