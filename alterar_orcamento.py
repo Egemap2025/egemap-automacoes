@@ -538,15 +538,12 @@ def editar_item(page, linha_item, indice=None):
         _fechar_modal(page)
         return False
 
-    # Confirma a janela de edicao e, se aparecer, a janela de variaveis.
-    _clicar_confirmar_modal(page)
-    page.wait_for_timeout(1500)
-    if _tem_texto_visivel(page, "Informe as vari"):
-        log("Confirmando a janela 'Informe as variaveis' (sem alterar)...")
-        if not _confirmar_ate_sumir(page, "Informe as vari"):
-            log("A janela de variaveis nao fechou sozinha.")
-            print_tela(page, "variaveis_travou")
-            input("  Confira/feche na tela e aperte ENTER...  ")
+    # Confirma a janela de edicao e, se aparecer, a janela de variaveis
+    # ('Informar Medidas/Quantidades' nos itens com motor/persiana).
+    if not _confirmar_edicao(page):
+        log("Alguma janela nao fechou sozinha (edicao ou variaveis).")
+        print_tela(page, "variaveis_travou")
+        input("  Confira/feche na tela e aperte ENTER...  ")
 
     log("Alteracoes confirmadas e salvas. ✔")
     page.wait_for_timeout(1500)
@@ -801,27 +798,49 @@ def _tem_texto_visivel(page, texto):
     return False
 
 
-def _confirmar_ate_sumir(page, titulo, max_tentativas=6):
-    """Clica nos botoes 'Confirmar' ate a janela com esse titulo sumir.
-    Testa cada 'Confirmar' visivel e confere se o titulo desapareceu -- assim
-    nao importa se ha um 'Confirmar' escondido de outra janela atras."""
-    for _ in range(max_tentativas):
-        if not _tem_texto_visivel(page, titulo):
-            return True
-        clicou_algum = False
-        for e in _confirmares_visiveis(page):
-            try:
-                e.scroll_into_view_if_needed()
-                e.click(timeout=2500)
-                clicou_algum = True
+# Marcas de texto que identificam cada janela (confirmadas no sistema real).
+MARCAS_MODAL_EDICAO = ("VIDRO COR", "ALUMINIO/PERFIL", "Dados do Item")
+# A janela de variaveis pode se chamar de dois jeitos, dependendo do item:
+#   - itens com motor/persiana: "Informar Medidas/Quantidades"
+#   - outros casos: "Informe as variaveis"
+# Por isso reconhecemos VARIAS marcas (uma basta).
+MARCAS_JANELA_VARIAVEIS = ("Informar Medidas", "Informe as vari",
+                           "SALVAR VARI", "Medidas em MM")
+
+
+def _modal_edicao_aberto(page):
+    return any(_tem_texto_visivel(page, m) for m in MARCAS_MODAL_EDICAO)
+
+
+def _janela_variaveis_aberta(page):
+    return any(_tem_texto_visivel(page, m) for m in MARCAS_JANELA_VARIAVEIS)
+
+
+def _confirmar_edicao(page, max_tentativas=8):
+    """Confirma a edicao do item ate TODAS as janelas fecharem:
+      1) a janela 'Dados do Item' (edicao), e
+      2) a janela de variaveis, que em itens com motor/persiana se chama
+         'Informar Medidas/Quantidades' (nao 'Informe as variaveis'!).
+    O botao pode ser 'Confirmar' ou 'CONFIRMAR' -- os dois casam. Damos um
+    respiro apos o 1o clique porque a janela de variaveis demora a aparecer."""
+    clicou_algo = False
+    for i in range(max_tentativas):
+        modal = _modal_edicao_aberto(page)
+        vari = _janela_variaveis_aberta(page)
+        if not modal and not vari:
+            # Ja fechou tudo? Se acabamos de clicar, espera um pouco para ver
+            # se a janela de variaveis ainda vai surgir (itens com motor).
+            if clicou_algo and i <= 2:
                 page.wait_for_timeout(1500)
-                if not _tem_texto_visivel(page, titulo):
-                    return True
-            except Exception:
-                continue
-        if not clicou_algum:
-            break
-    return not _tem_texto_visivel(page, titulo)
+                if _janela_variaveis_aberta(page):
+                    continue
+            return True
+        if _clicar_confirmar_modal(page):
+            clicou_algo = True
+            page.wait_for_timeout(1800)
+        else:
+            page.wait_for_timeout(800)
+    return not _modal_edicao_aberto(page) and not _janela_variaveis_aberta(page)
 
 
 def _fechar_modal(page):
@@ -1089,11 +1108,13 @@ def aplicar_item_auto(page, linha_item, num, mud):
         frame = _esperar_recalculo(page) or frame
 
     print_tela(page, f"auto_item_{num}")
-    _clicar_confirmar_modal(page)
-    page.wait_for_timeout(1500)
-    if _tem_texto_visivel(page, "Informe as vari"):
-        _confirmar_ate_sumir(page, "Informe as vari")
-    print(f"     item {num} salvo. ✔")
+    # Confirma a janela de edicao e, se aparecer, a de variaveis
+    # ('Informar Medidas/Quantidades') -- clica ate tudo fechar.
+    if _confirmar_edicao(page):
+        print(f"     item {num} salvo. ✔")
+    else:
+        print(f"     [!] item {num}: alguma janela nao fechou sozinha.")
+        print_tela(page, f"auto_confirmar_travou_{num}")
     page.wait_for_timeout(1500)
     return True
 

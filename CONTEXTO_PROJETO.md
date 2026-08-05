@@ -80,15 +80,30 @@ janela velha.
 - Novo `clicar_calcular`: ao final do modo mensagem o robô clica em
   **Calcular** para atualizar os valores do orçamento.
 
-> Falta **testar de verdade** no orçamento 2346 (os 2 itens ponta a ponta) —
-> as correções são baseadas na causa raiz documentada, mas não deu para rodar
-> contra o W-Vetro real nesta rodada.
+### Correção extra (a partir de um vídeo do sistema real, 05/08)
+
+O usuário mandou um vídeo editando o item 1 à mão. Isso revelou um **bug**:
+- A janela de edição real se chama **"Dados do Item"** (não "Altera Medida da
+  Esquadria"). Campos confirmados: QTDE, LARGURA, ALTURA, ALUMINIO/PERFIL,
+  VIDRO COR, TIPO, AMBIENTE/LOCALIZACAO, NOME PROJETO. Botões: Confirmar/Fechar.
+- **A janela de variáveis NÃO se chama "Informe as variáveis"!** Em itens com
+  motor/persiana ela se chama **"Informar Medidas/Quantidades"** (tem o botão
+  "SALVAR VARIÁVEIS COMO PADRÃO" e um **CONFIRMAR**). O robô procurava só por
+  "Informe as vari" → **ignorava essa janela**, que ficava aberta e travava o
+  próximo item.
+
+**Correção:** novo `_confirmar_edicao` reconhece as DUAS janelas
+(`MARCAS_MODAL_EDICAO` e `MARCAS_JANELA_VARIAVEIS`) e clica CONFIRMAR até
+**todas** fecharem. Ao final aparece "Orçamento Não Calculado" → `clicar_calcular`.
+
+> Ainda falta **testar o ROBÔ de verdade** no 2346 (o vídeo era manual). As
+> correções são baseadas nas telas reais do vídeo + causa raiz documentada.
 
 ---
 
 ## TRUQUES DO W-VETRO já descobertos (não reaprender!)
 
-- A janela de edição ("Altera Medida da Esquadria") pode estar num **iframe** —
+- A janela de edição chama-se **"Dados do Item"** e pode estar num **iframe** —
   procurar em `page.frames`.
 - **Ordem invertida no DOM:** vários campos vêm ANTES do rótulo. Por isso a
   localização é feita **dentro do mesmo bloco do rótulo** (`ancestor::*[.//tag]`)
@@ -99,9 +114,10 @@ janela velha.
 - **Menus ☰ dos itens:** há uma cópia escondida por item; clicar sempre na opção
   **VISÍVEL** (`_clicar_texto_visivel`).
 - **Confirmar:** o texto exato "Confirmar"/"CONFIRMAR" (regex `^confirmar$`, ignora
-  "CONFIRMAR VENDA"). Depois pode aparecer **"Informe as variáveis"** com outro
-  CONFIRMAR — clicar e **verificar se a janela sumiu** (`_confirmar_ate_sumir`),
-  porque há dois "Confirmar" na tela ao mesmo tempo.
+  "CONFIRMAR VENDA"). Depois pode aparecer a janela de variáveis —
+  **"Informar Medidas/Quantidades"** (motor/persiana) ou "Informe as variáveis" —
+  com outro CONFIRMAR. Usar `_confirmar_edicao`, que clica até **todas** as
+  janelas sumirem (há dois "Confirmar" na tela ao mesmo tempo).
 - **Campo de busca do orçamento:** input imediatamente antes do botão "Procurar"
   (não a busca do menu no canto). Preencher com `fill()` (não digitar letra a letra).
 - Depois de aplicar tudo, o W-Vetro mostra **"Orçamento Não Calculado — clique
