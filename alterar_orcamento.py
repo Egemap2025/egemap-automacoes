@@ -467,16 +467,17 @@ def _achar_select_vidro(page):
     return None
 
 
-def trocar_vidro_item(page, linha_item):
-    """Abre o item, mostra as opcoes de vidro e troca pela escolhida.
-    NAO salva -- para para o usuario conferir e salvar na tela."""
-    log("Abrindo o item para editar o vidro...")
+def editar_item(page, linha_item, indice=None):
+    """Abre 'Editar Item do Orc.' e permite alterar varios campos do mesmo
+    item (vidro, cor, largura, altura, quantidade, tipo, ambiente) num menu.
+    No fim, confirma e salva (passando pela janela de variaveis se aparecer)."""
+    rotulo = f"item {indice}" if indice else "item"
+    log(f"Abrindo o {rotulo} para editar...")
     if not _abrir_menu_item(page, linha_item):
         log("Nao consegui abrir o menu (☰) do item.")
         return False
 
     # Clica em "Editar Item do Orç." (a opcao VISIVEL do menu que abriu).
-    # Uso "Editar Item do Or" para nao depender do "ç" acentuado.
     if not _clicar_texto_visivel(page, "Editar Item do Or", timeout=6000):
         log("Nao encontrei a opcao 'Editar Item do Orç.' visivel.")
         print_tela(page, "sem_editar_item")
@@ -485,63 +486,61 @@ def trocar_vidro_item(page, linha_item):
     page.wait_for_timeout(1800)
     print_tela(page, "editar_item_modal")
 
-    select_vidro = _achar_select_vidro(page)
-    if select_vidro is None:
-        log("Nao encontrei o campo 'VIDRO COR' na janela.")
-        print_tela(page, "sem_campo_vidro")
+    frame = _frame_do_modal(page)
+    if frame is None:
+        log("Nao encontrei a janela de edicao do item.")
+        print_tela(page, "sem_modal_edicao")
         return False
 
-    # Le as opcoes de vidro disponiveis
-    try:
-        opcoes_raw = select_vidro.locator("option").all_inner_texts()
-    except Exception:
-        opcoes_raw = []
-    opcoes = [o.strip() for o in opcoes_raw
-              if o.strip() and "SELECIONE" not in o.strip().upper()]
+    mudou = False
+    while True:
+        print()
+        print("  O que alterar neste item?")
+        print("    1) Vidro")
+        print("    2) Cor (aluminio/perfil)")
+        print("    3) Largura")
+        print("    4) Altura")
+        print("    5) Quantidade")
+        print("    6) Tipo (ex: J01)")
+        print("    7) Ambiente / Localizacao")
+        print("    0) Terminar e SALVAR")
+        op = input("  Opcao: ").strip()
 
-    if not opcoes:
-        log("Nao consegui ler as opcoes de vidro.")
-        print_tela(page, "vidro_sem_opcoes")
-        return False
+        if op == "1":
+            mudou = _trocar_select_campo(frame, "VIDRO COR", "vidro") or mudou
+        elif op == "2":
+            mudou = _trocar_select_campo(frame, "ALUMINIO", "cor (aluminio/perfil)") or mudou
+        elif op == "3":
+            mudou = _trocar_input_campo(frame, "LARGURA", "largura") or mudou
+        elif op == "4":
+            mudou = _trocar_input_campo(frame, "ALTURA", "altura") or mudou
+        elif op == "5":
+            mudou = _trocar_input_campo(frame, "QTDE", "quantidade") or mudou
+        elif op == "6":
+            mudou = _trocar_input_campo(frame, "TIPO", "tipo", exato=True) or mudou
+        elif op == "7":
+            mudou = _trocar_input_campo(frame, "AMBIENTE", "ambiente/localizacao") or mudou
+        elif op == "0":
+            break
+        else:
+            print("  Opcao invalida.")
 
-    # Mostra a lista numerada para o usuario escolher (sem risco de digitar errado)
-    print()
-    print("  Opcoes de vidro disponiveis:")
-    for i, o in enumerate(opcoes, 1):
-        print(f"    {i:2d}) {o}")
-    print()
-    escolha = input("  Numero do vidro desejado (ou Enter para cancelar): ").strip()
-    if not escolha.isdigit() or not (1 <= int(escolha) <= len(opcoes)):
-        print("  Cancelado -- nenhuma alteracao feita.")
-        return False
-
-    vidro_escolhido = opcoes[int(escolha) - 1]
-    try:
-        select_vidro.select_option(label=vidro_escolhido)
-    except Exception as e:
-        log(f"Nao consegui selecionar o vidro: {e}")
-        return False
-
-    page.wait_for_timeout(600)
-    print_tela(page, "vidro_trocado")
-    print()
-    print("  " + "=" * 56)
-    print(f"  VIDRO alterado para: {vidro_escolhido}")
-    print("  >> CONFIRA na tela do W-Vetro se ficou certo.")
-    print("  " + "=" * 56)
-    resp = input("\n  ENTER para CONFIRMAR e salvar  |  N para cancelar: ").strip().lower()
-    if resp == "n":
-        print("  Cancelado -- fechando a janela sem salvar.")
+    if not mudou:
+        print("  Nenhuma alteracao feita -- fechando sem salvar.")
         _fechar_modal(page)
         return False
 
-    # 1) Confirma a janela do VIDRO (nesse momento so ela esta aberta).
+    print()
+    print("  >> CONFIRA as alteracoes na tela do W-Vetro.")
+    resp = input("  ENTER para CONFIRMAR e salvar  |  N para cancelar: ").strip().lower()
+    if resp == "n":
+        print("  Cancelado -- fechando sem salvar.")
+        _fechar_modal(page)
+        return False
+
+    # Confirma a janela de edicao e, se aparecer, a janela de variaveis.
     _clicar_confirmar_modal(page)
     page.wait_for_timeout(1500)
-
-    # 2) Em itens com persiana/motor aparece a janela "Informe as variaveis".
-    #    Como nao vamos mexer nas variaveis, e so confirmar -- mas ha DOIS
-    #    "Confirmar" na tela; entao clicamos e VERIFICAMOS se a janela fechou.
     if _tem_texto_visivel(page, "Informe as vari"):
         log("Confirmando a janela 'Informe as variaveis' (sem alterar)...")
         if not _confirmar_ate_sumir(page, "Informe as vari"):
@@ -549,8 +548,96 @@ def trocar_vidro_item(page, linha_item):
             print_tela(page, "variaveis_travou")
             input("  Confira/feche na tela e aperte ENTER...  ")
 
-    log("Alteracao confirmada e salva. ✔")
+    log("Alteracoes confirmadas e salvas. ✔")
     page.wait_for_timeout(1500)
+    return True
+
+
+def _frame_do_modal(page):
+    """Retorna o frame (pagina ou iframe) que contem a janela de edicao."""
+    page.wait_for_timeout(1200)
+    for chave in ("VIDRO COR", "ALUMINIO", "Altera Medida"):
+        for fr in page.frames:
+            try:
+                if fr.locator(f"xpath=//*[contains(text(),'{chave}')]").count() > 0:
+                    return fr
+            except Exception:
+                pass
+    return None
+
+
+def _trocar_select_campo(frame, label, nome):
+    """Troca um campo do tipo lista (select) mostrando as opcoes numeradas."""
+    try:
+        sel = frame.locator(
+            f"xpath=//*[contains(text(),'{label}')]/following::select[1]"
+        ).first
+        if sel.count() == 0:
+            print(f"  Nao encontrei o campo {nome}.")
+            return False
+    except Exception:
+        print(f"  Nao encontrei o campo {nome}.")
+        return False
+
+    try:
+        brutas = sel.locator("option").all_inner_texts()
+    except Exception:
+        brutas = []
+    opcoes = [o.strip() for o in brutas
+              if o.strip() and "SELECIONE" not in o.strip().upper()]
+    if not opcoes:
+        print(f"  Nao consegui ler as opcoes de {nome}.")
+        return False
+
+    print(f"\n  Opcoes de {nome}:")
+    for i, o in enumerate(opcoes, 1):
+        print(f"    {i:2d}) {o}")
+    esc = input(f"  Numero do(a) {nome} (Enter cancela): ").strip()
+    if not esc.isdigit() or not (1 <= int(esc) <= len(opcoes)):
+        print("  (cancelado)")
+        return False
+
+    escolhido = opcoes[int(esc) - 1]
+    try:
+        sel.select_option(label=escolhido)
+    except Exception as e:
+        print(f"  Nao consegui selecionar: {e}")
+        return False
+    print(f"  {nome} -> {escolhido}")
+    return True
+
+
+def _trocar_input_campo(frame, label, nome, exato=False):
+    """Troca um campo de digitacao (largura, altura, qtde, tipo, ambiente)."""
+    xp = (f"xpath=//*[normalize-space(text())='{label}']/following::input[1]"
+          if exato else
+          f"xpath=//*[contains(text(),'{label}')]/following::input[1]")
+    try:
+        inp = frame.locator(xp).first
+        if inp.count() == 0:
+            print(f"  Nao encontrei o campo {nome}.")
+            return False
+    except Exception:
+        print(f"  Nao encontrei o campo {nome}.")
+        return False
+
+    atual = ""
+    try:
+        atual = inp.input_value()
+    except Exception:
+        pass
+    novo = input(f"  Novo valor de {nome} (atual: '{atual}', Enter cancela): ").strip()
+    if not novo:
+        print("  (cancelado)")
+        return False
+    try:
+        inp.scroll_into_view_if_needed()
+        inp.click()
+        inp.fill(novo)
+    except Exception as e:
+        print(f"  Nao consegui alterar: {e}")
+        return False
+    print(f"  {nome} -> {novo}")
     return True
 
 
@@ -639,20 +726,20 @@ def _fechar_modal(page):
 
 
 def menu_alteracoes(page):
-    """Depois de abrir o orcamento, oferece alterar o vidro de um item."""
+    """Depois de abrir o orcamento, oferece editar um item."""
     while True:
         itens = _linhas_itens(page)
         if not itens:
             return
         print()
-        resp = input(f"Alterar o VIDRO de algum item? (1 a {len(itens)}, ou Enter para nao): ").strip()
+        resp = input(f"Editar algum item? (numero 1 a {len(itens)}, ou Enter para sair): ").strip()
         if not resp:
             return
         if not resp.isdigit() or not (1 <= int(resp) <= len(itens)):
             print("  Numero de item invalido.")
             continue
-        trocar_vidro_item(page, itens[int(resp) - 1])
-        # volta ao detalhe do orcamento para poder alterar outro item
+        editar_item(page, itens[int(resp) - 1], int(resp))
+        # volta ao detalhe do orcamento para poder editar outro item
         page.wait_for_timeout(1200)
 
 
@@ -661,8 +748,8 @@ def menu_alteracoes(page):
 def main():
     print("=" * 60)
     print("   EGEMAP - Robo de Alteracao de Orcamentos")
-    print("   Abre o orcamento, le os itens e troca o vidro (com sua")
-    print("   confirmacao). O robo NAO salva sozinho -- voce confere e salva.")
+    print("   Abre o orcamento e edita o item: vidro, cor, largura, altura,")
+    print("   quantidade, tipo e ambiente. Voce confirma antes de salvar.")
     print("=" * 60)
     print()
 
