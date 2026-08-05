@@ -309,6 +309,42 @@ def _abrir_linha_resultado(page, numero):
     return False
 
 
+def _resumo_item(texto):
+    """Transforma o texto cru da linha (que vem com o menu ☰) num resumo
+    legivel: nome do projeto, medida e vidro. Retorna (ordem, resumo)."""
+    import re
+    tokens = [t.strip() for t in re.split(r"\s*\|\s*|\n", texto) if t.strip()]
+    # remove entradas do menu (icones fa-)
+    tokens = [t for t in tokens if "fa-" not in t and "fa fa" not in t.lower()]
+    ordem, lh, vidro = "", "", ""
+    projeto_parts = []
+    for t in tokens:
+        if not ordem and t.isdigit():
+            ordem = t
+            continue
+        if re.search(r"\d+\s*[xX]\s*\d+", t):
+            lh = t
+            continue
+        if "MM" in t.upper() and any(v in t.upper() for v in (
+            "INCOLOR", "BRONZE", "FUME", "FUMÊ", "VERDE", "AZUL",
+            "ACIDATO", "REFLETIVO", "TEMPERADO", "COMUM")):
+            vidro = t
+            continue
+        if lh:  # nome do projeto vem ANTES da medida; depois sao Tipo/Local/etc
+            continue
+        if re.search(r"[A-Za-zÁÉÍÓÚÂÊÔÃÕÇ]", t) and not re.match(r"^[\d.,]+$", t):
+            projeto_parts.append(t)
+    projeto = " ".join(projeto_parts).strip(" .")
+    partes = []
+    if projeto:
+        partes.append(projeto)
+    if lh:
+        partes.append(f"medida {lh}")
+    if vidro:
+        partes.append(f"vidro {vidro}")
+    return ordem, ("  |  ".join(partes) if partes else texto)
+
+
 def ler_itens(page):
     """Le a tabela 'DETALHE DO ORCAMENTO' e mostra os itens encontrados."""
     log("Lendo os itens do orcamento...")
@@ -322,9 +358,8 @@ def ler_itens(page):
             texto = linhas.nth(i).inner_text().strip()
             # linhas de item tem "JANELA", "PORTA", etc. Filtro simples:
             if texto and any(p in texto.upper() for p in ("JANELA", "PORTA", "VIDRO", "MODULO", "GUARDA")):
-                # normaliza espacos/tabs
-                limpo = " | ".join(c.strip() for c in texto.split("\n") if c.strip())
-                itens.append(limpo)
+                _ordem, resumo = _resumo_item(texto)
+                itens.append(resumo)
     except Exception as e:
         log(f"Nao consegui ler a tabela: {e}")
 
