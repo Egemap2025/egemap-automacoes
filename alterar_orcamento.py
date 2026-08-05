@@ -509,7 +509,7 @@ def editar_item(page, linha_item, indice=None):
         if op == "1":
             mudou = _trocar_select_campo(frame, "VIDRO COR", "vidro") or mudou
         elif op == "2":
-            mudou = _trocar_select_campo(frame, "ALUMINIO", "cor (aluminio/perfil)") or mudou
+            mudou = _trocar_select_campo(frame, "PERFIL", "cor (aluminio/perfil)") or mudou
         elif op == "3":
             mudou = _trocar_input_campo(frame, "LARGURA", "largura") or mudou
         elif op == "4":
@@ -556,7 +556,7 @@ def editar_item(page, linha_item, indice=None):
 def _frame_do_modal(page):
     """Retorna o frame (pagina ou iframe) que contem a janela de edicao."""
     page.wait_for_timeout(1200)
-    for chave in ("VIDRO COR", "ALUMINIO", "Altera Medida"):
+    for chave in ("VIDRO COR", "PERFIL", "Altera Medida"):
         for fr in page.frames:
             try:
                 if fr.locator(f"xpath=//*[contains(text(),'{chave}')]").count() > 0:
