@@ -85,14 +85,15 @@ async function abrirOrcamento(page, numero) {
   } else {
     await page.keyboard.press('Enter');
   }
-  await esperar(page, 2000);
+  await esperar(page, 5000); // aguarda mais para a tabela carregar
 
-  // Encontra a linha e clica no link do cliente (nome azul) para abrir o orçamento
-  const linha = page.locator('tbody tr').filter({ hasText: numero }).first();
-  if (!await linha.isVisible({ timeout: 8000 }).catch(() => false)) {
-    throw new Error(`Orçamento ${numero} não encontrado na lista.`);
+  // Encontra a linha do resultado — tenta em toda a página
+  const linha = page.locator('tr').filter({ hasText: numero }).first();
+  if (!await linha.isVisible({ timeout: 12000 }).catch(() => false)) {
+    throw new Error(`Orçamento ${numero} não encontrado na lista. Verifique se o número está correto e se o orçamento existe no período atual.`);
   }
 
+  // Clica no link do cliente (nome azul) para abrir o orçamento
   const link = linha.locator('a').first();
   if (await link.isVisible({ timeout: 2000 }).catch(() => false)) {
     await link.click();
@@ -100,7 +101,7 @@ async function abrirOrcamento(page, numero) {
     await linha.click();
   }
 
-  await page.waitForURL(/detalheorcamento/i, { timeout: 25000 });
+  await page.waitForURL(/detalheorcamento/i, { timeout: 30000 });
   await esperar(page, 3000);
   console.log(`  → Orçamento ${numero} aberto!`);
 }
