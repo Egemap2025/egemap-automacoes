@@ -377,7 +377,6 @@ async function coletarDados() {
     continuar = (await ask('\nOutra alteração? [s/n]: ')).trim().toLowerCase() === 's';
   }
 
-  rl.close();
   return { numero, alteracoes };
 }
 
@@ -394,6 +393,7 @@ async function main() {
   try {
     await page.goto(URL_HOME, { waitUntil: 'commit', timeout: 60000 });
     await fazerLogin(page);
+    rl.close(); // fecha readline depois do login (não precisa mais de input)
     await abrirOrcamento(page, numero);
 
     for (const alt of alteracoes) {
