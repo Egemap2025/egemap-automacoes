@@ -535,9 +535,20 @@ def trocar_vidro_item(page, linha_item):
         _fechar_modal(page)
         return False
 
-    if _clicar_confirmar_modal(page):
-        log("Alteracao CONFIRMADA e salva. ✔")
-        page.wait_for_timeout(2500)  # espera a janela fechar / recalcular
+    # Clica em Confirmar na janela do vidro e, se aparecer, TAMBEM na janela
+    # "Informe as variaveis" (surge em itens com persiana/motor). Repetimos
+    # ate nao haver mais botao Confirmar de janela (o 'CONFIRMAR VENDA' da
+    # pagina e ignorado).
+    cliques = 0
+    for _ in range(3):
+        if _clicar_confirmar_modal(page):
+            cliques += 1
+            page.wait_for_timeout(1800)
+        else:
+            break
+    if cliques:
+        log(f"Alteracao confirmada e salva. ✔  ({cliques} confirmacao(oes))")
+        page.wait_for_timeout(1500)
         return True
     else:
         log("Nao achei o botao 'Confirmar' -- confira e salve na tela voce mesmo.")
@@ -546,22 +557,26 @@ def trocar_vidro_item(page, linha_item):
 
 
 def _clicar_confirmar_modal(page):
-    """Clica no botao 'Confirmar' da janela de edicao (rola ate ele).
-    Procura em todos os frames e evita o 'CONFIRMAR VENDA' da pagina."""
+    """Clica no botao 'Confirmar'/'CONFIRMAR' de uma janela (rola ate ele).
+    Procura em todos os frames. Ignora o 'CONFIRMAR VENDA' da pagina, pois
+    casa apenas com o texto que e exatamente 'confirmar'."""
+    import re
+    alvo = re.compile(r"^\s*confirmar\s*$", re.I)
     for fr in page.frames:
-        # A) botao com nome exatamente 'Confirmar'
+        # A) botao cujo nome e exatamente 'confirmar' (qualquer caixa)
         try:
-            btn = fr.get_by_role("button", name="Confirmar", exact=True)
-            if btn.count() > 0:
-                b = btn.first
-                b.scroll_into_view_if_needed()
-                b.click(timeout=3000)
-                return True
+            btn = fr.get_by_role("button", name=alvo)
+            for i in range(btn.count()):
+                b = btn.nth(i)
+                if b.is_visible():
+                    b.scroll_into_view_if_needed()
+                    b.click(timeout=3000)
+                    return True
         except Exception:
             pass
-        # B) elemento visivel cujo texto e exatamente 'Confirmar'
+        # B) qualquer elemento visivel cujo texto e exatamente Confirmar/CONFIRMAR
         try:
-            el = fr.get_by_text("Confirmar", exact=True)
+            el = fr.get_by_text(alvo)
             for i in range(el.count()):
                 e = el.nth(i)
                 if e.is_visible():
