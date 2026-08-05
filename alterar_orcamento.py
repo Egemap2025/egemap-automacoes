@@ -527,11 +527,63 @@ def trocar_vidro_item(page, linha_item):
     print()
     print("  " + "=" * 56)
     print(f"  VIDRO alterado para: {vidro_escolhido}")
-    print("  >> CONFIRA na tela do W-Vetro e clique em SALVAR voce mesmo.")
-    print("  >> (O robo NAO salva sozinho, por seguranca.)")
+    print("  >> CONFIRA na tela do W-Vetro se ficou certo.")
     print("  " + "=" * 56)
-    input("\n  Aperte ENTER aqui depois de conferir/salvar...  ")
-    return True
+    resp = input("\n  ENTER para CONFIRMAR e salvar  |  N para cancelar: ").strip().lower()
+    if resp == "n":
+        print("  Cancelado -- fechando a janela sem salvar.")
+        _fechar_modal(page)
+        return False
+
+    if _clicar_confirmar_modal(page):
+        log("Alteracao CONFIRMADA e salva. ✔")
+        page.wait_for_timeout(2500)  # espera a janela fechar / recalcular
+        return True
+    else:
+        log("Nao achei o botao 'Confirmar' -- confira e salve na tela voce mesmo.")
+        input("\n  Aperte ENTER aqui depois de salvar manualmente...  ")
+        return True
+
+
+def _clicar_confirmar_modal(page):
+    """Clica no botao 'Confirmar' da janela de edicao (rola ate ele).
+    Procura em todos os frames e evita o 'CONFIRMAR VENDA' da pagina."""
+    for fr in page.frames:
+        # A) botao com nome exatamente 'Confirmar'
+        try:
+            btn = fr.get_by_role("button", name="Confirmar", exact=True)
+            if btn.count() > 0:
+                b = btn.first
+                b.scroll_into_view_if_needed()
+                b.click(timeout=3000)
+                return True
+        except Exception:
+            pass
+        # B) elemento visivel cujo texto e exatamente 'Confirmar'
+        try:
+            el = fr.get_by_text("Confirmar", exact=True)
+            for i in range(el.count()):
+                e = el.nth(i)
+                if e.is_visible():
+                    e.scroll_into_view_if_needed()
+                    e.click(timeout=3000)
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def _fechar_modal(page):
+    """Fecha a janela de edicao sem salvar (botao 'Fechar' ou o X)."""
+    for fr in page.frames:
+        try:
+            btn = fr.get_by_role("button", name="Fechar", exact=True)
+            if btn.count() > 0 and btn.first.is_visible():
+                btn.first.click(timeout=2500)
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def menu_alteracoes(page):
