@@ -774,6 +774,297 @@ def _fechar_modal(page):
     return False
 
 
+# ── Modo mensagem: aplicar varias alteracoes a partir de um texto colado ─────────
+
+import re as _re
+
+CORES_PERFIL = ("pintura", "anodizado", "anod", "branco", "preto", "bronze",
+                "natural", "fosco", "madeira", "cinza", "grafite", "champagne",
+                "amadeirado", "corten", "brilhante", "bicolor", "louro")
+
+CORES_VIDRO = {"incolor": "INCOLOR", "verde": "VERDE", "bronze": "BRONZE",
+               "fume": "FUME", "fumê": "FUME", "azul": "AZUL", "acidato": "ACIDATO"}
+
+
+def _descreve_vidro(spec):
+    """Descricao amigavel do vidro (cor=INCOLOR e tipo=TEMPERADO por padrao)."""
+    low = spec.lower()
+    cor = "INCOLOR"
+    for k, v in CORES_VIDRO.items():
+        if k in low:
+            cor = v
+            break
+    m = _re.search(r"(\d{1,2})", low)
+    esp = m.group(1).zfill(2) if m else None
+    tipo = "COMUM" if "comum" in low else "TEMPERADO"
+    return f"{cor} {esp}MM - {tipo}" if esp else spec.upper()
+
+
+def parse_mensagem(texto):
+    """Le a mensagem e devolve (orcamento, {item: {campo: valor}})."""
+    linhas = [l.strip() for l in texto.splitlines() if l.strip()]
+    orcamento = None
+    itens = {}
+    for l in linhas:
+        m = _re.search(r"or[çc]amento\s*[:#nºo\.]*\s*(\d{2,7})", l, _re.I)
+        if m and orcamento is None:
+            orcamento = m.group(1)
+            continue
+        mi = _re.match(r"^\s*(\d{1,3})\s*[-–:]\s*(.+)$", l)
+        if not mi:
+            if orcamento is None and _re.match(r"^\d{2,7}$", l):
+                orcamento = l
+            continue
+        num = mi.group(1)
+        mud, ambiente = {}, []
+        for p in _re.split(r"\s*[-–]\s*", mi.group(2)):
+            p = p.strip()
+            if not p:
+                continue
+            low = p.lower()
+            md = _re.search(r"(\d{2,4})\s*[xX]\s*(\d{2,4})", p)
+            if md:
+                mud["largura"], mud["altura"] = md.group(1), md.group(2)
+                continue
+            mq = _re.search(r"(\d+)\s*un\b", low) or _re.search(r"qtde?\s*[:]?\s*(\d+)", low)
+            if mq:
+                mud["qtde"] = mq.group(1)
+                continue
+            if "vidro" in low:
+                mud["vidro"] = _re.sub(r"vidro", "", low, flags=_re.I).strip()
+                continue
+            if _re.match(r"^[a-z]{1,2}\s*\d{1,3}$", low):
+                mud["tipo"] = _re.sub(r"\s+", "", p).upper()
+                continue
+            if any(w in low for w in CORES_PERFIL):
+                mud["cor"] = p.strip()
+                continue
+            ambiente.append(p.strip())
+        if ambiente:
+            mud["ambiente"] = " ".join(ambiente)
+        itens[num] = mud
+    return orcamento, itens
+
+
+CAMPOS_PREVIEW = (("cor", "cor"), ("largura", "largura"), ("altura", "altura"),
+                  ("qtde", "quantidade"), ("vidro", "vidro"),
+                  ("tipo", "tipo"), ("ambiente", "ambiente"))
+
+
+def _mostrar_preview(orc, itens):
+    print()
+    print("  " + "=" * 56)
+    print(f"  ENTENDI ASSIM (orcamento {orc}):")
+    print("  " + "=" * 56)
+    for num, mud in itens.items():
+        print(f"\n  ITEM {num}:")
+        for chave, nome in CAMPOS_PREVIEW:
+            if chave in mud:
+                val = _descreve_vidro(mud[chave]) if chave == "vidro" else mud[chave]
+                print(f"     {nome:11s}-> {val}")
+        mantem = [n for c, n in CAMPOS_PREVIEW if c not in mud]
+        if mantem:
+            print(f"     (mantem: {', '.join(mantem)})")
+    print("  " + "=" * 56)
+
+
+def _pontua_vidro(opcao, termo):
+    ou = opcao.upper().replace(" ", "")
+    low = termo.lower()
+    cor = "INCOLOR"
+    for k, v in CORES_VIDRO.items():
+        if k in low:
+            cor = v
+            break
+    score = 0
+    if cor in opcao.upper():
+        score += 2
+    m = _re.search(r"(\d{1,2})", low)
+    tem_esp = False
+    if m:
+        d = m.group(1)
+        if f"{d}MM" in ou or f"{d.zfill(2)}MM" in ou:
+            score += 3
+            tem_esp = True
+    tipo = "COMUM" if "comum" in low else "TEMPERADO"
+    if tipo in opcao.upper():
+        score += 2
+    return score if tem_esp else -1
+
+
+def _melhor_opcao(opcoes, termo, esperado):
+    if esperado == "vidro":
+        pont = [(o, _pontua_vidro(o, termo)) for o in opcoes]
+    else:
+        palavras = [w for w in _re.split(r"\s+", termo.upper()) if len(w) > 2]
+        pont = [(o, sum(1 for w in palavras if w in o.upper())) for o in opcoes]
+    pont = [x for x in pont if x[1] > 0]
+    if not pont:
+        return None, False
+    pont.sort(key=lambda x: x[1], reverse=True)
+    melhor, s1 = pont[0]
+    s2 = pont[1][1] if len(pont) > 1 else -1
+    return melhor, (s1 > s2)
+
+
+def _set_select_auto(frame, rotulo, esperado, termo, nome):
+    sel = _achar_select(frame, rotulo, esperado)
+    if sel is None:
+        print(f"     [!] nao achei o campo {nome}")
+        return False
+    opcoes = [o for o in _opcoes_do_select(sel) if "SELECIONE" not in o.upper()]
+    if not opcoes:
+        print(f"     [!] sem opcoes de {nome}")
+        return False
+    escolha, claro = _melhor_opcao(opcoes, termo, esperado)
+    if escolha is None or not claro:
+        print(f"\n     Em duvida no {nome} para '{termo}'. Escolha:")
+        for i, o in enumerate(opcoes, 1):
+            print(f"       {i:2d}) {o}")
+        r = input("       Numero (Enter pula): ").strip()
+        if not r.isdigit() or not (1 <= int(r) <= len(opcoes)):
+            print(f"     ({nome} nao alterado)")
+            return False
+        escolha = opcoes[int(r) - 1]
+    try:
+        sel.select_option(label=escolha)
+        print(f"     {nome} -> {escolha}")
+        return True
+    except Exception as e:
+        print(f"     [!] {nome}: {e}")
+        return False
+
+
+def _set_input_auto(frame, rotulo, valor, nome, exato=False):
+    inp = _achar_input(frame, rotulo, exato)
+    if inp is None:
+        print(f"     [!] nao achei o campo {nome}")
+        return False
+    try:
+        inp.scroll_into_view_if_needed()
+        inp.click()
+        inp.fill(str(valor))
+        print(f"     {nome} -> {valor}")
+        return True
+    except Exception as e:
+        print(f"     [!] {nome}: {e}")
+        return False
+
+
+def _itens_por_ordem(page):
+    """Mapa {numero_do_item (coluna Ord.): linha_locator}."""
+    mapa = {}
+    try:
+        linhas = page.locator("table tbody tr")
+        for i in range(linhas.count()):
+            linha = linhas.nth(i)
+            try:
+                txt = linha.inner_text()
+            except Exception:
+                continue
+            if not any(p in txt.upper() for p in ("JANELA", "PORTA", "MODULO", "GUARDA")):
+                continue
+            ordem, _ = _resumo_item(txt)
+            if ordem:
+                mapa[ordem] = linha
+    except Exception:
+        pass
+    return mapa
+
+
+def aplicar_item_auto(page, linha_item, num, mud):
+    print(f"\n  >> Item {num}:")
+    if not _abrir_menu_item(page, linha_item):
+        print(f"     [!] nao abri o menu do item {num}")
+        return False
+    if not _clicar_texto_visivel(page, "Editar Item do Or", timeout=6000):
+        print(f"     [!] nao abri 'Editar Item' do item {num}")
+        print_tela(page, f"auto_sem_editar_{num}")
+        return False
+    page.wait_for_timeout(1600)
+    frame = _frame_do_modal(page)
+    if frame is None:
+        print(f"     [!] nao achei a janela de edicao do item {num}")
+        print_tela(page, f"auto_sem_modal_{num}")
+        return False
+
+    if "cor" in mud:
+        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
+    if "vidro" in mud:
+        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
+    if "largura" in mud:
+        _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
+    if "altura" in mud:
+        _set_input_auto(frame, "ALTURA", mud["altura"], "altura")
+    if "qtde" in mud:
+        _set_input_auto(frame, "QTDE", mud["qtde"], "quantidade")
+    if "tipo" in mud:
+        _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
+    if "ambiente" in mud:
+        _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
+
+    print_tela(page, f"auto_item_{num}")
+    _clicar_confirmar_modal(page)
+    page.wait_for_timeout(1500)
+    if _tem_texto_visivel(page, "Informe as vari"):
+        _confirmar_ate_sumir(page, "Informe as vari")
+    print(f"     item {num} salvo. ✔")
+    page.wait_for_timeout(1500)
+    return True
+
+
+def modo_mensagem(page):
+    """Le uma mensagem colada, mostra o que entendeu, confirma e aplica."""
+    print()
+    print("Cole a mensagem (pode ter varias linhas).")
+    print("Ao terminar, deixe uma linha VAZIA e aperte ENTER (ou digite FIM):")
+    linhas = []
+    while True:
+        try:
+            ln = input()
+        except EOFError:
+            break
+        if ln.strip().upper() == "FIM":
+            break
+        if ln.strip() == "" and linhas:
+            break
+        if ln.strip():
+            linhas.append(ln)
+    texto = "\n".join(linhas)
+    if not texto.strip():
+        print("  (mensagem vazia)")
+        return
+
+    orc, itens = parse_mensagem(texto)
+    if not orc:
+        print("  Nao achei o numero do orcamento na mensagem.")
+        return
+    if not itens:
+        print("  Nao achei itens para alterar na mensagem.")
+        return
+
+    _mostrar_preview(orc, itens)
+    r = input("\n  Esta certo? ENTER para APLICAR  |  N para cancelar: ").strip().lower()
+    if r == "n":
+        print("  Cancelado.")
+        return
+
+    if not abrir_orcamento(page, orc):
+        print("  Nao consegui abrir o orcamento.")
+        return
+
+    for num, mud in itens.items():
+        mapa = _itens_por_ordem(page)
+        linha = mapa.get(str(num))
+        if linha is None:
+            print(f"  [!] item {num} nao existe neste orcamento.")
+            continue
+        aplicar_item_auto(page, linha, num, mud)
+        page.wait_for_timeout(1200)
+
+    print("\n  Pronto! Alteracoes da mensagem aplicadas. ✔")
+
+
 def menu_alteracoes(page):
     """Depois de abrir o orcamento, oferece editar um item."""
     while True:
@@ -829,19 +1120,29 @@ def main():
 
             while True:
                 print()
-                numero = input("Numero do orcamento (ou 'sair'): ").strip()
-                if numero.lower() in ("sair", "s", "exit", "q", ""):
-                    break
-                if not numero.isdigit():
-                    print("  Digite so o numero (ex: 2346).")
-                    continue
+                print("O que deseja fazer?")
+                print("  1) Colar uma MENSAGEM (varias alteracoes de uma vez)")
+                print("  2) Editar um orcamento MANUALMENTE (passo a passo)")
+                print("  0) Sair")
+                op = input("Opcao: ").strip().lower()
 
-                if abrir_orcamento(page, numero):
-                    ler_itens(page)
-                    menu_alteracoes(page)
+                if op in ("0", "sair", "s", "exit", "q"):
+                    break
+                elif op == "1":
+                    modo_mensagem(page)
+                elif op == "2":
+                    numero = input("Numero do orcamento: ").strip()
+                    if not numero.isdigit():
+                        print("  Digite so o numero (ex: 2346).")
+                        continue
+                    if abrir_orcamento(page, numero):
+                        ler_itens(page)
+                        menu_alteracoes(page)
+                    else:
+                        print("  Nao consegui abrir esse orcamento sozinho.")
+                        print(f"  Veja os prints em: {PRINTS_DIR}")
                 else:
-                    print("  Nao consegui abrir esse orcamento sozinho.")
-                    print(f"  Veja os prints em: {PRINTS_DIR}")
+                    print("  Opcao invalida.")
 
         finally:
             print()
