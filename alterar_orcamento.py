@@ -157,51 +157,73 @@ def abrir_orcamento(page, numero):
 
 def _preencher_numero(page, numero):
     """Tenta varias estrategias para escrever o numero no campo de valor da busca."""
-    # Estrategia A: campo do tipo spinbox (numero)
+    # O campo "valor" e o input que fica IMEDIATAMENTE antes do botao "Procurar".
+    # Mirar por essa relacao evita cair na busca do menu (canto esquerdo).
+
+    # Estrategia A (a boa): o input mais proximo ANTES do botao Procurar.
     try:
-        campo = page.get_by_role("spinbox").first
+        campo = page.locator(
+            "xpath=//button[normalize-space()='Procurar']/preceding::input[1]"
+        ).first
+        campo.wait_for(timeout=5000)
+        campo.scroll_into_view_if_needed()
+        campo.click()
+        campo.fill("")
+        campo.type(str(numero), delay=40)
+        valor = campo.input_value()
+        if str(numero) in (valor or ""):
+            log(f"   (numero {numero} escrito no campo de busca certo)")
+            return True
+    except Exception:
+        pass
+
+    # Estrategia B: input logo apos o seletor de operador "=" na linha de filtro.
+    try:
+        campo = page.locator(
+            "xpath=//select[option[normalize-space()='=']]/following::input[1]"
+        ).first
         campo.wait_for(timeout=4000)
+        campo.click()
+        campo.fill("")
+        campo.type(str(numero), delay=40)
+        if str(numero) in (campo.input_value() or ""):
+            return True
+    except Exception:
+        pass
+
+    # Estrategia C: campo do tipo spinbox (numero) -- ultimo recurso.
+    try:
+        campo = page.get_by_role("spinbox").last
+        campo.wait_for(timeout=3000)
         campo.fill(str(numero))
         return True
     except Exception:
         pass
-    # Estrategia B: input de texto proximo ao rotulo "valor"
-    try:
-        # pega todos os inputs visiveis e usa um heuristico simples
-        inputs = page.locator("input:visible")
-        n = inputs.count()
-        for i in range(n):
-            inp = inputs.nth(i)
-            tipo = (inp.get_attribute("type") or "").lower()
-            if tipo in ("number", "text", ""):
-                # tenta o que estiver mais a direita na linha de filtro
-                pass
-        # fallback direto: ultimo input costuma ser o "valor"
-        if n > 0:
-            inputs.nth(n - 1).fill(str(numero))
-            return True
-    except Exception:
-        pass
+
     return False
 
 
 def _abrir_linha_resultado(page, numero):
-    """Clica na linha do resultado para abrir o detalhe do orcamento."""
-    # A) clica no proprio numero do orcamento
+    """Clica na linha do resultado para abrir o detalhe do orcamento.
+    O jeito mais confiavel e clicar no NOME DO CLIENTE (link sublinhado)."""
+    # A) clica no link do nome do cliente, dentro da area de resultado
     try:
-        page.get_by_text(str(numero), exact=True).first.click(timeout=5000)
-        return True
-    except Exception:
-        pass
-    # B) clica no link do nome do cliente (fica sublinhado na tabela)
-    try:
-        link = page.locator("table a").first
-        link.wait_for(timeout=4000)
+        link = page.locator("table a, tbody a").first
+        link.wait_for(timeout=6000)
+        link.scroll_into_view_if_needed()
         link.click()
         return True
     except Exception:
         pass
-    # C) clica no icone de menu (☰) da primeira linha e depois em algo de abrir
+    # B) duplo clique na linha do resultado
+    try:
+        linha = page.locator("table tbody tr").filter(has_text=str(numero)).first
+        linha.wait_for(timeout=4000)
+        linha.dblclick()
+        return True
+    except Exception:
+        pass
+    # C) clica no icone de menu (☰) da primeira linha
     try:
         page.locator("table tbody tr").first.click(timeout=4000)
         return True
