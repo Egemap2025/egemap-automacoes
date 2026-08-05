@@ -553,17 +553,27 @@ def editar_item(page, linha_item, indice=None):
     return True
 
 
-def _frame_do_modal(page):
-    """Retorna o frame (pagina ou iframe) que contem a janela de edicao."""
-    page.wait_for_timeout(1200)
-    for chave in ("VIDRO COR", "PERFIL", "Altera Medida"):
-        for fr in page.frames:
+def _frame_do_modal(page, esperar=True):
+    """Retorna o frame (pagina ou iframe) que contem a janela de edicao.
+    Prefere o frame cujo rotulo esta VISIVEL (evita pegar uma janela antiga
+    que ficou detachada apos um recalculo)."""
+    if esperar:
+        page.wait_for_timeout(1200)
+    reserva = None
+    for fr in page.frames:
+        try:
+            loc = fr.locator("xpath=//*[contains(text(),'VIDRO COR')]")
+            if loc.count() == 0:
+                continue
             try:
-                if fr.locator(f"xpath=//*[contains(text(),'{chave}')]").count() > 0:
+                if loc.first.is_visible():
                     return fr
             except Exception:
                 pass
-    return None
+            reserva = reserva or fr
+        except Exception:
+            continue
+    return reserva
 
 
 def _opcoes_do_select(sel):
@@ -988,20 +998,32 @@ def aplicar_item_auto(page, linha_item, num, mud):
         print_tela(page, f"auto_sem_modal_{num}")
         return False
 
-    if "cor" in mud:
-        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
-    if "vidro" in mud:
-        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
+    # Reencontra a janela antes de CADA campo (ela recarrega apos mudar
+    # cor/vidro). Campos digitados primeiro; cor e vidro por ultimo.
+    def _fr():
+        return _frame_do_modal(page, esperar=False) or frame
+
     if "largura" in mud:
-        _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
+        _set_input_auto(_fr(), "LARGURA", mud["largura"], "largura")
+        page.wait_for_timeout(300)
     if "altura" in mud:
-        _set_input_auto(frame, "ALTURA", mud["altura"], "altura")
+        _set_input_auto(_fr(), "ALTURA", mud["altura"], "altura")
+        page.wait_for_timeout(300)
     if "qtde" in mud:
-        _set_input_auto(frame, "QTDE", mud["qtde"], "quantidade")
+        _set_input_auto(_fr(), "QTDE", mud["qtde"], "quantidade")
+        page.wait_for_timeout(300)
     if "tipo" in mud:
-        _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
+        _set_input_auto(_fr(), "TIPO", mud["tipo"], "tipo", exato=True)
+        page.wait_for_timeout(300)
     if "ambiente" in mud:
-        _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
+        _set_input_auto(_fr(), "AMBIENTE", mud["ambiente"], "ambiente")
+        page.wait_for_timeout(300)
+    if "cor" in mud:
+        _set_select_auto(_fr(), "PERFIL", "cor", mud["cor"], "cor")
+        page.wait_for_timeout(1800)  # espera o recalculo
+    if "vidro" in mud:
+        _set_select_auto(_fr(), "VIDRO COR", "vidro", mud["vidro"], "vidro")
+        page.wait_for_timeout(1800)
 
     print_tela(page, f"auto_item_{num}")
     _clicar_confirmar_modal(page)
