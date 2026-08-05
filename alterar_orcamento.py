@@ -411,6 +411,30 @@ def _abrir_menu_item(page, linha_item):
     return False
 
 
+def _clicar_texto_visivel(page, texto, timeout=6000):
+    """Clica no PRIMEIRO elemento VISIVEL que contem o texto. O W-Vetro mantem
+    uma copia escondida do menu para cada item; so a aberta fica visivel."""
+    import time as _t
+    fim = _t.time() + timeout / 1000
+    while _t.time() < fim:
+        loc = page.get_by_text(texto, exact=False)
+        try:
+            n = loc.count()
+        except Exception:
+            n = 0
+        for i in range(n):
+            el = loc.nth(i)
+            try:
+                if el.is_visible():
+                    el.scroll_into_view_if_needed()
+                    el.click(timeout=2000)
+                    return True
+            except Exception:
+                continue
+        page.wait_for_timeout(300)
+    return False
+
+
 def _achar_select_vidro(page):
     """Localiza o <select> do campo 'VIDRO COR' na janela de edicao do item."""
     # A) o select logo apos o texto "VIDRO COR"
@@ -450,16 +474,12 @@ def trocar_vidro_item(page, linha_item):
         log("Nao consegui abrir o menu (☰) do item.")
         return False
 
-    # Clica em "Editar Item do Orç."
-    try:
-        linha_item.get_by_text("Editar Item", exact=False).first.click(timeout=3000)
-    except Exception:
-        try:
-            page.get_by_text("Editar Item", exact=False).first.click(timeout=3000)
-        except Exception:
-            log("Nao encontrei a opcao 'Editar Item do Orç.'.")
-            print_tela(page, "sem_editar_item")
-            return False
+    # Clica em "Editar Item do Orç." (a opcao VISIVEL do menu que abriu).
+    # Uso "Editar Item do Or" para nao depender do "ç" acentuado.
+    if not _clicar_texto_visivel(page, "Editar Item do Or", timeout=6000):
+        log("Nao encontrei a opcao 'Editar Item do Orç.' visivel.")
+        print_tela(page, "sem_editar_item")
+        return False
 
     page.wait_for_timeout(1800)
     print_tela(page, "editar_item_modal")
