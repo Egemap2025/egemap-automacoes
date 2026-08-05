@@ -225,62 +225,84 @@ def _preencher_numero(page, numero):
 
 
 def _abrir_linha_resultado(page, numero):
-    """Abre o detalhe do orcamento clicando no NOME DO CLIENTE, na linha do
-    resultado. Localiza a coluna 'Cliente' pelo cabecalho e clica na celula
-    correspondente da linha que contem o numero."""
+    """Abre o detalhe do orcamento clicando no NOME DO CLIENTE (link azul
+    sublinhado) da linha do resultado -- com clique REAL (mouse), que e o
+    que o W-Vetro reconhece."""
     numero = str(numero)
 
-    # A) Abordagem principal: acha a coluna 'Cliente' e clica na celula da linha.
+    # Localiza a linha do resultado que contem o numero.
+    linha = None
     try:
-        texto = page.evaluate(
+        cand = page.get_by_role("row").filter(has_text=numero).first
+        cand.wait_for(timeout=6000)
+        linha = cand
+    except Exception:
+        try:
+            cand = page.locator("tr").filter(has_text=numero).first
+            cand.wait_for(timeout=4000)
+            linha = cand
+        except Exception:
+            linha = None
+
+    # A) Clique REAL no link <a> (nome do cliente) dentro da linha.
+    if linha is not None:
+        try:
+            a = linha.locator("a").first
+            a.wait_for(timeout=4000)
+            a.scroll_into_view_if_needed()
+            a.click()
+            log("   (cliquei no nome do cliente)")
+            return True
+        except Exception:
+            pass
+        # A2) qualquer texto sublinhado/clicavel na linha
+        try:
+            linha.locator("a, u, [style*='underline'], [onclick]").first.click(timeout=3000)
+            return True
+        except Exception:
+            pass
+
+    # B) Fallback: primeiro link da area de resultado (fora do cabecalho).
+    try:
+        a = page.locator("tbody a").first
+        a.wait_for(timeout=4000)
+        a.scroll_into_view_if_needed()
+        a.click()
+        return True
+    except Exception:
+        pass
+
+    # C) Fallback: pega o nome do cliente e clica por texto (clique real).
+    try:
+        nome = page.evaluate(
             """(numero) => {
-                const tabelas = Array.from(document.querySelectorAll('table'));
-                for (const t of tabelas) {
+                for (const t of document.querySelectorAll('table')) {
                     const ths = Array.from(t.querySelectorAll('th'));
-                    if (!ths.length) continue;
-                    let idx = ths.findIndex(th => /^\\s*cliente\\s*$/i.test(th.textContent.trim()));
-                    if (idx < 0) idx = ths.findIndex(th => /cliente/i.test(th.textContent) && !/perfil/i.test(th.textContent));
+                    let idx = ths.findIndex(th => /cliente/i.test(th.textContent) && !/perfil/i.test(th.textContent));
                     if (idx < 0) continue;
-                    const linhas = Array.from(t.querySelectorAll('tbody tr'));
-                    for (const tr of linhas) {
+                    for (const tr of t.querySelectorAll('tbody tr')) {
                         if (!tr.textContent.includes(numero)) continue;
                         const tds = Array.from(tr.querySelectorAll('td'));
-                        if (!tds.length) continue;
-                        // ajusta se houver celula de icone (☰) a mais no inicio
                         const offset = Math.max(0, tds.length - ths.length);
-                        let cel = tds[idx + offset] || tds[idx];
-                        if (!cel) continue;
-                        const alvo = cel.querySelector('a, [onclick], u, span, div') || cel;
-                        alvo.click();
-                        return (alvo.textContent || '').trim().slice(0, 40) || 'ok';
+                        const cel = tds[idx + offset] || tds[idx];
+                        if (cel) return (cel.textContent || '').trim();
                     }
                 }
                 return null;
             }""",
             numero,
         )
-        if texto:
-            log(f"   (cliquei no cliente: {texto})")
+        if nome:
+            page.get_by_text(nome, exact=False).first.click(timeout=4000)
             return True
     except Exception:
         pass
 
-    # B) Fallback: clica no primeiro link/elemento clicavel da area de resultado.
+    # D) Fallback: duplo clique na linha.
     try:
-        link = page.locator("tbody a, tbody u").first
-        link.wait_for(timeout=4000)
-        link.scroll_into_view_if_needed()
-        link.click()
-        return True
-    except Exception:
-        pass
-
-    # C) Fallback: duplo clique na linha do resultado.
-    try:
-        linha = page.locator("table tbody tr").filter(has_text=numero).first
-        linha.wait_for(timeout=4000)
-        linha.dblclick()
-        return True
+        if linha is not None:
+            linha.dblclick(timeout=3000)
+            return True
     except Exception:
         pass
 
