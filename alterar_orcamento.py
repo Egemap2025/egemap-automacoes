@@ -436,33 +436,34 @@ def _clicar_texto_visivel(page, texto, timeout=6000):
 
 
 def _achar_select_vidro(page):
-    """Localiza o <select> do campo 'VIDRO COR' na janela de edicao do item."""
-    # A) o select logo apos o texto "VIDRO COR"
-    try:
-        s = page.locator(
-            "xpath=//*[contains(text(),'VIDRO COR')]/following::select[1]"
-        ).first
-        s.wait_for(timeout=4000)
-        return s
-    except Exception:
-        pass
-    # B) por label associado
-    try:
-        s = page.get_by_label("VIDRO COR", exact=False)
-        s.wait_for(timeout=2500)
-        return s
-    except Exception:
-        pass
-    # C) qualquer select cujas opcoes pareçam de vidro
-    try:
-        selects = page.locator("select")
-        for i in range(selects.count()):
-            s = selects.nth(i)
-            txt = (s.inner_text() or "").upper()
-            if any(v in txt for v in ("TEMPERADO", "COMUM", "INCOLOR")):
+    """Localiza o <select> do campo 'VIDRO COR'. Procura em TODOS os frames,
+    porque a janela de edicao do W-Vetro abre dentro de um iframe."""
+    # espera um pouco para o iframe carregar
+    page.wait_for_timeout(1500)
+    for fr in page.frames:
+        # A) o select logo apos o texto "VIDRO COR"
+        try:
+            s = fr.locator(
+                "xpath=//*[contains(text(),'VIDRO COR')]/following::select[1]"
+            ).first
+            if s.count() > 0:
                 return s
-    except Exception:
-        pass
+        except Exception:
+            pass
+        # B) qualquer select cujas opcoes pareçam de vidro
+        try:
+            selects = fr.locator("select")
+            total = selects.count()
+            for i in range(min(total, 80)):
+                s = selects.nth(i)
+                try:
+                    txt = (s.inner_text() or "").upper()
+                except Exception:
+                    txt = ""
+                if any(v in txt for v in ("TEMPERADO", "COMUM", "INCOLOR")):
+                    return s
+        except Exception:
+            pass
     return None
 
 
