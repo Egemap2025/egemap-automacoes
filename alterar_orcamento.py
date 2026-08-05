@@ -700,39 +700,143 @@ def _visivel(loc):
         return False
 
 
+# Variantes de rotulo (o nome exato pode variar no W-Vetro).
+ROTULOS = {
+    "LARGURA":  ["LARGURA"],
+    "ALTURA":   ["ALTURA"],
+    "QTDE":     ["QTDE", "QUANTIDADE"],
+    "TIPO":     ["TIPO"],
+    "AMBIENTE": ["AMBIENTE/LOCALIZACAO", "AMBIENTE/LOCALIZAÇÃO", "AMBIENTE"],
+    "PERFIL":   ["ALUMINIO/PERFIL", "ALUMÍNIO/PERFIL", "PERFIL"],
+    "VIDRO COR": ["VIDRO COR", "VIDRO/COR", "VIDRO"],
+}
+
+# JS que acha o campo (input/select/textarea) mais proximo de um rotulo.
+# Robusto a: texto aninhado, espaco nao-quebravel, ordem invertida (campo
+# ANTES do rotulo) e rotulos-cabecalho (ex.: secao "Largura" com MINIMA/MAXIMA).
+_JS_CAMPO = r"""
+(args) => {
+  const {rotulos, tag} = args;
+  const norm = s => (s||'').replace(/ /g,' ').replace(/\s+/g,' ').trim().toUpperCase();
+  const alvos = rotulos.map(norm);
+  const vis = el => {
+    if(!el) return false;
+    const s = getComputedStyle(el);
+    if (s.display==='none' || s.visibility==='hidden') return false;
+    return el.getClientRects().length > 0;
+  };
+  // 1) escolhe o melhor elemento-rotulo (pontuando especificidade)
+  let melhores = [];
+  const cand = document.querySelectorAll('label,span,div,td,th,p,b,strong,font,li');
+  for (const el of cand){
+    const t = norm(el.textContent);
+    if(!t || t.length>45) continue;
+    for (const a of alvos){
+      if(!t.includes(a)) continue;
+      let score = 2;
+      if (t===a || t===a+' *') score += 12;
+      else if (t.startsWith(a+' ') || t.startsWith(a+'/') || t.startsWith(a+':')) score += 8;
+      else if (t.startsWith(a)) score += 6;
+      if (t.includes('*')) score += 3;
+      score -= el.querySelectorAll('*').length*0.2 + t.length*0.03;
+      melhores.push({el, score});
+      break;
+    }
+  }
+  if(!melhores.length) return null;
+  melhores.sort((a,b)=> b.score - a.score);
+  // 2) do melhor rotulo, sobe ancestrais ate achar um campo visivel
+  const globalList = Array.prototype.slice.call(document.querySelectorAll(tag));
+  for (const m of melhores.slice(0,6)){
+    let node = m.el;
+    for (let up=0; up<6 && node; up++, node=node.parentElement){
+      const fs = Array.prototype.slice.call(node.querySelectorAll(tag))
+                  .filter(f => vis(f) && !f.disabled && !f.readOnly);
+      if(fs.length){
+        const idx = globalList.indexOf(fs[0]);
+        if(idx>=0) return idx;
+      }
+    }
+  }
+  return null;
+}
+"""
+
+
+def _campo_por_js(frame, rotulo_chave, tag):
+    """Acha o campo via JS (mais confiavel). Retorna locator Playwright ou None."""
+    rotulos = ROTULOS.get(rotulo_chave, [rotulo_chave])
+    try:
+        idx = frame.evaluate(_JS_CAMPO, {"rotulos": rotulos, "tag": tag})
+    except Exception:
+        idx = None
+    if idx is None or idx < 0:
+        return None
+    try:
+        loc = frame.locator(tag).nth(idx)
+        return loc if loc.count() > 0 else None
+    except Exception:
+        return None
+
+
 def _achar_select(frame, rotulo, esperado):
-    """Acha o <select> certo do rotulo, decidindo pelo CONTEUDO das opcoes
-    (vidro tem 'MM'; cor tem acabamentos). Entre os candidatos que batem no
-    conteudo, prefere o que esta VISIVEL (descarta copia morta pos-recalculo)."""
+    """Acha o <select> certo do rotulo. 1o tenta pelo ROTULO via JS (o vizinho
+    do texto 'VIDRO COR' / 'ALUMINIO/PERFIL'); confere pelo CONTEUDO. Se nao
+    der, cai no metodo antigo por conteudo das opcoes."""
+    # 1) pelo rotulo (JS) -- so aceita se o conteudo confere com o esperado
+    loc = _campo_por_js(frame, rotulo, "select")
+    if loc is not None and _visivel(loc):
+        ops = _opcoes_do_select(loc)
+        if (esperado == "vidro" and _parece_vidro(ops)) or \
+           (esperado == "cor" and _parece_cor(ops)) or not ops:
+            return loc
+
+    # 2) metodo antigo (por conteudo das opcoes)
     cands = _candidatos_campo(frame, rotulo, "select")
     batem = []
-    for loc in cands:
-        ops = _opcoes_do_select(loc)
+    for c in cands:
+        ops = _opcoes_do_select(c)
         if esperado == "vidro" and _parece_vidro(ops):
-            batem.append(loc)
+            batem.append(c)
         elif esperado == "cor" and _parece_cor(ops):
-            batem.append(loc)
-    # 1o) candidato que bate no conteudo E esta visivel
-    for loc in batem:
-        if _visivel(loc):
-            return loc
-    # 2o) qualquer que bata no conteudo
+            batem.append(c)
+    for c in batem:
+        if _visivel(c):
+            return c
     if batem:
         return batem[0]
-    # 3o) qualquer candidato visivel
-    for loc in cands:
-        if _visivel(loc):
-            return loc
+    # 3) por ULTIMO: varre TODOS os selects do frame pelo conteudo
+    if loc is not None:
+        return loc
+    try:
+        todos = frame.locator("select")
+        for i in range(min(todos.count(), 80)):
+            s = todos.nth(i)
+            ops = _opcoes_do_select(s)
+            if esperado == "vidro" and _parece_vidro(ops) and _visivel(s):
+                return s
+            if esperado == "cor" and _parece_cor(ops) and _visivel(s):
+                return s
+    except Exception:
+        pass
+    for c in cands:
+        if _visivel(c):
+            return c
     return cands[0] if cands else None
 
 
 def _achar_input(frame, rotulo, exato=False):
-    """Acha o <input> do rotulo (dentro do mesmo bloco, senao vizinho).
-    Prefere o campo VISIVEL para nao pegar uma copia morta da janela."""
+    """Acha o <input> do rotulo. 1o tenta pelo ROTULO via JS (robusto),
+    senao cai no metodo antigo por xpath."""
+    loc = _campo_por_js(frame, rotulo, "input")
+    if loc is not None and _visivel(loc):
+        return loc
     cands = _candidatos_campo(frame, rotulo, "input", exato=exato)
-    for loc in cands:
-        if _visivel(loc):
-            return loc
+    for c in cands:
+        if _visivel(c):
+            return c
+    if loc is not None:
+        return loc
     return cands[0] if cands else None
 
 
