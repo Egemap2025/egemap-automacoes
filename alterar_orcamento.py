@@ -563,35 +563,43 @@ def _frame_tem_campos(fr):
 
 
 def _frame_do_modal(page, esperar=True):
-    """Retorna o Frame da janela de edicao amarrando ao <iframe> VISIVEL na
-    tela (assim nunca pega uma copia antiga/detachada que ficou na memoria).
-    Se o modal estiver na propria pagina, retorna o frame principal."""
+    """Retorna o Frame da janela de edicao. Prioriza o <iframe> visivel, mas
+    aceita qualquer iframe/quadro VIVO que tenha os campos -- descartando as
+    copias mortas (que ficam na memoria apos recarregar). query_selector so
+    funciona em frames vivos, entao serve de filtro."""
     tentativas = 5 if esperar else 2
     for t in range(tentativas):
         if esperar and t == 0:
             page.wait_for_timeout(1200)
-        # 1) iframes visiveis que contenham os campos do modal
+
+        # A) iframes atualmente no DOM (copias mortas nao aparecem aqui)
+        candidato = None
         try:
             for eh in page.query_selector_all("iframe"):
                 try:
-                    if not eh.is_visible():
-                        continue
                     fr = eh.content_frame()
-                    if fr is not None and _frame_tem_campos(fr):
-                        return fr
+                    if fr is None or not _frame_tem_campos(fr):
+                        continue
+                    try:
+                        if eh.is_visible():
+                            return fr
+                    except Exception:
+                        pass
+                    candidato = candidato or fr
                 except Exception:
                     continue
         except Exception:
             pass
-        # 2) modal direto na pagina principal
-        try:
-            mf = page.main_frame
-            loc = mf.locator("xpath=//*[contains(text(),'VIDRO COR')]")
-            if loc.count() > 0 and loc.first.is_visible():
-                return mf
-        except Exception:
-            pass
-        page.wait_for_timeout(800)
+        if candidato is not None:
+            return candidato
+
+        # B) qualquer frame vivo com os campos (inclui a pagina principal)
+        for fr in page.frames:
+            if _frame_tem_campos(fr):
+                return fr
+
+        if esperar:
+            page.wait_for_timeout(900)
     return None
 
 
