@@ -535,57 +535,94 @@ def trocar_vidro_item(page, linha_item):
         _fechar_modal(page)
         return False
 
-    # Clica em Confirmar na janela do vidro e, se aparecer, TAMBEM na janela
-    # "Informe as variaveis" (surge em itens com persiana/motor). Repetimos
-    # ate nao haver mais botao Confirmar de janela (o 'CONFIRMAR VENDA' da
-    # pagina e ignorado).
-    cliques = 0
-    for _ in range(3):
-        if _clicar_confirmar_modal(page):
-            cliques += 1
-            page.wait_for_timeout(1800)
-        else:
-            break
-    if cliques:
-        log(f"Alteracao confirmada e salva. ✔  ({cliques} confirmacao(oes))")
-        page.wait_for_timeout(1500)
-        return True
-    else:
-        log("Nao achei o botao 'Confirmar' -- confira e salve na tela voce mesmo.")
-        input("\n  Aperte ENTER aqui depois de salvar manualmente...  ")
-        return True
+    # 1) Confirma a janela do VIDRO (nesse momento so ela esta aberta).
+    _clicar_confirmar_modal(page)
+    page.wait_for_timeout(1500)
+
+    # 2) Em itens com persiana/motor aparece a janela "Informe as variaveis".
+    #    Como nao vamos mexer nas variaveis, e so confirmar -- mas ha DOIS
+    #    "Confirmar" na tela; entao clicamos e VERIFICAMOS se a janela fechou.
+    if _tem_texto_visivel(page, "Informe as vari"):
+        log("Confirmando a janela 'Informe as variaveis' (sem alterar)...")
+        if not _confirmar_ate_sumir(page, "Informe as vari"):
+            log("A janela de variaveis nao fechou sozinha.")
+            print_tela(page, "variaveis_travou")
+            input("  Confira/feche na tela e aperte ENTER...  ")
+
+    log("Alteracao confirmada e salva. ✔")
+    page.wait_for_timeout(1500)
+    return True
+
+
+def _confirmares_visiveis(page):
+    """Retorna a lista de elementos 'Confirmar'/'CONFIRMAR' VISIVEIS de todos
+    os frames (ignora 'CONFIRMAR VENDA', pois casa so com 'confirmar')."""
+    import re
+    alvo = re.compile(r"^\s*confirmar\s*$", re.I)
+    encontrados = []
+    for fr in page.frames:
+        for getter in ("role", "text"):
+            try:
+                loc = (fr.get_by_role("button", name=alvo) if getter == "role"
+                       else fr.get_by_text(alvo))
+                for i in range(loc.count()):
+                    e = loc.nth(i)
+                    try:
+                        if e.is_visible():
+                            encontrados.append(e)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    return encontrados
 
 
 def _clicar_confirmar_modal(page):
-    """Clica no botao 'Confirmar'/'CONFIRMAR' de uma janela (rola ate ele).
-    Procura em todos os frames. Ignora o 'CONFIRMAR VENDA' da pagina, pois
-    casa apenas com o texto que e exatamente 'confirmar'."""
-    import re
-    alvo = re.compile(r"^\s*confirmar\s*$", re.I)
-    for fr in page.frames:
-        # A) botao cujo nome e exatamente 'confirmar' (qualquer caixa)
+    """Clica no primeiro botao 'Confirmar' visivel de uma janela."""
+    for e in _confirmares_visiveis(page):
         try:
-            btn = fr.get_by_role("button", name=alvo)
-            for i in range(btn.count()):
-                b = btn.nth(i)
-                if b.is_visible():
-                    b.scroll_into_view_if_needed()
-                    b.click(timeout=3000)
-                    return True
+            e.scroll_into_view_if_needed()
+            e.click(timeout=3000)
+            return True
         except Exception:
-            pass
-        # B) qualquer elemento visivel cujo texto e exatamente Confirmar/CONFIRMAR
+            continue
+    return False
+
+
+def _tem_texto_visivel(page, texto):
+    """Diz se algum elemento com esse texto esta visivel (em qualquer frame)."""
+    for fr in page.frames:
         try:
-            el = fr.get_by_text(alvo)
-            for i in range(el.count()):
-                e = el.nth(i)
-                if e.is_visible():
-                    e.scroll_into_view_if_needed()
-                    e.click(timeout=3000)
+            loc = fr.get_by_text(texto, exact=False)
+            for i in range(loc.count()):
+                if loc.nth(i).is_visible():
                     return True
         except Exception:
             pass
     return False
+
+
+def _confirmar_ate_sumir(page, titulo, max_tentativas=6):
+    """Clica nos botoes 'Confirmar' ate a janela com esse titulo sumir.
+    Testa cada 'Confirmar' visivel e confere se o titulo desapareceu -- assim
+    nao importa se ha um 'Confirmar' escondido de outra janela atras."""
+    for _ in range(max_tentativas):
+        if not _tem_texto_visivel(page, titulo):
+            return True
+        clicou_algum = False
+        for e in _confirmares_visiveis(page):
+            try:
+                e.scroll_into_view_if_needed()
+                e.click(timeout=2500)
+                clicou_algum = True
+                page.wait_for_timeout(1500)
+                if not _tem_texto_visivel(page, titulo):
+                    return True
+            except Exception:
+                continue
+        if not clicou_algum:
+            break
+    return not _tem_texto_visivel(page, titulo)
 
 
 def _fechar_modal(page):
