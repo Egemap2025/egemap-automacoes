@@ -55,7 +55,12 @@ Orçamento 2346
 
 ---
 
-## Modo mensagem — APLICAR (CORRIGIDO nesta rodada)
+## Modo mensagem — APLICAR ✅ FUNCIONANDO (ponta a ponta no orç. 2346)
+
+> **STATUS:** o aplicar do modo mensagem rodou de verdade no W-Vetro real
+> (item 1 do 2346): abriu o orçamento, preencheu TODOS os campos, confirmou a
+> janela de edição E a de variáveis, foi ao próximo item e clicou Calcular.
+> Falta só validar em orçamentos maiores/variados.
 
 **Sintomas que existiam:** às vezes o robô dizia "não achei a janela de
 edição" mesmo com a janela ABERTA, ou aplicava a cor mas falhava no vidro.
