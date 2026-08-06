@@ -1214,6 +1214,18 @@ def _abrir_edicao_item(page, linha_item, num, tentativas=3):
     """Abre o menu do item, clica em 'Editar Item do Orc.' e devolve o frame
     da janela 'Dados do Item'. TENTA DE NOVO se a janela nao aparecer -- as
     vezes o 1o clique nao abre, ou a janela demora a carregar no iframe."""
+    # Proteção: se sobrou alguma janela aberta do item anterior, fecha antes
+    # de tentar abrir este item (senao o menu ☰ fica bloqueado).
+    if _modal_edicao_aberto(page) or _janela_variaveis_aberta(page):
+        print("     (fechando janela que ficou aberta antes de continuar...)")
+        if not _confirmar_edicao(page):
+            _fechar_modal(page)
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+        page.wait_for_timeout(1000)
+
     for tent in range(1, tentativas + 1):
         if tent > 1:
             print(f"     (tentativa {tent} de abrir a janela do item {num}...)")
@@ -1311,13 +1323,27 @@ def aplicar_item_semi_auto(page, linha_item, num, mud):
 
     print()
     print("  " + "=" * 58)
-    print(f"  ITEM {num} PREENCHIDO PELO ROBO. Agora, NA TELA DO W-VETRO:")
-    print("    1) CONFIRA os campos (ajuste na mao se algo ficou errado).")
-    print("    2) Clique em CONFIRMAR.")
-    print("    3) Se abrir 'Informar Medidas/Quantidades',")
-    print("       clique CONFIRMAR nela tambem.")
+    print(f"  ITEM {num} PREENCHIDO PELO ROBO. CONFIRA na tela do W-Vetro.")
     print("  " + "=" * 58)
-    input("  Quando o item estiver SALVO, aperte ENTER aqui p/ o proximo...  ")
+    print("    ENTER = o ROBO confirma e vai para o proximo item")
+    print("    M     = VOCE confirma na mao (ajustar algo antes)")
+    resp = input("  Opcao (Enter = robo confirma): ").strip().lower()
+
+    if resp == "m":
+        input("  Confirme/salve na tela e aperte ENTER quando terminar...  ")
+        # Garante que nao ficou nenhuma janela aberta antes do proximo item.
+        if _modal_edicao_aberto(page) or _janela_variaveis_aberta(page):
+            _confirmar_edicao(page)
+        return True
+
+    # ENTER: o robo confirma (janela de edicao + variaveis, se aparecer).
+    if _confirmar_edicao(page):
+        print(f"     item {num} salvo. ✔")
+    else:
+        print(f"     [!] item {num}: nao consegui fechar as janelas.")
+        print_tela(page, f"semi_confirmar_travou_{num}")
+        input("  Feche/confirme na tela e aperte ENTER p/ continuar...  ")
+    page.wait_for_timeout(1500)
     return True
 
 
