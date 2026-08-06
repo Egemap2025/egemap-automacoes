@@ -143,9 +143,25 @@ O usuário mandou um vídeo editando o item 1 à mão. Isso revelou um **bug**:
 2. ✅ FEITO — resumo/conferência ao final (`_resumo_final` /
    `_confere_item_na_linha`): mostra OK / conferir / falhou por item,
    comparando com a linha da tabela (lenient p/ texto truncado).
-3. **A FAZER (visão do usuário): montar orçamentos do ZERO** — o robô CRIAR
-   projetos novos ("Inserir Novo Projeto"/"Substituir Projeto"), não só
-   alterar. É a tela de criação (diferente da de edição); precisa mapear.
+3. **EM ANDAMENTO: Substituir Projeto** (trocar o item por outro modelo /
+   "adicionar persiana/tela" = trocar por modelo INTEGRADA/COM TELA).
+   Fluxo mapeado pelos prints do usuário (05/08):
+   - Menu ☰ do item → **"Substituir Projeto"** (última opção do menu).
+   - Popup **"Substituir Novo Projeto — Deseja excluir este projeto e incluir
+     outro na mesma posição?"** → botão **Sim**.
+   - Tela **"ESCOLHA O DESENHO | PROJETO"** (`app.wvetro.selecioneprojeto`):
+     dropdowns **LINHA** (Versatic 25, Deluxe 32, Solene..., Guarda-corpo,
+     Portão...) e **MODELO** (Janela de Correr 02/03/04/06 Folhas, Janela
+     Maxim-ar, Módulo Fixo, Porta de Correr..., Porta de Giro, Portinhola...);
+     botão **Pesquisar**.
+     Também há NOME FORNECEDOR, BITOLA e um campo PESQUISA (texto).
+   - Aparecem **cards de desenho** com código (ex.: `*EGE-VER25-IJCR200A`),
+     imagem e título (ex.: `JANELA DE CORRER INTEGRADA 02 FOLHAS | PERFISUD`);
+     cada card tem "Mais N opções de desenhos". Clicar no card certo.
+   - Cai na janela **"Dados do Item"** → daí o robô JÁ sabe preencher/confirmar.
+   - **Falta definir com o usuário:** formato da mensagem p/ substituir e como
+     escolher o card (por MODELO + palavras do título). Pedir um VÍDEO de UMA
+     substituição completa.
 4. Possível: **ler o pedido direto do WhatsApp Web** (hoje cola-se a mensagem).
 
 ---
