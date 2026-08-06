@@ -920,15 +920,32 @@ def _confirmares_visiveis(page):
     return encontrados
 
 
-def _clicar_confirmar_modal(page):
-    """Clica no primeiro botao 'Confirmar' visivel de uma janela."""
-    for e in _confirmares_visiveis(page):
+def _clicar_forte(e):
+    """Tenta clicar de varios jeitos (normal, forcado, via JS). Retorna True
+    se algum funcionou. Usado quando um clique simples nao pega."""
+    try:
+        e.scroll_into_view_if_needed()
+    except Exception:
+        pass
+    for metodo in ("normal", "forcado", "js"):
         try:
-            e.scroll_into_view_if_needed()
-            e.click(timeout=3000)
+            if metodo == "normal":
+                e.click(timeout=2500)
+            elif metodo == "forcado":
+                e.click(timeout=2000, force=True)
+            else:
+                e.evaluate("el => el.click()")
             return True
         except Exception:
             continue
+    return False
+
+
+def _clicar_confirmar_modal(page):
+    """Clica no primeiro botao 'Confirmar' visivel de uma janela."""
+    for e in _confirmares_visiveis(page):
+        if _clicar_forte(e):
+            return True
     return False
 
 
@@ -982,11 +999,24 @@ def _confirmar_edicao(page, max_tentativas=8):
                 if _janela_variaveis_aberta(page):
                     continue
             return True
-        if _clicar_confirmar_modal(page):
-            clicou_algo = True
-            page.wait_for_timeout(1800)
-        else:
+
+        # Ao trocar cor/vidro sobram COPIAS MORTAS da janela, cada uma com um
+        # 'Confirmar' fantasma. Por isso NAO clicamos so no primeiro: tentamos
+        # CADA 'Confirmar' visivel e, apos cada clique, conferimos se o estado
+        # mudou (alguma janela fechou). Assim uma hora acertamos o botao vivo.
+        confirmares = _confirmares_visiveis(page)
+        if not confirmares:
             page.wait_for_timeout(800)
+            continue
+        estado = (modal, vari)
+        for e in confirmares:
+            if not _clicar_forte(e):
+                continue
+            clicou_algo = True
+            page.wait_for_timeout(1500)
+            novo = (_modal_edicao_aberto(page), _janela_variaveis_aberta(page))
+            if novo != estado:
+                break  # algo mudou -- re-avalia do inicio do laco
     return not _modal_edicao_aberto(page) and not _janela_variaveis_aberta(page)
 
 
