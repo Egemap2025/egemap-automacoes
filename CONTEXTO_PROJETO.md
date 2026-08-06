@@ -158,10 +158,31 @@ O usuário mandou um vídeo editando o item 1 à mão. Isso revelou um **bug**:
    - Aparecem **cards de desenho** com código (ex.: `*EGE-VER25-IJCR200A`),
      imagem e título (ex.: `JANELA DE CORRER INTEGRADA 02 FOLHAS | PERFISUD`);
      cada card tem "Mais N opções de desenhos". Clicar no card certo.
-   - Cai na janela **"Dados do Item"** → daí o robô JÁ sabe preencher/confirmar.
-   - **Falta definir com o usuário:** formato da mensagem p/ substituir e como
-     escolher o card (por MODELO + palavras do título). Pedir um VÍDEO de UMA
-     substituição completa.
+   - Cai na tela **"Detalhes do Projeto"** (`app.wvetro.confirmadadosprojeto`)
+     — é DIFERENTE da janela "Dados do Item" da edição! Campos:
+     NOMENCLATURA, **QUANTIDADE**, **LARGURA (MM)**, **ALTURA (MM)**,
+     **COR ACESSÓRIOS**, **COR ALUMINIO | PERFIL**, **VIDRO** (não "VIDRO COR"),
+     **AMBIENTE**, **TIPO**, CONTRAMARCO, ARREMATE, ARREM.PISO, ORDEM.
+     A MEDIDA vem preenchida do item antigo; VIDRO/TIPO/AMBIENTE **resetam** →
+     precisam ser repostos iguais ao que era (+ mudanças pedidas).
+     Botões: **"Incluir item no orçamento"**, "Incluir mesmo item e informar
+     nova medida", "Escolher outro projeto".
+   - Após "Incluir item no orçamento" abre **"Informe as variáveis"**. Para
+     itens com persiana, a variável-chave é **AE — ACIONAMENTO DA ESTEIRA**:
+     opções **MOTOR COM CONTROLE / RECOLHEDOR CORDÃO / RECOLHEDOR FITA**.
+     Se MOTOR → aparecem VM (VOLTAGEM DO MOTOR 220V), AM (ACIONAMENTO DO
+     MOTOR: CONTROLE REMOTO), RC (LADO DO RECOLHEDOR/MOTOR). Outras: PP (PASSO
+     DAS PALHETAS), TP (TAMANHO DA PALHETA), MD (USA MANCAL DIVISOR), etc.
+     Depois **CONFIRMAR**.
+   - **Falta definir com o usuário:** (a) formato da mensagem p/ substituir;
+     (b) como escolher o card quando há vários; (c) a LINHA vem na mensagem ou
+     é padrão; (d) valor padrão do ACIONAMENTO (motor x recolhedor fita).
+   - **Popup "Atenção! Existem itens com valores zerados"** (botões "CONFERIR
+     ITENS SEM VALOR" e **"Fechar"**) pode aparecer na tela de seleção → o robô
+     deve só clicar **Fechar** e continuar (confirmado pelo usuário).
+   - **ATENÇÃO / RISCO:** substituir EXCLUI o projeto antigo antes de incluir o
+     novo. Construir primeiro em modo SEGURO (robô navega/preenche, usuário
+     confirma os passos críticos) para não perder item por engano.
 4. Possível: **ler o pedido direto do WhatsApp Web** (hoje cola-se a mensagem).
 
 ---
