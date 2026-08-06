@@ -1044,19 +1044,66 @@ CORES_PERFIL = ("pintura", "anodizado", "anod", "branco", "preto", "bronze",
 CORES_VIDRO = {"incolor": "INCOLOR", "verde": "VERDE", "bronze": "BRONZE",
                "fume": "FUME", "fumê": "FUME", "azul": "AZUL", "acidato": "ACIDATO"}
 
+# Nomes especiais de vidro (aparecem como cor/nome na lista do W-Vetro).
+NOMES_VIDRO = [("mini-boreal", "MINI-BOREAL"), ("mini boreal", "MINI-BOREAL"),
+               ("boreal", "BOREAL"), ("pontilhado", "PONTILHADO"),
+               ("quadrato", "QUADRATO"), ("canelado", "CANELADO"),
+               ("float", "FLOAT"), ("refletivo", "REFLETIVO"),
+               ("laminado", "LAMINADO")]
+
+# Palavras que indicam que a parte da mensagem e um VIDRO (nao ambiente/cor).
+VIDRO_TIPOS = ("temperado", "comum", "laminado", "refletivo", "acidato", "insulado")
+VIDRO_NOMES = ("incolor", "verde", "fume", "fumê", "bronze", "azul", "cinza",
+               "boreal", "mini-boreal", "pontilhado", "quadrato", "canelado",
+               "float", "antelio", "prata")
+
+
+def _parece_spec_vidro(low):
+    """Diz se a parte da mensagem parece a especificacao de um VIDRO, pelo
+    conteudo (nao exige a palavra 'vidro'). Ex.: 'incolor 8mm temperado',
+    'mini-boreal 04mm comum', 'vidro 6 temperado'."""
+    if "vidro" in low:
+        return True
+    if _re.search(r"\d\s*mm", low):            # tem espessura em 'mm'
+        return True
+    if any(t in low for t in VIDRO_TIPOS):     # temperado/comum/laminado...
+        return True
+    # nome/cor de vidro + um numero (espessura sem 'mm', ex.: 'incolor 6')
+    if any(n in low for n in VIDRO_NOMES) and _re.search(r"\d", low):
+        return True
+    return False
+
 
 def _descreve_vidro(spec):
-    """Descricao amigavel do vidro (cor=INCOLOR e tipo=TEMPERADO por padrao)."""
+    """Descricao amigavel do vidro para o preview. Detecta nome/cor
+    (incolor por padrao), espessura e tipo (temperado/comum/laminado)."""
     low = spec.lower()
-    cor = "INCOLOR"
-    for k, v in CORES_VIDRO.items():
+    nome = None
+    for k, v in NOMES_VIDRO:
         if k in low:
-            cor = v
+            nome = v
             break
+    if nome is None:
+        nome = "INCOLOR"
+        for k, v in CORES_VIDRO.items():
+            if k in low:
+                nome = v
+                break
     m = _re.search(r"(\d{1,2})", low)
     esp = m.group(1).zfill(2) if m else None
-    tipo = "COMUM" if "comum" in low else "TEMPERADO"
-    return f"{cor} {esp}MM - {tipo}" if esp else spec.upper()
+    if "comum" in low:
+        tipo = "COMUM"
+    elif "temperado" in low:
+        tipo = "TEMPERADO"
+    elif "laminado" in low:
+        tipo = "LAMINADO"
+    else:
+        tipo = "TEMPERADO"  # padrao quando nao dito
+    partes = [nome]
+    if esp:
+        partes.append(f"{esp}MM")
+    desc = " ".join(partes)
+    return f"{desc} - {tipo}"
 
 
 def parse_mensagem(texto):
@@ -1076,28 +1123,38 @@ def parse_mensagem(texto):
             continue
         num = mi.group(1)
         mud, ambiente = {}, []
-        for p in _re.split(r"\s*[-–]\s*", mi.group(2)):
+        # Separa os campos pelo traco COM espacos dos dois lados (' - '), para
+        # NAO quebrar palavras que tem traco no meio (ex.: 'mini-boreal').
+        for p in _re.split(r"\s+[-–]\s+", mi.group(2)):
             p = p.strip()
             if not p:
                 continue
             low = p.lower()
+            # 1) medida largura x altura
             md = _re.search(r"(\d{2,4})\s*[xX]\s*(\d{2,4})", p)
             if md:
                 mud["largura"], mud["altura"] = md.group(1), md.group(2)
                 continue
-            mq = _re.search(r"(\d+)\s*un\b", low) or _re.search(r"qtde?\s*[:]?\s*(\d+)", low)
+            # 2) quantidade: aceita 2un / 2und / 2unid / 2 unidades / qtde 2
+            mq = (_re.search(r"(\d+)\s*un[a-z]*\b", low)
+                  or _re.search(r"qtde?\s*[:]?\s*(\d+)", low)
+                  or _re.search(r"(\d+)\s*(?:pe[cç]as?|pcs?)\b", low))
             if mq:
                 mud["qtde"] = mq.group(1)
                 continue
-            if "vidro" in low:
-                mud["vidro"] = _re.sub(r"vidro", "", low, flags=_re.I).strip()
+            # 3) vidro: reconhecido pelo CONTEUDO (nao exige a palavra 'vidro')
+            if _parece_spec_vidro(low):
+                mud["vidro"] = _re.sub(r"\bvidro\b", "", low, flags=_re.I).strip()
                 continue
-            if _re.match(r"^[a-z]{1,2}\s*\d{1,3}$", low):
+            # 4) tipo (ex.: j01, pj01) -- ate 3 letras + numero
+            if _re.match(r"^[a-z]{1,3}\s*\d{1,3}$", low):
                 mud["tipo"] = _re.sub(r"\s+", "", p).upper()
                 continue
+            # 5) cor do perfil (pintura, anodizado, preto...)
             if any(w in low for w in CORES_PERFIL):
                 mud["cor"] = p.strip()
                 continue
+            # 6) o que sobrar e ambiente/localizacao
             ambiente.append(p.strip())
         if ambiente:
             mud["ambiente"] = " ".join(ambiente)
@@ -1128,16 +1185,15 @@ def _mostrar_preview(orc, itens):
 
 
 def _pontua_vidro(opcao, termo):
-    ou = opcao.upper().replace(" ", "")
+    """Pontua o quanto uma opcao da lista casa com o termo do vidro pedido.
+    Espessura (mm) e obrigatoria; pontua tambem tipo (temperado/comum/laminado)
+    e nome/cor (incolor, verde, boreal, refletivo...)."""
+    o = opcao.upper()
+    ou = o.replace(" ", "")
     low = termo.lower()
-    cor = "INCOLOR"
-    for k, v in CORES_VIDRO.items():
-        if k in low:
-            cor = v
-            break
     score = 0
-    if cor in opcao.upper():
-        score += 2
+
+    # espessura em mm (obrigatoria) -- ex.: '8' -> aceita '8MM' ou '08MM'
     m = _re.search(r"(\d{1,2})", low)
     tem_esp = False
     if m:
@@ -1145,10 +1201,25 @@ def _pontua_vidro(opcao, termo):
         if f"{d}MM" in ou or f"{d.zfill(2)}MM" in ou:
             score += 3
             tem_esp = True
-    tipo = "COMUM" if "comum" in low else "TEMPERADO"
-    if tipo in opcao.upper():
-        score += 2
-    return score if tem_esp else -1
+    if not tem_esp:
+        return -1
+
+    # tipo
+    for t in ("COMUM", "TEMPERADO", "LAMINADO"):
+        if t.lower() in low and t in o:
+            score += 2
+
+    # nome/cor do vidro citado no termo e presente na opcao
+    citou_nome = False
+    for w in VIDRO_NOMES:
+        if w in low:
+            citou_nome = True
+            if w.replace("-", "").upper() in ou or w.upper() in o:
+                score += 2
+    # se o termo nao citou nome/cor, prefere INCOLOR (padrao)
+    if not citou_nome and "INCOLOR" in o:
+        score += 1
+    return score
 
 
 def _melhor_opcao(opcoes, termo, esperado):

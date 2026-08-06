@@ -40,17 +40,22 @@ Prints de depuração são salvos em `~/EGEMAP_robo_prints`.
 5. **Modo mensagem — LEITURA e PREVIEW**: cola a mensagem, o robô entende e
    mostra um resumo do que vai fazer (testado, perfeito).
 
-### Formato da mensagem (regras já definidas com o usuário)
+### Formato da mensagem (flexível — reconhece por conteúdo)
 ```
 Orçamento 2346
-1 - Pintura preto - 1300x1500 - vidro 6 temperado - j01 - quartos
-5 - Pintura Branco Brilhante - Vidro 8 temperado - Sala de jantar
+1 - 2und - incolor 8mm temperado - pintura preto - j02
+5 - 3und - 600x600 - mini-boreal 04mm comum - pintura preto - j04 - bwc
 ```
+- Campos separados por **" - "** (traço COM espaços dos dois lados). Traço
+  dentro de palavra (ex.: `mini-boreal`) NÃO quebra o campo.
 - `1300x1500` = **largura x altura** (largura primeiro).
-- Vidro sem cor = **INCOLOR**; sem dizer comum = **TEMPERADO** (escreve "comum"
-  quando for comum). Ex.: "vidro 6 temperado" → `INCOLOR 06MM - TEMPERADO`.
-- Quantidade escrita como **"3un"**.
-- Tipo no formato **j01 / j02**.
+- **Vidro reconhecido pelo conteúdo** (não exige a palavra "vidro"): basta ter
+  espessura (`8mm`/`6`), tipo (`temperado`/`comum`/`laminado`) ou nome/cor
+  (`incolor`, `verde`, `mini-boreal`, `refletivo`...). Sem cor = **INCOLOR**;
+  sem dizer comum = **TEMPERADO**. Ex.: "incolor 8mm temperado" →
+  `INCOLOR 08MM - TEMPERADO`; "mini-boreal 04mm comum" → `MINI-BOREAL 04MM - COMUM`.
+- Quantidade: **"2un" / "2und" / "2 unidades" / "qtde 2"**.
+- Tipo no formato **j01 / j02 / pj01**.
 - **O que não estiver escrito, mantém o que já está no orçamento.**
 
 ---
