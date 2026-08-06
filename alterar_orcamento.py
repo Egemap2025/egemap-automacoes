@@ -380,6 +380,33 @@ def ler_itens(page):
 
 # ── Alteracoes: trocar vidro de um item ───────────────────────────────────────────
 
+# Palavras de produto (fallback). O sinal PRINCIPAL de que uma linha e um item
+# e ter o menu ☰ (fa-bars); os nomes abaixo sao so um reforco.
+PALAVRAS_ITEM = ("JANELA", "PORTA", "MODULO", "MÓDULO", "GUARDA", "BOX",
+                 "FIXO", "PAINEL", "FACHADA", "GRADIL", "PORTAO", "PORTÃO",
+                 "TAMPO", "ESPELHO", "BASCULANTE", "MAXIM", "VENEZIANA",
+                 "PIVOTANTE", "BANDEIRA", "CORRER", "SACADA", "VITRINE",
+                 "ESQUADRIA", "SOLENE", "PELE DE VIDRO", "PERSIANA")
+
+
+def _eh_linha_item(linha):
+    """Diz se a linha da tabela e um ITEM de projeto. O sinal mais confiavel e
+    ter o menu de acoes ☰ (fa-bars); se nao der, cai nos nomes de produto ou
+    numa medida (LxA). Assim funciona para QUALQUER tipo de produto."""
+    try:
+        if linha.locator("[class*='fa-bars'], i[class*='bars']").count() > 0:
+            return True
+    except Exception:
+        pass
+    try:
+        txt = linha.inner_text().upper()
+    except Exception:
+        return False
+    if any(p in txt for p in PALAVRAS_ITEM):
+        return True
+    return bool(_re.search(r"\d+\s*[xX]\s*\d+", txt))
+
+
 def _linhas_itens(page):
     """Retorna as linhas (locators) que sao itens de projeto do orcamento,
     na ordem em que aparecem."""
@@ -388,11 +415,7 @@ def _linhas_itens(page):
         linhas = page.locator("table tbody tr")
         for i in range(linhas.count()):
             linha = linhas.nth(i)
-            try:
-                txt = linha.inner_text().upper()
-            except Exception:
-                continue
-            if any(p in txt for p in ("JANELA", "PORTA", "MODULO", "GUARDA")):
+            if _eh_linha_item(linha):
                 resultado.append(linha)
     except Exception:
         pass
@@ -1297,14 +1320,14 @@ def _itens_por_ordem(page):
         linhas = page.locator("table tbody tr")
         for i in range(linhas.count()):
             linha = linhas.nth(i)
+            if not _eh_linha_item(linha):
+                continue
             try:
                 txt = linha.inner_text()
             except Exception:
                 continue
-            if not any(p in txt.upper() for p in ("JANELA", "PORTA", "MODULO", "GUARDA")):
-                continue
             ordem, _ = _resumo_item(txt)
-            if ordem:
+            if ordem and ordem not in mapa:
                 mapa[ordem] = linha
     except Exception:
         pass
@@ -1529,7 +1552,9 @@ def modo_mensagem(page):
         mapa = _itens_por_ordem(page)
         linha = mapa.get(str(num))
         if linha is None:
+            achados = ", ".join(sorted(mapa, key=lambda x: int(x) if x.isdigit() else 0))
             print(f"  [!] item {num} nao existe neste orcamento.")
+            print(f"      (itens encontrados na tela: {achados or 'nenhum'})")
             continue
         try:
             if semi:
