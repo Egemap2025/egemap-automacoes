@@ -1422,13 +1422,14 @@ def aplicar_item_auto(page, linha_item, num, mud):
     print_tela(page, f"auto_item_{num}")
     # Confirma a janela de edicao e, se aparecer, a de variaveis
     # ('Informar Medidas/Quantidades') -- clica ate tudo fechar.
-    if _confirmar_edicao(page):
+    ok = _confirmar_edicao(page)
+    if ok:
         print(f"     item {num} salvo. ✔")
     else:
         print(f"     [!] item {num}: alguma janela nao fechou sozinha.")
         print_tela(page, f"auto_confirmar_travou_{num}")
     page.wait_for_timeout(1500)
-    return True
+    return ok
 
 
 def aplicar_item_semi_auto(page, linha_item, num, mud):
@@ -1498,6 +1499,77 @@ def clicar_calcular(page):
     return False
 
 
+def _confere_item_na_linha(mud, row_up):
+    """Compara o que foi pedido com o texto da LINHA do item na tabela (que
+    mostra L/H, Qtd, Tipo, Localizacao e Vidro). Devolve lista de campos que
+    NAO baterem. Comparacao lenient: o vidro na tabela vem truncado, entao
+    conferimos nome + espessura (nao a string inteira)."""
+    ruins = []
+    sem_espaco = row_up.replace(" ", "")
+    if "largura" in mud and "altura" in mud:
+        med = f'{mud["largura"]}X{mud["altura"]}'.upper()
+        if med not in sem_espaco:
+            ruins.append("medida")
+    if "tipo" in mud and mud["tipo"].upper() not in row_up:
+        ruins.append("tipo")
+    if "ambiente" in mud:
+        # a localizacao vem TRUNCADA na tabela (ex.: 'SUITE MAST..'); por isso
+        # conferimos so o inicio (4 letras) da 1a palavra do ambiente.
+        palavras = [w for w in mud["ambiente"].upper().split() if len(w) >= 3]
+        if palavras and palavras[0][:4] not in row_up:
+            ruins.append("ambiente")
+    if "vidro" in mud:
+        desc = _descreve_vidro(mud["vidro"]).upper()   # ex.: INCOLOR 08MM - TEMPERADO
+        nome = desc.split()[0]                          # INCOLOR / MINI-BOREAL
+        mm = _re.search(r"\d{2}MM", desc)
+        ok_nome = nome in row_up
+        ok_mm = (mm.group(0) in sem_espaco) if mm else True
+        if not (ok_nome and ok_mm):
+            ruins.append("vidro")
+    return ruins
+
+
+def _resumo_final(page, itens, resultados):
+    """Imprime um RESUMO do que foi aplicado e uma CONFERENCIA de cada item
+    contra a linha atual da tabela (o que o W-Vetro esta mostrando)."""
+    page.wait_for_timeout(1000)
+    mapa = _itens_por_ordem(page)
+    print()
+    print("  " + "=" * 58)
+    print("  RESUMO / CONFERENCIA")
+    print("  " + "=" * 58)
+    ok_n = aviso_n = falha_n = 0
+    for num, mud in itens.items():
+        st = resultados.get(num, "?")
+        if st == "nao_existe":
+            print(f"  Item {num}: ✗ NAO EXISTE neste orcamento")
+            falha_n += 1
+            continue
+        if st in ("falhou", "erro"):
+            print(f"  Item {num}: ✗ NAO salvou (veja os prints/avisos acima)")
+            falha_n += 1
+            continue
+        # aplicado: confere contra a linha da tabela
+        linha = mapa.get(str(num))
+        row_up = ""
+        if linha is not None:
+            try:
+                row_up = " ".join(linha.inner_text().split()).upper()
+            except Exception:
+                row_up = ""
+        ruins = _confere_item_na_linha(mud, row_up) if row_up else ["(nao li a linha)"]
+        if not ruins:
+            print(f"  Item {num}: ✔ salvo e conferido")
+            ok_n += 1
+        else:
+            print(f"  Item {num}: ⚠ salvo, mas confira: {', '.join(ruins)}")
+            aviso_n += 1
+    print("  " + "-" * 58)
+    print(f"  Total: {ok_n} OK  |  {aviso_n} conferir  |  {falha_n} falhou")
+    print("  " + "=" * 58)
+    print("\n  Pronto! Alteracoes da mensagem aplicadas. ✔")
+
+
 def modo_mensagem(page):
     """Le uma mensagem colada, mostra o que entendeu, confirma e aplica."""
     print()
@@ -1548,6 +1620,7 @@ def modo_mensagem(page):
         print("  Nao consegui abrir o orcamento.")
         return
 
+    resultados = {}  # num -> "ok" | "falhou" | "nao_existe" | "erro"
     for num, mud in itens.items():
         mapa = _itens_por_ordem(page)
         linha = mapa.get(str(num))
@@ -1555,15 +1628,18 @@ def modo_mensagem(page):
             achados = ", ".join(sorted(mapa, key=lambda x: int(x) if x.isdigit() else 0))
             print(f"  [!] item {num} nao existe neste orcamento.")
             print(f"      (itens encontrados na tela: {achados or 'nenhum'})")
+            resultados[num] = "nao_existe"
             continue
         try:
             if semi:
-                aplicar_item_semi_auto(page, linha, num, mud)
+                ok = aplicar_item_semi_auto(page, linha, num, mud)
             else:
-                aplicar_item_auto(page, linha, num, mud)
+                ok = aplicar_item_auto(page, linha, num, mud)
+            resultados[num] = "ok" if ok else "falhou"
         except Exception as e:
             print(f"  [!] erro inesperado no item {num}: {e}")
             print_tela(page, f"erro_item_{num}")
+            resultados[num] = "erro"
         page.wait_for_timeout(1200)
 
     # Ao final, o W-Vetro precisa RECALCULAR os valores do orcamento.
@@ -1574,7 +1650,8 @@ def modo_mensagem(page):
         print("  (Nao achei o botao 'Calcular'. Se aparecer 'Orcamento Nao")
         print("   Calculado' na tela, clique em Calcular manualmente.)")
 
-    print("\n  Pronto! Alteracoes da mensagem aplicadas. ✔")
+    # Resumo + conferencia: mostra como cada item ficou na tela do W-Vetro.
+    _resumo_final(page, itens, resultados)
 
 
 def menu_alteracoes(page):

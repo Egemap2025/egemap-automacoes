@@ -139,12 +139,14 @@ O usuário mandou um vídeo editando o item 1 à mão. Isso revelou um **bug**:
 
 ## Próximos passos
 
-1. **Testar no PC** o modo mensagem ponta a ponta no orçamento 2346 (os 2
-   itens) e confirmar que ficou estável com as correções desta rodada.
-2. Se algum campo ainda falhar, mandar os **prints** salvos em
-   `~/EGEMAP_robo_prints` (`auto_item_*`, `auto_sem_modal_*`) para ajustar.
-3. Futuro (visão do usuário): robô **montar orçamentos do zero** (já que terá
-   toda a navegação dominada) — ex.: "Substituir Projeto" / "Novo Orçamento".
+1. ✅ FEITO — alterar orçamento (modo mensagem) 100%.
+2. ✅ FEITO — resumo/conferência ao final (`_resumo_final` /
+   `_confere_item_na_linha`): mostra OK / conferir / falhou por item,
+   comparando com a linha da tabela (lenient p/ texto truncado).
+3. **A FAZER (visão do usuário): montar orçamentos do ZERO** — o robô CRIAR
+   projetos novos ("Inserir Novo Projeto"/"Substituir Projeto"), não só
+   alterar. É a tela de criação (diferente da de edição); precisa mapear.
+4. Possível: **ler o pedido direto do WhatsApp Web** (hoje cola-se a mensagem).
 
 ---
 
