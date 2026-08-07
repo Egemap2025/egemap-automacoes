@@ -1702,8 +1702,26 @@ _JS_MARCAR_CARD = r"""
   }
   if (!best || bestScore <= 0) return null;
   best.setAttribute('data-egerobo','card');
-  const img = best.querySelector('img'); if (img) img.setAttribute('data-egerobo','img');
-  const lnk = best.querySelector('a,button,[onclick]'); if (lnk) lnk.setAttribute('data-egerobo','lnk');
+  // FOTO GRANDE do desenho: a MAIOR imagem do card (nao o logo pequeno).
+  let bigImg=null, bigArea=0;
+  for (const im of best.querySelectorAll('img')){
+    const r = im.getBoundingClientRect();
+    const area = r.width * r.height;
+    if (area > bigArea){ bigArea = area; bigImg = im; }
+  }
+  if (bigImg) bigImg.setAttribute('data-egerobo','img');
+  // NOME do projeto (titulo) -- NAO a linha do codigo nem 'PROJETO COM'
+  // (evita clicar no botao vermelho 'Mais N opcoes de desenhos').
+  let titEl=null, titScore=-1;
+  for (const el of best.querySelectorAll('div,span,p,a,h1,h2,h3,h4,b,strong')){
+    const tt = nd(el.textContent);
+    if (!tt || tt.length > 120) continue;
+    if (tt.includes('projeto com') || tt.includes('opcoes') || tt.includes('opções')) continue;
+    if (/ege-|perf-/.test(tt) && tt.length < 22) continue;
+    let sc = 0; for (const w of pal){ if (tt.includes(w)) sc++; }
+    if (sc > titScore){ titScore = sc; titEl = el; }
+  }
+  if (titEl) titEl.setAttribute('data-egerobo','titulo');
   best.scrollIntoView({block:'center'});
   let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
   if (titulo.length > 90) titulo = titulo.slice(0,90) + '...';
@@ -1737,9 +1755,9 @@ def _escolher_card_auto(page, modelo):
         return False
     print(f"     card escolhido -> {res.get('titulo','?')}")
 
-    # Clica no card com o Playwright (clique REAL). Tenta a imagem, o link e o
-    # card inteiro; 1 clique e depois 2 cliques -- ate a tela do projeto abrir.
-    for sel in ('[data-egerobo="img"]', '[data-egerobo="lnk"]', '[data-egerobo="card"]'):
+    # Clica no card com o Playwright (clique REAL). Tenta a FOTO GRANDE, o NOME
+    # e o card inteiro -- NUNCA o botao vermelho 'Mais N opcoes'. 1x e depois 2x.
+    for sel in ('[data-egerobo="img"]', '[data-egerobo="titulo"]', '[data-egerobo="card"]'):
         loc = page.locator(sel).first
         try:
             if loc.count() == 0:
@@ -1758,9 +1776,10 @@ def _escolher_card_auto(page, modelo):
             if _esperar_url_ou_texto(page, "confirmadadosprojeto",
                                      "Detalhes do Projeto", 5000):
                 return True
-    # ultimo recurso: clique via JS no elemento marcado
+    # ultimo recurso: clique via JS na foto/nome marcados
     try:
         page.evaluate("() => { const e=document.querySelector('[data-egerobo=\"img\"]')"
+                      " || document.querySelector('[data-egerobo=\"titulo\"]')"
                       " || document.querySelector('[data-egerobo=\"card\"]'); if(e) e.click(); }")
         if _esperar_url_ou_texto(page, "confirmadadosprojeto",
                                  "Detalhes do Projeto", 5000):
