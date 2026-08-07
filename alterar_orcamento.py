@@ -1580,16 +1580,49 @@ def _clicar_botao(page, texto_regex, timeout=6000):
     return False
 
 
+def _sem_acento(s):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", s or "")
+                   if unicodedata.category(c) != "Mn")
+
+
+_STOP = {"com", "de", "da", "do", "e", "ou", "a", "o", "em", "no", "na", "para"}
+
+
 def _melhor_opcao_texto(opcoes, termo):
-    """Escolhe a opcao que mais compartilha palavras com o termo pedido."""
-    palavras = [w for w in _re.split(r"[^a-z0-9]+", termo.lower()) if len(w) >= 2]
+    """Escolhe a opcao que mais compartilha palavras com o termo pedido
+    (ignora acentos e palavras-cola tipo 'com'/'de')."""
+    palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(termo.lower()))
+                if len(w) >= 2 and w not in _STOP]
     melhor, melhor_score = None, 0
     for o in opcoes:
-        ol = o.lower()
+        ol = _sem_acento(o.lower())
         s = sum(1 for w in palavras if w in ol)
         if s > melhor_score:
             melhor, melhor_score = o, s
     return melhor
+
+
+def _modelo_dropdown(descricao):
+    """A partir da descricao solta do usuario (ex.: 'janela com persiana com
+    peitoril fixo', 'fixo 02 modulos verticais', 'maxim ar com bandeira',
+    'porta janela 02 folhas e tela'), decide qual MODELO escolher na lista."""
+    low = _sem_acento(descricao.lower())
+    mf = _re.search(r"(\d{1,2})\s*folhas?", low)
+    folhas = mf.group(1).zfill(2) if mf else "02"
+    if "maxim" in low:
+        return "JANELA MAXIM-AR"
+    if "portinhola" in low:
+        return "PORTINHOLA"
+    if "porta" in low:
+        if "giro" in low:
+            return f"PORTA DE GIRO {folhas} FOLHA"
+        return f"PORTA DE CORRER {folhas} FOLHAS"
+    # fixo/painel/modulo (sem ser janela/porta) -> Modulo Fixo
+    if "modulo" in low or "painel" in low or \
+       ("fixo" in low and "janela" not in low and "porta" not in low):
+        return "MODULO FIXO"
+    return f"JANELA DE CORRER {folhas} FOLHAS"
 
 
 def _selecionar_select_rotulo(page, rotulo, valor, nome):
@@ -1685,7 +1718,8 @@ def _escolher_card_auto(page, modelo):
     """Clica AUTOMATICAMENTE no card cujo titulo/codigo mais casa com o modelo.
     Usa CLIQUE REAL de mouse (o W-Vetro ignora clique sintetico). Mostra qual
     card escolheu. Retorna True se conseguiu navegar."""
-    palavras = [w for w in _re.split(r"[^a-z0-9]+", modelo.lower()) if len(w) >= 2]
+    palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(modelo.lower()))
+                if len(w) >= 2 and w not in _STOP]
     try:
         res = page.evaluate(_JS_ACHAR_CARD, {"palavras": palavras})
     except Exception:
@@ -1762,10 +1796,11 @@ def substituir_item_projeto(page, linha_item, num, mud):
         _clicar_botao(page, r"^\s*fechar\s*$", timeout=4000)
         page.wait_for_timeout(600)
 
-    # 4) LINHA e MODELO (melhor match)
+    # 4) LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
+    #    modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
     _selecionar_select_rotulo(page, "LINHA", linha, "linha")
     page.wait_for_timeout(700)
-    _selecionar_select_rotulo(page, "MODELO", modelo, "modelo")
+    _selecionar_select_rotulo(page, "MODELO", _modelo_dropdown(modelo), "modelo")
     page.wait_for_timeout(700)
 
     # 5) Pesquisar
