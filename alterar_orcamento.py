@@ -1898,6 +1898,12 @@ def modo_mensagem(page):
     resultados = {}  # num -> "ok" | "falhou" | "nao_existe" | "erro"
     for num, mud in itens.items():
         mapa = _itens_por_ordem(page)
+        # Se a tela nao esta mostrando os itens (ex.: acabamos de SUBSTITUIR e
+        # o W-Vetro foi para outra tela), REABRE o orcamento para voltar a lista.
+        if not mapa:
+            print("  (voltando para a tela do orcamento...)")
+            abrir_orcamento(page, orc)
+            mapa = _itens_por_ordem(page)
         linha = mapa.get(str(num))
         if linha is None:
             achados = ", ".join(sorted(mapa, key=lambda x: int(x) if x.isdigit() else 0))
@@ -1930,6 +1936,10 @@ def modo_mensagem(page):
         page.wait_for_timeout(1200)
 
     # Ao final, o W-Vetro precisa RECALCULAR os valores do orcamento.
+    # Se houve substituicao, a tela pode ter mudado -- volta para o orcamento.
+    if any(m.get("substituir") for m in itens.values()):
+        if not _itens_por_ordem(page):
+            abrir_orcamento(page, orc)
     print("\n  Atualizando os valores (Calcular)...")
     if clicar_calcular(page):
         print("  Cliquei em Calcular -- valores atualizados. ✔")
