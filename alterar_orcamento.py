@@ -1691,9 +1691,9 @@ _JS_ACHAR_CARD = r"""
   for (const b of nodes){
     const t = nd(b.textContent);
     if (t.length < 6 || t.length > 500) continue;
-    const pareceCard = t.includes('ege-') || t.includes('perf-') ||
-          t.includes('projeto com') ||
-          /folhas|fixo|maxim|porta|m[oó]dulo|persiana|tela|portinhola|giro|veneziana|painel|bandeira|peitoril/.test(t);
+    // Sinal FORTE de card (evita pegar menus/blocos da pagina):
+    // todo card tem o codigo (*EGE-/PERF-) e o texto 'projeto com'.
+    const pareceCard = t.includes('ege-') || t.includes('perf-') || t.includes('projeto com');
     if (!pareceCard) continue;
     let s = 0;
     for (const w of pal){
@@ -1720,6 +1720,17 @@ def _escolher_card_auto(page, modelo):
     card escolheu. Retorna True se conseguiu navegar."""
     palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(modelo.lower()))
                 if len(w) >= 2 and w not in _STOP]
+    # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
+    import time as _t
+    fim = _t.time() + 10
+    while _t.time() < fim:
+        try:
+            if page.evaluate(
+                    "() => /projeto com|ege-|perf-/i.test(document.body.innerText||'')"):
+                break
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
     try:
         res = page.evaluate(_JS_ACHAR_CARD, {"palavras": palavras})
     except Exception:
