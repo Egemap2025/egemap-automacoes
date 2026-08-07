@@ -1722,6 +1722,15 @@ _JS_MARCAR_CARD = r"""
     if (sc > titScore){ titScore = sc; titEl = el; }
   }
   if (titEl) titEl.setAttribute('data-egerobo','titulo');
+  // Botao 'Mais N opcoes de desenhos' (abre o popup de variacoes -- necessario
+  // p/ painel fixo 'N modulos'). Marcamos para clicar SE a foto nao abrir.
+  let maisEl=null;
+  for (const el of best.querySelectorAll('a,button,span,div,[onclick]')){
+    const tt = nd(el.textContent);
+    if (tt.length <= 45 && (tt.includes('opcoes') || tt.includes('opes de desenho') ||
+        (tt.includes('mais') && tt.includes('desenho')))){ maisEl = el; break; }
+  }
+  if (maisEl) maisEl.setAttribute('data-egerobo','mais');
   best.scrollIntoView({block:'center'});
   let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
   if (titulo.length > 90) titulo = titulo.slice(0,90) + '...';
@@ -1787,8 +1796,19 @@ def _escolher_card_auto(page, modelo):
     except Exception:
         pass
 
-    # Se o clique abriu o POPUP DE VARIACOES (ex.: painel fixo 'N modulos'),
-    # escolhe a variacao que casa com a descricao e clica nela.
+    # Painel fixo 'N modulos': a foto nao abre nada -- precisa clicar em
+    # 'Mais N opcoes de desenhos' para abrir o popup de variacoes.
+    mais = page.locator('[data-egerobo="mais"]').first
+    try:
+        if mais.count() > 0:
+            print("     (abrindo 'Mais opcoes de desenhos'...)")
+            mais.scroll_into_view_if_needed(timeout=2000)
+            mais.click(timeout=3000)
+            page.wait_for_timeout(1800)
+    except Exception:
+        pass
+
+    # Se abriu o POPUP DE VARIACOES, escolhe a variacao que casa e clica nela.
     if _escolher_variacao_popup(page, modelo):
         return True
     return False
