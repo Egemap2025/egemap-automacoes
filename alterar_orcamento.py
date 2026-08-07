@@ -1764,51 +1764,49 @@ def _escolher_card_auto(page, modelo):
         return False
     print(f"     card escolhido -> {res.get('titulo','?')}")
 
-    # Clica no card com o Playwright (clique REAL). Tenta a FOTO GRANDE, o NOME
-    # e o card inteiro -- NUNCA o botao vermelho 'Mais N opcoes'. 1x e depois 2x.
-    for sel in ('[data-egerobo="img"]', '[data-egerobo="titulo"]', '[data-egerobo="card"]'):
-        loc = page.locator(sel).first
+    # Clicar na FOTO GRANDE do card avanca direto (confirmado pelo usuario).
+    # O desenho costuma ser imagem de FUNDO num quadro (nao um <img>), entao o
+    # jeito certo e um CLIQUE REAL de mouse no MEIO do desenho (parte de cima do
+    # card). Tambem tentamos o NOME. Nunca o botao vermelho 'Mais opcoes'.
+    def _clicar_ponto(loc, fx, fy):
         try:
-            if loc.count() == 0:
-                continue
+            loc.scroll_into_view_if_needed(timeout=2000)
+            box = loc.bounding_box()
         except Exception:
-            continue
-        for metodo in ("click", "dblclick"):
+            box = None
+        if not box:
+            return False
+        x = box["x"] + box["width"] * fx
+        y = box["y"] + box["height"] * fy
+        for func in (page.mouse.click, page.mouse.dblclick):
             try:
-                loc.scroll_into_view_if_needed(timeout=2000)
-                if metodo == "click":
-                    loc.click(timeout=3000)
-                else:
-                    loc.dblclick(timeout=3000)
+                func(x, y)
             except Exception:
                 continue
             if _esperar_url_ou_texto(page, "confirmadadosprojeto",
                                      "Detalhes do Projeto", 5000):
                 return True
-    # ultimo recurso: clique via JS na foto/nome marcados
-    try:
-        page.evaluate("() => { const e=document.querySelector('[data-egerobo=\"img\"]')"
-                      " || document.querySelector('[data-egerobo=\"titulo\"]')"
-                      " || document.querySelector('[data-egerobo=\"card\"]'); if(e) e.click(); }")
-        if _esperar_url_ou_texto(page, "confirmadadosprojeto",
-                                 "Detalhes do Projeto", 5000):
-            return True
-    except Exception:
-        pass
+        return False
 
-    # Painel fixo 'N modulos': a foto nao abre nada -- precisa clicar em
-    # 'Mais N opcoes de desenhos' para abrir o popup de variacoes.
-    mais = page.locator('[data-egerobo="mais"]').first
-    try:
-        if mais.count() > 0:
-            print("     (abrindo 'Mais opcoes de desenhos'...)")
-            mais.scroll_into_view_if_needed(timeout=2000)
-            mais.click(timeout=3000)
-            page.wait_for_timeout(1800)
-    except Exception:
-        pass
-
-    # Se abriu o POPUP DE VARIACOES, escolhe a variacao que casa e clica nela.
+    card = page.locator('[data-egerobo="card"]').first
+    # meio do desenho (a foto ocupa a parte de cima do card)
+    if card.count() > 0 and _clicar_ponto(card, 0.5, 0.40):
+        return True
+    # tenta a maior imagem marcada (caso o desenho seja um <img>)
+    img = page.locator('[data-egerobo="img"]').first
+    if img.count() > 0 and _clicar_ponto(img, 0.5, 0.5):
+        return True
+    # tenta o NOME do projeto
+    tit = page.locator('[data-egerobo="titulo"]').first
+    if tit.count() > 0:
+        try:
+            tit.click(timeout=3000)
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 5000):
+                return True
+        except Exception:
+            pass
+    # ultimo recurso: se o clique abriu um popup de variacoes, escolhe nele
     if _escolher_variacao_popup(page, modelo):
         return True
     return False
