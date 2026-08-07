@@ -1646,9 +1646,55 @@ def _frame_dados_projeto(page):
 
 def _escolher_card_auto(page, modelo):
     """Clica AUTOMATICAMENTE no card de desenho cujo titulo mais casa com o
-    modelo pedido. Retorna True se clicou em algum card."""
+    modelo pedido. Usa CLIQUE REAL de mouse (o W-Vetro ignora clique sintetico),
+    com fallback para clique via JS. Retorna True se conseguiu navegar."""
     palavras = [w for w in _re.split(r"[^a-z0-9]+", modelo.lower()) if len(w) >= 2]
-    js = r"""
+    # JS acha o melhor card, rola ate ele e devolve as COORDENADAS (centro da
+    # imagem do card) -- o clique real e feito pelo Playwright.
+    js_coord = r"""
+    (args) => {
+      const pal = args.palavras;
+      const norm = s => (s||'').toLowerCase();
+      const nodes = Array.from(document.querySelectorAll('div,li,article,a,td,section'));
+      let best=null, bestScore=0, bestLen=1e9;
+      for (const b of nodes){
+        const t = norm(b.textContent);
+        if (t.length < 6 || t.length > 500) continue;
+        const pareceCard = t.includes('ege-') || t.includes('projeto com') ||
+              /folhas|fixo|maxim|porta|m[oó]dulo|persiana|tela|portinhola|giro/.test(t);
+        if (!pareceCard) continue;
+        let s = 0; for (const w of pal){ if (t.includes(w)) s++; }
+        if (s > bestScore || (s === bestScore && t.length < bestLen)){
+          best=b; bestScore=s; bestLen=t.length;
+        }
+      }
+      if (!best || bestScore <= 0) return null;
+      const alvo = best.querySelector('img') || best;
+      alvo.scrollIntoView({block:'center'});
+      const r = alvo.getBoundingClientRect();
+      return {x: r.left + r.width/2, y: r.top + r.height/2, score: bestScore};
+    }
+    """
+    # 1) CLIQUE REAL nas coordenadas do card (na pagina principal)
+    try:
+        res = page.evaluate(js_coord, {"palavras": palavras})
+    except Exception:
+        res = None
+    if res and res.get("score", 0) > 0:
+        x, y = res["x"], res["y"]
+        for tentativa in ("click", "dblclick"):
+            try:
+                if tentativa == "click":
+                    page.mouse.click(x, y)
+                else:
+                    page.mouse.dblclick(x, y)
+            except Exception:
+                continue
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 6000):
+                return True
+    # 2) fallback: clique via JS (as vezes funciona)
+    js_click = r"""
     (args) => {
       const pal = args.palavras;
       const norm = s => (s||'').toLowerCase();
@@ -1666,20 +1712,18 @@ def _escolher_card_auto(page, modelo):
         }
       }
       if (!best || bestScore <= 0) return 0;
-      best.scrollIntoView({block:'center'});
       const clic = best.querySelector('img,a,button,[onclick]') || best;
       clic.click();
       return bestScore;
     }
     """
-    for fr in page.frames:
-        try:
-            r = fr.evaluate(js, {"palavras": palavras})
-            if r and r > 0:
-                page.wait_for_timeout(1800)
+    try:
+        if page.evaluate(js_click, {"palavras": palavras}):
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 6000):
                 return True
-        except Exception:
-            continue
+    except Exception:
+        pass
     return False
 
 
