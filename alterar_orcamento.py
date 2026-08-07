@@ -1844,9 +1844,16 @@ def substituir_item_projeto(page, linha_item, num, mud):
 
     # 6) escolher o card do desenho AUTOMATICAMENTE
     if not _escolher_card_auto(page, modelo):
-        print("     [!] nao consegui escolher o card do desenho automaticamente.")
+        # Fallback: alguns cards (ex.: 'N MODULOS') abrem um popup de variacoes
+        # e nao dao para clicar direto. Entao pausa SO aqui: voce da 1 clique no
+        # desenho e o robo continua sozinho (preenche, inclui, variaveis, salva).
+        print("     [!] nao consegui abrir o desenho sozinho (essa tela tem varias opcoes).")
         print_tela(page, f"sub_sem_card_{num}")
-        return False
+        print("     " + "=" * 54)
+        print("     >> CLIQUE no desenho que voce quer, NA TELA do W-Vetro")
+        print("        (na FOTO grande do desenho certo).")
+        print("     " + "=" * 54)
+        input("     Quando abrir a tela 'Dados do Projeto', aperte ENTER aqui...  ")
 
     # 7) tela 'Detalhes do Projeto'
     if not _esperar_url_ou_texto(page, "confirmadadosprojeto", "Detalhes do Projeto", 15000):
