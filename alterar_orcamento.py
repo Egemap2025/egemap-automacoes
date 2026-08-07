@@ -1677,47 +1677,45 @@ def _frame_dados_projeto(page):
     return page.main_frame
 
 
-# JS que escolhe o melhor card. Pontua por palavras do modelo; se alguma
-# palavra parece um CODIGO (>=5 chars com numero, ex.: 'ijcr200'), vale MUITO
-# (assim o usuario pode fixar o card exato pelo codigo). Desempata pelo titulo
-# mais curto (card mais simples/direto). Retorna best + coordenadas + titulo.
-_JS_ACHAR_CARD = r"""
+# JS que escolhe o melhor card e MARCA nele atributos data-egerobo para o
+# Playwright clicar depois (clique real, com auto-scroll). Pontua por palavras
+# do modelo; codigo (ex.: 'ijcr200') vale muito. Desempata pelo card mais curto.
+_JS_MARCAR_CARD = r"""
 (args) => {
   const nd = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
   const pal = args.palavras.map(nd);
   const ehCodigo = w => w.length >= 5 && /[0-9]/.test(w) && /[a-z]/.test(w);
+  // limpa marcacoes antigas
+  document.querySelectorAll('[data-egerobo]').forEach(e => e.removeAttribute('data-egerobo'));
   const nodes = Array.from(document.querySelectorAll('div,li,article,a,td,section'));
   let best=null, bestScore=-1, bestLen=1e9;
   for (const b of nodes){
     const t = nd(b.textContent);
     if (t.length < 6 || t.length > 500) continue;
-    // Sinal FORTE de card (evita pegar menus/blocos da pagina):
-    // todo card tem o codigo (*EGE-/PERF-) e o texto 'projeto com'.
     const pareceCard = t.includes('ege-') || t.includes('perf-') || t.includes('projeto com');
     if (!pareceCard) continue;
     let s = 0;
-    for (const w of pal){
-      if (w.length >= 2 && t.includes(w)) s += ehCodigo(w) ? 20 : 1;
-    }
+    for (const w of pal){ if (w.length >= 2 && t.includes(w)) s += ehCodigo(w) ? 20 : 1; }
     if (s > bestScore || (s === bestScore && t.length < bestLen)){
       best=b; bestScore=s; bestLen=t.length;
     }
   }
   if (!best || bestScore <= 0) return null;
-  const alvo = best.querySelector('img') || best;
-  alvo.scrollIntoView({block:'center'});
-  const r = alvo.getBoundingClientRect();
+  best.setAttribute('data-egerobo','card');
+  const img = best.querySelector('img'); if (img) img.setAttribute('data-egerobo','img');
+  const lnk = best.querySelector('a,button,[onclick]'); if (lnk) lnk.setAttribute('data-egerobo','lnk');
+  best.scrollIntoView({block:'center'});
   let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
   if (titulo.length > 90) titulo = titulo.slice(0,90) + '...';
-  return {x: r.left + r.width/2, y: r.top + r.height/2, score: bestScore, titulo};
+  return {score: bestScore, titulo};
 }
 """
 
 
 def _escolher_card_auto(page, modelo):
-    """Clica AUTOMATICAMENTE no card cujo titulo/codigo mais casa com o modelo.
-    Usa CLIQUE REAL de mouse (o W-Vetro ignora clique sintetico). Mostra qual
-    card escolheu. Retorna True se conseguiu navegar."""
+    """Escolhe e clica AUTOMATICAMENTE no card cujo titulo/codigo mais casa com
+    o modelo. Marca o card via JS e clica com o Playwright (clique real, com
+    auto-scroll). Mostra qual card escolheu. Retorna True se conseguiu navegar."""
     palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(modelo.lower()))
                 if len(w) >= 2 and w not in _STOP]
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
@@ -1732,33 +1730,40 @@ def _escolher_card_auto(page, modelo):
             pass
         page.wait_for_timeout(500)
     try:
-        res = page.evaluate(_JS_ACHAR_CARD, {"palavras": palavras})
+        res = page.evaluate(_JS_MARCAR_CARD, {"palavras": palavras})
     except Exception:
         res = None
     if not res or res.get("score", 0) <= 0:
         return False
     print(f"     card escolhido -> {res.get('titulo','?')}")
-    x, y = res["x"], res["y"]
-    # 1) clique REAL de mouse (1x e depois 2x se nao navegar)
-    for tentativa in ("click", "dblclick"):
+
+    # Clica no card com o Playwright (clique REAL). Tenta a imagem, o link e o
+    # card inteiro; 1 clique e depois 2 cliques -- ate a tela do projeto abrir.
+    for sel in ('[data-egerobo="img"]', '[data-egerobo="lnk"]', '[data-egerobo="card"]'):
+        loc = page.locator(sel).first
         try:
-            if tentativa == "click":
-                page.mouse.click(x, y)
-            else:
-                page.mouse.dblclick(x, y)
+            if loc.count() == 0:
+                continue
         except Exception:
             continue
-        if _esperar_url_ou_texto(page, "confirmadadosprojeto",
-                                 "Detalhes do Projeto", 6000):
-            return True
-    # 2) fallback: clique via JS
-    js_click = _JS_ACHAR_CARD.replace(
-        "const r = alvo.getBoundingClientRect();",
-        "const clic = best.querySelector('img,a,button,[onclick]') || best; clic.click(); const r = alvo.getBoundingClientRect();")
+        for metodo in ("click", "dblclick"):
+            try:
+                loc.scroll_into_view_if_needed(timeout=2000)
+                if metodo == "click":
+                    loc.click(timeout=3000)
+                else:
+                    loc.dblclick(timeout=3000)
+            except Exception:
+                continue
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 5000):
+                return True
+    # ultimo recurso: clique via JS no elemento marcado
     try:
-        page.evaluate(js_click, {"palavras": palavras})
+        page.evaluate("() => { const e=document.querySelector('[data-egerobo=\"img\"]')"
+                      " || document.querySelector('[data-egerobo=\"card\"]'); if(e) e.click(); }")
         if _esperar_url_ou_texto(page, "confirmadadosprojeto",
-                                 "Detalhes do Projeto", 6000):
+                                 "Detalhes do Projeto", 5000):
             return True
     except Exception:
         pass
