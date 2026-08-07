@@ -1129,8 +1129,72 @@ def _descreve_vidro(spec):
     return f"{desc} - {tipo}"
 
 
+# Palavras que identificam a LINHA na mensagem de substituicao.
+LINHA_KWS = ("deluxe", "versatic", "solene", "intensive", "hydro", "perfisud",
+             "guarda-corpo", "guarda corpo", "corrimão", "corrimao", "portão",
+             "portao", "portões", "portoes", "ripados", "fachada", "citta",
+             "vidro temperado", "l.30", "l. 30")
+
+
+def _eh_linha(low):
+    return any(k in low for k in LINHA_KWS)
+
+
+def _eh_acionamento(low):
+    return ("motor" in low) or ("recolhedor" in low) or low in ("fita", "cordao", "cordão")
+
+
+def _norm_acionamento(low):
+    """Normaliza o acionamento pedido para casar com a lista de variaveis."""
+    if "fita" in low:
+        return "RECOLHEDOR FITA"
+    if "cordão" in low or "cordao" in low:
+        return "RECOLHEDOR CORDÃO"
+    if "motor" in low:
+        return "MOTOR"
+    if "recolhedor" in low:
+        return "RECOLHEDOR FITA"
+    return "MOTOR"
+
+
+def _classificar_parte(p, mud, ambiente):
+    """Classifica UMA parte da mensagem (medida/qtde/vidro/tipo/cor/ambiente)
+    e guarda em mud/ambiente. Reutilizado na alteracao e na substituicao."""
+    p = p.strip()
+    if not p:
+        return
+    low = p.lower()
+    # medida largura x altura
+    md = _re.search(r"(\d{2,4})\s*[xX]\s*(\d{2,4})", p)
+    if md:
+        mud["largura"], mud["altura"] = md.group(1), md.group(2)
+        return
+    # quantidade: 2un / 2und / 2unid / 2 unidades / qtde 2 / 2 pecas
+    mq = (_re.search(r"(\d+)\s*un[a-z]*\b", low)
+          or _re.search(r"qtde?\s*[:]?\s*(\d+)", low)
+          or _re.search(r"(\d+)\s*(?:pe[cç]as?|pcs?)\b", low))
+    if mq:
+        mud["qtde"] = mq.group(1)
+        return
+    # vidro: reconhecido pelo CONTEUDO (nao exige a palavra 'vidro')
+    if _parece_spec_vidro(low):
+        mud["vidro"] = _re.sub(r"\bvidro\b", "", low, flags=_re.I).strip()
+        return
+    # tipo (ex.: j01, pj01) -- ate 3 letras + numero
+    if _re.match(r"^[a-z]{1,3}\s*\d{1,3}$", low):
+        mud["tipo"] = _re.sub(r"\s+", "", p).upper()
+        return
+    # cor do perfil (pintura, anodizado, preto...)
+    if any(w in low for w in CORES_PERFIL):
+        mud["cor"] = p.strip()
+        return
+    # o que sobrar e ambiente/localizacao
+    ambiente.append(p.strip())
+
+
 def parse_mensagem(texto):
-    """Le a mensagem e devolve (orcamento, {item: {campo: valor}})."""
+    """Le a mensagem e devolve (orcamento, {item: {campo: valor}}).
+    Suporta ALTERAR campos e SUBSTITUIR o projeto do item ('substituir por')."""
     linhas = [l.strip() for l in texto.splitlines() if l.strip()]
     orcamento = None
     itens = {}
@@ -1145,42 +1209,36 @@ def parse_mensagem(texto):
                 orcamento = l
             continue
         num = mi.group(1)
+        conteudo = mi.group(2)
         mud, ambiente = {}, []
-        # Separa os campos pelo traco COM espacos dos dois lados (' - '), para
-        # NAO quebrar palavras que tem traco no meio (ex.: 'mini-boreal').
-        for p in _re.split(r"\s+[-–]\s+", mi.group(2)):
-            p = p.strip()
-            if not p:
-                continue
-            low = p.lower()
-            # 1) medida largura x altura
-            md = _re.search(r"(\d{2,4})\s*[xX]\s*(\d{2,4})", p)
-            if md:
-                mud["largura"], mud["altura"] = md.group(1), md.group(2)
-                continue
-            # 2) quantidade: aceita 2un / 2und / 2unid / 2 unidades / qtde 2
-            mq = (_re.search(r"(\d+)\s*un[a-z]*\b", low)
-                  or _re.search(r"qtde?\s*[:]?\s*(\d+)", low)
-                  or _re.search(r"(\d+)\s*(?:pe[cç]as?|pcs?)\b", low))
-            if mq:
-                mud["qtde"] = mq.group(1)
-                continue
-            # 3) vidro: reconhecido pelo CONTEUDO (nao exige a palavra 'vidro')
-            if _parece_spec_vidro(low):
-                mud["vidro"] = _re.sub(r"\bvidro\b", "", low, flags=_re.I).strip()
-                continue
-            # 4) tipo (ex.: j01, pj01) -- ate 3 letras + numero
-            if _re.match(r"^[a-z]{1,3}\s*\d{1,3}$", low):
-                mud["tipo"] = _re.sub(r"\s+", "", p).upper()
-                continue
-            # 5) cor do perfil (pintura, anodizado, preto...)
-            if any(w in low for w in CORES_PERFIL):
-                mud["cor"] = p.strip()
-                continue
-            # 6) o que sobrar e ambiente/localizacao
-            ambiente.append(p.strip())
-        if ambiente:
-            mud["ambiente"] = " ".join(ambiente)
+
+        # SUBSTITUIR PROJETO: 'substituir por ...' / 'trocar por/para ...'
+        m_sub = _re.match(r"^\s*(?:substituir|trocar|troca)\s+(?:por|para)\s+(.+)$",
+                          conteudo, _re.I)
+        if m_sub:
+            mud["substituir"] = True
+            partes = _re.split(r"\s+[-–]\s+", m_sub.group(1))
+            mud["modelo"] = partes[0].strip()
+            for p in partes[1:]:
+                low = p.strip().lower()
+                if not low:
+                    continue
+                if _eh_linha(low):
+                    mud["linha"] = p.strip()
+                elif _eh_acionamento(low):
+                    mud["acionamento"] = _norm_acionamento(low)
+                else:
+                    _classificar_parte(p, mud, ambiente)
+            if ambiente:
+                mud["ambiente"] = " ".join(ambiente)
+            mud.setdefault("acionamento", "MOTOR")  # padrao (so usado se tiver persiana)
+        else:
+            # ALTERAR campos do item existente.
+            for p in _re.split(r"\s+[-–]\s+", conteudo):
+                _classificar_parte(p, mud, ambiente)
+            if ambiente:
+                mud["ambiente"] = " ".join(ambiente)
+
         itens[num] = mud
     return orcamento, itens
 
@@ -1196,6 +1254,19 @@ def _mostrar_preview(orc, itens):
     print(f"  ENTENDI ASSIM (orcamento {orc}):")
     print("  " + "=" * 56)
     for num, mud in itens.items():
+        if mud.get("substituir"):
+            print(f"\n  ITEM {num}: >>> SUBSTITUIR PROJETO <<<")
+            print(f"     modelo      -> {mud.get('modelo','?')}")
+            print(f"     linha       -> {mud.get('linha','(nao informada!)')}")
+            print(f"     acionamento -> {mud.get('acionamento','MOTOR')}")
+            # campos informados que serao aplicados no projeto novo
+            for chave, nome in CAMPOS_PREVIEW:
+                if chave in mud:
+                    val = _descreve_vidro(mud[chave]) if chave == "vidro" else mud[chave]
+                    print(f"     {nome:11s} -> {val}")
+            print("     (vidro/tipo/ambiente/medida: mantem o do item atual,")
+            print("      exceto o que voce informou acima)")
+            continue
         print(f"\n  ITEM {num}:")
         for chave, nome in CAMPOS_PREVIEW:
             if chave in mud:
@@ -1541,6 +1612,10 @@ def _resumo_final(page, itens, resultados):
     ok_n = aviso_n = falha_n = 0
     for num, mud in itens.items():
         st = resultados.get(num, "?")
+        if st == "substituir_manual":
+            print(f"  Item {num}: » SUBSTITUIR na mao (automatico em construcao)")
+            aviso_n += 1
+            continue
         if st == "nao_existe":
             print(f"  Item {num}: ✗ NAO EXISTE neste orcamento")
             falha_n += 1
@@ -1629,6 +1704,14 @@ def modo_mensagem(page):
             print(f"  [!] item {num} nao existe neste orcamento.")
             print(f"      (itens encontrados na tela: {achados or 'nenhum'})")
             resultados[num] = "nao_existe"
+            continue
+        # SUBSTITUIR PROJETO ainda esta EM CONSTRUCAO -- por seguranca (a troca
+        # APAGA o item antigo), o robo NAO executa isso ainda. Faz manual.
+        if mud.get("substituir"):
+            print(f"  >> Item {num}: SUBSTITUIR projeto ({mud.get('modelo','?')})")
+            print("     [i] a substituicao automatica ainda esta em construcao.")
+            print("         Por enquanto, faca essa troca na mao no W-Vetro.")
+            resultados[num] = "substituir_manual"
             continue
         try:
             if semi:
