@@ -1734,12 +1734,15 @@ _JS_MARCAR_CARD = r"""
   best.scrollIntoView({block:'center'});
   let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
   if (titulo.length > 90) titulo = titulo.slice(0,90) + '...';
-  return {score: bestScore, titulo};
+  // estrutura do card (para diagnostico quando o clique nao pegar)
+  let html = (best.outerHTML||'').replace(/\s+/g,' ');
+  if (html.length > 2500) html = html.slice(0,2500) + '...';
+  return {score: bestScore, titulo, html};
 }
 """
 
 
-def _escolher_card_auto(page, modelo):
+def _escolher_card_auto(page, modelo, num=""):
     """Escolhe e clica AUTOMATICAMENTE no card cujo titulo/codigo mais casa com
     o modelo. Marca o card via JS e clica com o Playwright (clique real, com
     auto-scroll). Mostra qual card escolheu. Retorna True se conseguiu navegar."""
@@ -1792,10 +1795,25 @@ def _escolher_card_auto(page, modelo):
     # meio do desenho (a foto ocupa a parte de cima do card)
     if card.count() > 0 and _clicar_ponto(card, 0.5, 0.40):
         return True
+    # varios pontos da area do desenho (caso 0.40 caia numa borda)
+    for fy in (0.30, 0.5, 0.22):
+        if card.count() > 0 and _clicar_ponto(card, 0.5, fy):
+            return True
     # tenta a maior imagem marcada (caso o desenho seja um <img>)
     img = page.locator('[data-egerobo="img"]').first
     if img.count() > 0 and _clicar_ponto(img, 0.5, 0.5):
         return True
+    # clique FORCADO (ignora sobreposicoes) no card e na imagem
+    for sel in ('[data-egerobo="img"]', '[data-egerobo="card"]'):
+        loc = page.locator(sel).first
+        try:
+            if loc.count() > 0:
+                loc.click(timeout=2500, force=True)
+                if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                         "Detalhes do Projeto", 4000):
+                    return True
+        except Exception:
+            pass
     # tenta o NOME do projeto
     tit = page.locator('[data-egerobo="titulo"]').first
     if tit.count() > 0:
@@ -1809,6 +1827,17 @@ def _escolher_card_auto(page, modelo):
     # ultimo recurso: se o clique abriu um popup de variacoes, escolhe nele
     if _escolher_variacao_popup(page, modelo):
         return True
+    # DIAGNOSTICO: salva a estrutura (HTML) do card para eu ver como clicar
+    try:
+        html = (res or {}).get("html", "")
+        if html:
+            PRINTS_DIR.mkdir(parents=True, exist_ok=True)
+            caminho = PRINTS_DIR / f"sub_card_html_{num}.txt"
+            caminho.write_text(html, encoding="utf-8")
+            print(f"     (salvei a estrutura do card em: {caminho})")
+            print("     >> me manda esse arquivo .txt que eu descubro como clicar sozinho.")
+    except Exception:
+        pass
     return False
 
 
@@ -1939,7 +1968,7 @@ def substituir_item_projeto(page, linha_item, num, mud):
     page.wait_for_timeout(2000)
 
     # 6) escolher o card do desenho AUTOMATICAMENTE
-    if not _escolher_card_auto(page, modelo):
+    if not _escolher_card_auto(page, modelo, num):
         # Fallback: alguns cards (ex.: 'N MODULOS') abrem um popup de variacoes
         # e nao dao para clicar direto. Entao pausa SO aqui: voce da 1 clique no
         # desenho e o robo continua sozinho (preenche, inclui, variaveis, salva).
