@@ -1786,6 +1786,84 @@ def _escolher_card_auto(page, modelo):
             return True
     except Exception:
         pass
+
+    # Se o clique abriu o POPUP DE VARIACOES (ex.: painel fixo 'N modulos'),
+    # escolhe a variacao que casa com a descricao e clica nela.
+    if _escolher_variacao_popup(page, modelo):
+        return True
+    return False
+
+
+# JS que acha, DENTRO do popup de variacoes, a variacao que casa com a descricao.
+_JS_MARCAR_VARIACAO = r"""
+(args) => {
+  const nd = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const pal = args.palavras.map(nd);
+  document.querySelectorAll('[data-egevar]').forEach(e => e.removeAttribute('data-egevar'));
+  // acha o container do popup pelo texto do cabecalho
+  let modal = null;
+  const marca = Array.from(document.querySelectorAll('*')).find(e => {
+    const t = nd(e.textContent || '');
+    return t.length < 400 && (t.includes('desenho desta tipologia') ||
+           t.includes('variacoes') || t.includes('variaveis)'));
+  });
+  if (marca){ let n = marca; for (let i=0;i<7&&n;i++,n=n.parentElement){
+    const r = n.getBoundingClientRect(); if (r.width>300 && r.height>200){ modal=n; break; } } }
+  const raiz = modal || document;
+  const nodes = Array.from(raiz.querySelectorAll('div,li,tr,td,article,a'));
+  let best=null, bestScore=-1, bestLen=1e9;
+  for (const b of nodes){
+    const t = nd(b.textContent);
+    if (!t || t.length < 4 || t.length > 140) continue;
+    if (t.includes('projeto com')) continue;   // esses sao os cards de fundo
+    if (!/modulo|painel|folhas|maxim|persiana|peitoril|bandeira|veneziana|tela/.test(t)) continue;
+    const r = b.getBoundingClientRect();
+    if (r.width < 20 || r.height < 10) continue;
+    let s = 0; for (const w of pal){ if (w.length>=2 && t.includes(w)) s++; }
+    if (s > bestScore || (s === bestScore && t.length < bestLen)){
+      best=b; bestScore=s; bestLen=t.length;
+    }
+  }
+  if (!best) return null;
+  best.setAttribute('data-egevar','row');
+  let big=null, area=0;
+  for (const im of best.querySelectorAll('img')){
+    const r = im.getBoundingClientRect(); const a = r.width*r.height;
+    if (a > area){ area=a; big=im; }
+  }
+  if (big) big.setAttribute('data-egevar','img');
+  best.scrollIntoView({block:'center'});
+  let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
+  if (titulo.length > 80) titulo = titulo.slice(0,80) + '...';
+  return {score: bestScore, titulo, viaModal: !!modal};
+}
+"""
+
+
+def _escolher_variacao_popup(page, modelo):
+    """Escolhe e clica a variacao certa no popup de variacoes (painel fixo etc.).
+    Retorna True se conseguiu navegar para a tela do projeto."""
+    palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(modelo.lower()))
+                if len(w) >= 2 and w not in _STOP]
+    try:
+        res = page.evaluate(_JS_MARCAR_VARIACAO, {"palavras": palavras})
+    except Exception:
+        res = None
+    if not res:
+        return False
+    print(f"     variacao escolhida -> {res.get('titulo','?')}")
+    for sel in ('[data-egevar="img"]', '[data-egevar="row"]'):
+        loc = page.locator(sel).first
+        try:
+            if loc.count() == 0:
+                continue
+            loc.scroll_into_view_if_needed(timeout=2000)
+            loc.click(timeout=3000)
+        except Exception:
+            continue
+        if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                 "Detalhes do Projeto", 5000):
+            return True
     return False
 
 
