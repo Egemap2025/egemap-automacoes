@@ -183,6 +183,17 @@ O usuário mandou um vídeo editando o item 1 à mão. Isso revelou um **bug**:
    - **ATENÇÃO / RISCO:** substituir EXCLUI o projeto antigo antes de incluir o
      novo. Construir primeiro em modo SEGURO (robô navega/preenche, usuário
      confirma os passos críticos) para não perder item por engano.
+   - **v1 IMPLEMENTADA (modo guiado):** `substituir_item_projeto`. Formato da
+     mensagem: `N - substituir - <modelo> - <linha> - <acionamento> - <overrides>`
+     (também aceita `substituir por <modelo>`). O robô: abre ☰→Substituir
+     Projeto→Sim→fecha popup valores zerados→seleciona LINHA e MODELO (melhor
+     match)→**pausa p/ conferir**→Pesquisar→**usuário clica o card**→preenche
+     Detalhes do Projeto (cor/vidro/tipo/ambiente/medida da mensagem)→**usuário
+     finaliza** (Incluir item + variáveis/acionamento + Confirmar). LINHA e
+     acionamento vêm na mensagem; acionamento padrão MOTOR (só p/ persiana).
+   - **v2 (a fazer):** preservar automaticamente vidro/tipo/ambiente do item
+     antigo quando não vierem na mensagem; automatizar a escolha do card e as
+     variáveis (acionamento) ponta a ponta.
 4. Possível: **ler o pedido direto do WhatsApp Web** (hoje cola-se a mensagem).
 
 ---
