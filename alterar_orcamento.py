@@ -1633,20 +1633,68 @@ def _esperar_url_ou_texto(page, url_parte=None, texto=None, timeout=15000):
     return False
 
 
+def _frame_dados_projeto(page):
+    """Frame da tela 'Detalhes do Projeto' (onde estao COR/VIDRO/etc)."""
+    for fr in page.frames:
+        try:
+            if _campo_por_js(fr, "VIDRO COR", "select") is not None:
+                return fr
+        except Exception:
+            continue
+    return page.main_frame
+
+
+def _escolher_card_auto(page, modelo):
+    """Clica AUTOMATICAMENTE no card de desenho cujo titulo mais casa com o
+    modelo pedido. Retorna True se clicou em algum card."""
+    palavras = [w for w in _re.split(r"[^a-z0-9]+", modelo.lower()) if len(w) >= 2]
+    js = r"""
+    (args) => {
+      const pal = args.palavras;
+      const norm = s => (s||'').toLowerCase();
+      const nodes = Array.from(document.querySelectorAll('div,li,article,a,td,section'));
+      let best=null, bestScore=0, bestLen=1e9;
+      for (const b of nodes){
+        const t = norm(b.textContent);
+        if (t.length < 6 || t.length > 500) continue;
+        const pareceCard = t.includes('ege-') || t.includes('projeto com') ||
+              /folhas|fixo|maxim|porta|m[oó]dulo|persiana|tela|portinhola|giro/.test(t);
+        if (!pareceCard) continue;
+        let s = 0; for (const w of pal){ if (t.includes(w)) s++; }
+        if (s > bestScore || (s === bestScore && t.length < bestLen)){
+          best=b; bestScore=s; bestLen=t.length;
+        }
+      }
+      if (!best || bestScore <= 0) return 0;
+      best.scrollIntoView({block:'center'});
+      const clic = best.querySelector('img,a,button,[onclick]') || best;
+      clic.click();
+      return bestScore;
+    }
+    """
+    for fr in page.frames:
+        try:
+            r = fr.evaluate(js, {"palavras": palavras})
+            if r and r > 0:
+                page.wait_for_timeout(1800)
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def substituir_item_projeto(page, linha_item, num, mud):
-    """SUBSTITUIR o projeto de um item por outro modelo (modo GUIADO).
-    O robo navega e preenche; o usuario confirma os 2 pontos delicados:
-    escolher o desenho (card) e finalizar as variaveis. A troca APAGA o item
-    antigo, por isso o cuidado."""
+    """SUBSTITUIR o projeto de um item por outro modelo -- 100% AUTOMATICO.
+    Abre Substituir Projeto -> Sim -> escolhe LINHA/MODELO -> Pesquisa ->
+    escolhe o card (melhor match) -> preenche 'Dados do Projeto' -> Inclui ->
+    variaveis (acionamento) -> Confirma. A troca APAGA o item antigo."""
     modelo = mud.get("modelo", "")
     linha = mud.get("linha", "")
+    acion = mud.get("acionamento")
     print(f"\n  >> Item {num}: SUBSTITUIR por '{modelo}'"
           + (f" (linha {linha})" if linha else ""))
-    if not modelo:
-        print("     [!] sem modelo na mensagem -- pulando.")
-        return False
-    if not linha:
-        print("     [!] sem LINHA na mensagem (ex.: 'deluxe 32') -- pulando por seguranca.")
+    if not modelo or not linha:
+        print("     [!] falta modelo ou linha na mensagem -- pulando por seguranca.")
         return False
 
     # 1) menu ☰ -> Substituir Projeto
@@ -1658,7 +1706,7 @@ def substituir_item_projeto(page, linha_item, num, mud):
         print_tela(page, f"sub_sem_opcao_{num}")
         return False
 
-    # 2) popup 'Deseja excluir este projeto e incluir outro...' -> Sim
+    # 2) popup 'Deseja excluir este projeto...' -> Sim
     page.wait_for_timeout(1200)
     if not _clicar_botao(page, r"^\s*sim\s*$", timeout=6000):
         print("     [!] nao achei o botao 'Sim' da confirmacao.")
@@ -1672,41 +1720,36 @@ def substituir_item_projeto(page, linha_item, num, mud):
         return False
     page.wait_for_timeout(1000)
 
-    # popup 'Atencao! itens com valores zerados' -> Fechar (se aparecer)
+    # popup 'valores zerados' -> Fechar (se aparecer)
     if _tem_texto_visivel(page, "valores zerados") or _tem_texto_visivel(page, "sem valor"):
         _clicar_botao(page, r"^\s*fechar\s*$", timeout=4000)
         page.wait_for_timeout(600)
 
-    # 4) LINHA e MODELO
+    # 4) LINHA e MODELO (melhor match)
     _selecionar_select_rotulo(page, "LINHA", linha, "linha")
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(700)
     _selecionar_select_rotulo(page, "MODELO", modelo, "modelo")
-    page.wait_for_timeout(600)
-    print("     (confira LINHA e MODELO na tela; ajuste se precisar)")
-    input("     Aperte ENTER para eu PESQUISAR os desenhos...  ")
+    page.wait_for_timeout(700)
 
     # 5) Pesquisar
     _clicar_botao(page, r"^\s*pesquisar\s*$", timeout=6000)
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(2000)
 
-    # 6) escolher o card do desenho -- feito pelo USUARIO (evita pegar errado)
-    print()
-    print("     >> Na tela, CLIQUE no card do desenho certo (ex.: com persiana/tela).")
-    input("     Depois que abrir 'Dados do Projeto', aperte ENTER aqui...  ")
+    # 6) escolher o card do desenho AUTOMATICAMENTE
+    if not _escolher_card_auto(page, modelo):
+        print("     [!] nao consegui escolher o card do desenho automaticamente.")
+        print_tela(page, f"sub_sem_card_{num}")
+        return False
 
-    # 7) tela 'Detalhes do Projeto' (confirmadadosprojeto)
+    # 7) tela 'Detalhes do Projeto'
     if not _esperar_url_ou_texto(page, "confirmadadosprojeto", "Detalhes do Projeto", 15000):
-        print("     [!] nao reconheci a tela 'Dados do Projeto'. Confira na tela.")
+        print("     [!] nao abriu a tela 'Dados do Projeto' apos escolher o card.")
         print_tela(page, f"sub_sem_dados_{num}")
+        return False
+    page.wait_for_timeout(1000)
 
-    # preenche o que veio na mensagem (o resto voce confere/ajusta na tela)
-    frame = None
-    for fr in page.frames:
-        if _campo_por_js(fr, "VIDRO COR", "select") is not None or \
-           _tem_texto_visivel(page, "COR ALUMINIO"):
-            frame = fr
-            break
-    frame = frame or page.main_frame
+    # preenche o que veio na mensagem
+    frame = _frame_dados_projeto(page)
     if "largura" in mud:
         _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
     if "altura" in mud:
@@ -1721,21 +1764,24 @@ def substituir_item_projeto(page, linha_item, num, mud):
         _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
     print_tela(page, f"sub_dados_{num}")
 
-    # 8) usuario finaliza: Incluir item + variaveis (acionamento) + Confirmar
-    acion = mud.get("acionamento")
-    print()
-    print("     " + "=" * 54)
-    print(f"     ITEM {num}: PROJETO NOVO PREENCHIDO. Agora, NA TELA:")
-    print("       1) Confira os campos (medida/cor/vidro/tipo/ambiente).")
-    print("       2) Clique em 'Incluir item no orcamento'.")
-    if acion:
-        print(f"       3) Nas variaveis, escolha ACIONAMENTO DA ESTEIRA = {acion}")
-        print("          (e confira motor/lado) e clique CONFIRMAR.")
-    else:
-        print("       3) Se abrir 'Informe as variaveis', confira e CONFIRMAR.")
-    print("     " + "=" * 54)
-    input("     Quando o item estiver incluido, aperte ENTER p/ continuar...  ")
-    page.wait_for_timeout(1000)
+    # 8) Incluir item no orcamento
+    if not _clicar_botao(page, r"incluir item no or", timeout=8000):
+        print("     [!] nao achei 'Incluir item no orcamento'.")
+        print_tela(page, f"sub_sem_incluir_{num}")
+        return False
+    page.wait_for_timeout(2000)
+
+    # 9) janela 'Informe as variaveis': acionamento + CONFIRMAR
+    if _janela_variaveis_aberta(page):
+        if acion:
+            _selecionar_select_rotulo(page, "ACIONAMENTO DA ESTEIRA", acion, "acionamento")
+            page.wait_for_timeout(800)
+        if not _confirmar_edicao(page):
+            print("     [!] a janela de variaveis nao fechou sozinha.")
+            print_tela(page, f"sub_variaveis_travou_{num}")
+
+    page.wait_for_timeout(1500)
+    print(f"     item {num} substituido. ✔")
     return True
 
 
