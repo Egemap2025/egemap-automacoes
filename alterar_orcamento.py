@@ -1212,26 +1212,35 @@ def parse_mensagem(texto):
         conteudo = mi.group(2)
         mud, ambiente = {}, []
 
-        # SUBSTITUIR PROJETO: 'substituir por ...' / 'trocar por/para ...'
-        m_sub = _re.match(r"^\s*(?:substituir|trocar|troca)\s+(?:por|para)\s+(.+)$",
+        # SUBSTITUIR PROJETO. Aceita varios jeitos de escrever:
+        #   'substituir por <modelo> - ...'   'substituir - <modelo> - ...'
+        #   'substituir <modelo> - ...'       'trocar por/para <modelo> - ...'
+        # (o 'trocar' exige por/para p/ nao confundir com 'trocar vidro').
+        m_sub = _re.match(r"^\s*substituir\b\s*(?:por|para)?\s*[-–]?\s*(.*)$",
                           conteudo, _re.I)
+        if not m_sub:
+            m_sub = _re.match(r"^\s*troc(?:ar|a)\b\s*(?:por|para)\s*[-–]?\s*(.*)$",
+                              conteudo, _re.I)
         if m_sub:
             mud["substituir"] = True
-            partes = _re.split(r"\s+[-–]\s+", m_sub.group(1))
-            mud["modelo"] = partes[0].strip()
+            partes = [p.strip() for p in _re.split(r"\s+[-–]\s+", m_sub.group(1)) if p.strip()]
+            # o 1o campo depois de 'substituir' e o MODELO (verbatim, sem
+            # classificar -- pode ser 'vidro fixo', 'janela de correr...', etc.)
+            mud["modelo"] = partes[0] if partes else ""
             for p in partes[1:]:
-                low = p.strip().lower()
-                if not low:
-                    continue
+                low = p.lower()
                 if _eh_linha(low):
-                    mud["linha"] = p.strip()
+                    mud["linha"] = p
                 elif _eh_acionamento(low):
                     mud["acionamento"] = _norm_acionamento(low)
                 else:
                     _classificar_parte(p, mud, ambiente)
             if ambiente:
                 mud["ambiente"] = " ".join(ambiente)
-            mud.setdefault("acionamento", "MOTOR")  # padrao (so usado se tiver persiana)
+            # acionamento padrao MOTOR so faz sentido em item com persiana/esteira
+            if _re.search(r"persiana|integrad|rol[oôõ]|esteira|motor",
+                          mud.get("modelo", "").lower()):
+                mud.setdefault("acionamento", "MOTOR")
         else:
             # ALTERAR campos do item existente.
             for p in _re.split(r"\s+[-–]\s+", conteudo):
@@ -1256,9 +1265,10 @@ def _mostrar_preview(orc, itens):
     for num, mud in itens.items():
         if mud.get("substituir"):
             print(f"\n  ITEM {num}: >>> SUBSTITUIR PROJETO <<<")
-            print(f"     modelo      -> {mud.get('modelo','?')}")
+            print(f"     modelo      -> {mud.get('modelo') or '(nao informado!)'}")
             print(f"     linha       -> {mud.get('linha','(nao informada!)')}")
-            print(f"     acionamento -> {mud.get('acionamento','MOTOR')}")
+            if "acionamento" in mud:
+                print(f"     acionamento -> {mud['acionamento']}")
             # campos informados que serao aplicados no projeto novo
             for chave, nome in CAMPOS_PREVIEW:
                 if chave in mud:
