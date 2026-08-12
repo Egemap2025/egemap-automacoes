@@ -561,18 +561,21 @@ def log(msg):
 
 
 def _apagar(path, client=""):
-    # Tenta algumas vezes: o Windows pode segurar o arquivo por um instante
-    # (antivirus escaneando, gravacao ainda nao liberada, etc.)
-    for tentativa in range(5):
+    # Tenta por ate ~20s: o Windows/OneDrive pode segurar o arquivo por um
+    # tempo logo apos salvar (sincronizacao de nuvem, antivirus escaneando,
+    # gravacao ainda nao liberada, etc.) -- pastas dentro do OneDrive sao
+    # as que mais demoram a soltar o arquivo.
+    tentativas = 10
+    for tentativa in range(tentativas):
         try:
             Path(path).unlink()
             log(f"[{client}] Removido original: {Path(path).name}")
             return
         except Exception as e:
-            if tentativa == 4:
-                log(f"[{client}] Nao foi possivel remover {Path(path).name}: {e}")
+            if tentativa == tentativas - 1:
+                log(f"[{client}] Nao foi possivel remover {Path(path).name} (pode estar sincronizando no OneDrive) — apague manualmente: {e}")
             else:
-                time.sleep(1)
+                time.sleep(2)
 
 
 def _norm(path):
