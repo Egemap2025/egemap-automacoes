@@ -560,22 +560,47 @@ def log(msg):
     print(f"[{hora}] {msg}", flush=True)
 
 
+# Arquivos que nao conseguimos apagar de cara ficam aqui, e o tick() do
+# monitor vai tentando de novo em segundo plano (sem travar o programa) por
+# alguns minutos -- cobre o caso do OneDrive segurar o arquivo travado por
+# muito tempo sincronizando com a nuvem.
+_PENDING_DELETE: dict = {}   # path_norm -> (primeira_tentativa, caminho, client)
+_PENDING_DELETE_TIMEOUT = 300  # desiste depois de ~5 minutos tentando
+
+
 def _apagar(path, client=""):
-    # Tenta por ate ~20s: o Windows/OneDrive pode segurar o arquivo por um
-    # tempo logo apos salvar (sincronizacao de nuvem, antivirus escaneando,
-    # gravacao ainda nao liberada, etc.) -- pastas dentro do OneDrive sao
-    # as que mais demoram a soltar o arquivo.
-    tentativas = 10
-    for tentativa in range(tentativas):
+    # Tenta rapido algumas vezes (pode ser so um instante de gravacao ainda
+    # nao liberada). Se nao conseguir, agenda pra tentar de novo em segundo
+    # plano em vez de travar o programa esperando.
+    for tentativa in range(3):
         try:
             Path(path).unlink()
             log(f"[{client}] Removido original: {Path(path).name}")
             return
+        except Exception:
+            if tentativa < 2:
+                time.sleep(1)
+
+    chave = _norm(path)
+    if chave not in _PENDING_DELETE:
+        log(f"[{client}] {Path(path).name} ainda em uso — vou continuar tentando apagar em segundo plano (pode ser sincronizacao do OneDrive)...")
+    _PENDING_DELETE[chave] = (time.time(), path, client)
+
+
+def _processar_pendentes_apagar():
+    """Chamado a cada tick(): tenta de novo apagar os arquivos que ficaram
+    presos, sem travar o resto do monitor."""
+    agora = time.time()
+    for chave in list(_PENDING_DELETE.keys()):
+        inicio, path, client = _PENDING_DELETE[chave]
+        try:
+            Path(path).unlink()
+            log(f"[{client}] Removido original (apos aguardar liberacao do arquivo): {Path(path).name}")
+            del _PENDING_DELETE[chave]
         except Exception as e:
-            if tentativa == tentativas - 1:
-                log(f"[{client}] Nao foi possivel remover {Path(path).name} (pode estar sincronizando no OneDrive) — apague manualmente: {e}")
-            else:
-                time.sleep(2)
+            if agora - inicio > _PENDING_DELETE_TIMEOUT:
+                log(f"[{client}] Nao foi possivel remover {Path(path).name} apos varios minutos (pode estar sincronizando no OneDrive) — apague manualmente: {e}")
+                del _PENDING_DELETE[chave]
 
 
 def _norm(path):
@@ -665,6 +690,12 @@ class PropostaHandler(FileSystemEventHandler):
     def tick(self):
         import traceback
         now = time.time()
+
+        # Retentativa em segundo plano de arquivos que ficaram presos ao apagar
+        try:
+            _processar_pendentes_apagar()
+        except Exception as e:
+            log(f"ERRO ao tentar apagar pendentes: {e}")
 
         # PDFs individuais: envolve com Capa + Pagina Final (6s de espera)
         prontos = [k for k, (t, _) in list(self._pending_single.items()) if now - t >= 6]
