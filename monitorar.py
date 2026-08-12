@@ -108,6 +108,13 @@ def format_brl(value):
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def format_brl_investimento(value):
+    """Formata o valor grande da pagina final (Proposta de Investimento) --
+    sem centavos, so os milhares (ex: 75.090), igual ao padrao "R$ 000.000"
+    do template novo."""
+    return f"{round(value):,}".replace(",", ".")
+
+
 def output_path_do_dia(folder, name, client=""):
     """Caminho de saida da proposta. O nome ja inclui a data (DD-MM), entao
     se ja existe um arquivo com esse nome e porque a proposta deste cliente
@@ -201,84 +208,243 @@ def limpar_campos_vazios_alm(doc, page_index=0):
         page.insert_text(origin, texto, fontname=fontname, fontsize=size, color=color)
 
 
-LABELS_SUBTIPO = {
-    "alm":     "Esquadrias de Alumínio",
-    "mad":     "Esquadrias de Madeira",
-    "alm_mad": "Esquadrias de Madeira e Alumínio",
-}
+# ── Capa dinâmica (Capa 1 / Capa 2 / Página Final) ─────────────────────────────
+#
+# A Capa tem 3 páginas:
+#   1. Capa 1  — "[nome do vendedor]", "[nome do cliente]", "[número do pedido]"
+#   2. Capa 2  — institucional, sem nada dinâmico
+#   3. Página final — "[NOME DO CLIENTE]" (dentro de uma frase) + "R$ 000.000"
+#      (valor total do investimento = PVC + ALM somados)
+
+def _caminho_fonte_bundled():
+    """Caminho da fonte DM Sans (completa) que vem empacotada junto com o
+    programa -- funciona tanto rodando via "python monitorar.py" quanto no
+    .exe gerado pelo PyInstaller (--add-data)."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).resolve().parent
+    caminho = base / "DMSans-Regular.ttf"
+    return str(caminho) if caminho.exists() else None
 
 
-_FONT_CACHE: dict = {}
+_CAPA_FONT_CACHE: dict = {}
 
-def _extract_font_from_capa(capa_pdf_path, want_black: bool):
-    """Extrai Arial-Black ou ArialMT do PDF da capa e salva em temp."""
-    import tempfile
-    cache_key = (str(capa_pdf_path), want_black)
-    if cache_key in _FONT_CACHE:
-        return _FONT_CACHE[cache_key]
+def _extrair_fonte_da_capa(capa_pdf_path):
+    """Fallback: extrai a fonte DM Sans direto do PDF da capa. So usado se a
+    fonte empacotada (DMSans-Regular.ttf) nao for encontrada -- a fonte
+    dentro do PDF costuma vir "picotada" (so tem as letras que ja apareciam
+    no texto original dos placeholders, faltando letras/numeros/simbolos
+    necessarios pra inserir nomes e valores novos)."""
+    cache_key = str(capa_pdf_path)
+    if cache_key in _CAPA_FONT_CACHE:
+        return _CAPA_FONT_CACHE[cache_key]
     result = None
     try:
+        import tempfile
         doc = fitz.open(capa_pdf_path)
-        page = doc[1]
-        for finfo in page.get_fonts():
-            # get_fonts() retorna 6 ou 7 campos dependendo da versao do PyMuPDF
-            xref, ext, _t, basename, _name, _enc = finfo[:6]
-            lower = basename.lower()
-            is_black  = "black" in lower
-            is_bold   = "bold" in lower
-            is_italic = "italic" in lower
-            if want_black:
-                matches = is_black
-            else:
-                matches = "arial" in lower and not is_black and not is_bold and not is_italic
-            if matches:
-                data = doc.extract_font(xref)
-                if data and data[3]:
-                    fname = "ariblk" if want_black else "arialmt"
-                    tmp = Path(tempfile.gettempdir()) / f"egemap_{fname}.{ext or 'ttf'}"
-                    tmp.write_bytes(data[3])
-                    result = str(tmp)
-                    break
+        paginas = {0, len(doc) - 1}
+        for page_idx in paginas:
+            if page_idx < 0 or page_idx >= len(doc):
+                continue
+            for finfo in doc[page_idx].get_fonts():
+                xref, ext, _t, basename, _name, _enc = finfo[:6]
+                chave = basename.lower().replace(" ", "").replace("-", "")
+                if "dmsans" in chave:
+                    data = doc.extract_font(xref)
+                    if data and data[3]:
+                        tmp = Path(tempfile.gettempdir()) / f"egemap_dmsans.{ext or 'ttf'}"
+                        tmp.write_bytes(data[3])
+                        result = str(tmp)
+                        break
+            if result:
+                break
     except Exception:
         pass
-    _FONT_CACHE[cache_key] = result
+    _CAPA_FONT_CACHE[cache_key] = result
     return result
 
 
-def _get_resumo_fonts(capa_pdf_path=None):
-    """Retorna (fn_bold, fn_regular) — busca no sistema e extrai da capa como fallback."""
-    fn_bold = fn_reg = None
+def _get_capa_dinamica_font(capa_pdf_path):
+    """Fonte usada nos textos dinamicos da capa (DM Sans). Prioriza a fonte
+    completa empacotada com o programa; so cai pro fallback (extrair do PDF,
+    que pode vir com letras faltando) se ela nao existir."""
+    return _caminho_fonte_bundled() or _extrair_fonte_da_capa(capa_pdf_path)
 
-    if os.name == "nt":
-        win_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-        # Arial Black (ariblk) ou Arial Bold (arialbd) como fallback
-        for f in ("ariblk.ttf", "arialbd.ttf"):
-            p = win_dir / f
-            if p.exists():
-                fn_bold = str(p)
-                break
-        p = win_dir / "arial.ttf"
-        if p.exists():
-            fn_reg = str(p)
+
+def _medir_texto(texto, fontfile, size):
+    try:
+        fonte = fitz.Font(fontfile=fontfile) if fontfile else fitz.Font("helv")
+        return fonte.text_length(texto, fontsize=size)
+    except Exception:
+        return len(texto) * size * 0.5
+
+
+def _inserir_texto(page, origem, texto, fontfile, size, color):
+    if fontfile:
+        # fontname precisa ser explicito: sem ele o PyMuPDF ignora o fontfile
+        # e cai no Helvetica padrao (fontname="helv" e o default).
+        alias = re.sub(r"[^A-Za-z0-9]+", "_", Path(fontfile).stem)
+        page.insert_text(origem, texto, fontfile=fontfile, fontname=alias, fontsize=size, color=color)
     else:
-        for base in (
-            Path("/usr/share/fonts/truetype/liberation"),
-            Path("/usr/share/fonts/liberation"),
-        ):
-            b = base / "LiberationSans-Bold.ttf"
-            r = base / "LiberationSans-Regular.ttf"
-            if b.exists() and r.exists():
-                fn_bold, fn_reg = str(b), str(r)
-                break
+        page.insert_text(origem, texto, fontname="helv", fontsize=size, color=color)
 
-    # Se ainda nao achou, extrai do proprio PDF da capa
-    if capa_pdf_path:
-        if fn_bold is None:
-            fn_bold = _extract_font_from_capa(capa_pdf_path, want_black=True)
-        if fn_reg is None:
-            fn_reg = _extract_font_from_capa(capa_pdf_path, want_black=False)
 
-    return fn_bold, fn_reg
+def _substituir_linha_inteira(page, texto_antigo, texto_novo, fontfile):
+    """Troca uma linha cujo texto e EXATAMENTE texto_antigo por texto_novo,
+    mantendo posicao, tamanho e cor originais. Usado para os placeholders
+    que ocupam a linha toda (ex: "[nome do vendedor]", "R$ 000.000")."""
+    for b in page.get_text("dict")["blocks"]:
+        if b["type"] != 0:
+            continue
+        for line in b["lines"]:
+            t = "".join(s["text"] for s in line["spans"]).strip()
+            if t == texto_antigo:
+                span = line["spans"][0]
+                ox, oy = span["origin"]
+                size = span["size"]
+                color = _color_tuple(span["color"])
+                page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
+                page.apply_redactions()
+                _inserir_texto(page, (ox, oy), texto_novo, fontfile, size, color)
+                return True
+    return False
+
+
+def _substituir_dentro_da_linha(page, marcador, texto_novo, fontfile):
+    """Troca so a parte "marcador" de uma linha maior (ex: "[NOME DO CLIENTE],
+    é uma honra fazer parte do seu projeto."), preservando o resto da frase
+    que vem depois do marcador."""
+    for b in page.get_text("dict")["blocks"]:
+        if b["type"] != 0:
+            continue
+        for line in b["lines"]:
+            t = "".join(s["text"] for s in line["spans"])
+            if marcador in t:
+                idx = t.find(marcador)
+                resto = t[idx + len(marcador):]
+                span = line["spans"][0]
+                ox, oy = span["origin"]
+                size = span["size"]
+                color = _color_tuple(span["color"])
+                page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
+                page.apply_redactions()
+                _inserir_texto(page, (ox, oy), texto_novo, fontfile, size, color)
+                if resto:
+                    largura = _medir_texto(texto_novo, fontfile, size)
+                    _inserir_texto(page, (ox + largura, oy), resto, fontfile, size, color)
+                return True
+    return False
+
+
+def montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, total_str):
+    """Monta a Capa completa (3 paginas) com os dados do cliente:
+    Capa 1 (vendedor/cliente/pedido) e a pagina final (cliente + valor do
+    investimento) editadas; Capa 2 (institucional) fica intocada. Retorna um
+    doc de 3 paginas -- as paginas 0-1 vao no inicio da proposta final e a
+    pagina 2 vai no fim."""
+    fontfile = _get_capa_dinamica_font(capa_pdf_path)
+    doc = fitz.open()
+    doc.insert_pdf(fitz.open(capa_pdf_path))
+
+    p1 = doc[0]
+    _substituir_linha_inteira(p1, "[nome do vendedor]", vendedor or "[nome do vendedor]", fontfile)
+    _substituir_linha_inteira(p1, "[nome do cliente]", cliente or "[nome do cliente]", fontfile)
+    _substituir_linha_inteira(p1, "[número do pedido]", pedido or "[número do pedido]", fontfile)
+
+    pf = doc[len(doc) - 1]
+    _substituir_dentro_da_linha(pf, "[NOME DO CLIENTE]", (cliente or "[NOME DO CLIENTE]").upper(), fontfile)
+    _substituir_linha_inteira(pf, "R$ 000.000", f"R$ {total_str}", fontfile)
+
+    return doc
+
+
+def _valor_ao_lado(page, label_exato):
+    """Acha o texto que esta na mesma linha, a direita, de um rotulo exato
+    (ex: "VENDEDOR:", "CLIENTE:"). Usado pra extrair dados do cabecalho do
+    W-Vetro (segundo bloco de cabecalho, o dos dados do cliente)."""
+    linhas = []
+    for b in page.get_text("dict")["blocks"]:
+        if b["type"] != 0:
+            continue
+        for line in b["lines"]:
+            t = "".join(s["text"] for s in line["spans"]).strip()
+            if t:
+                linhas.append({"text": t, "bbox": line["bbox"]})
+    alvo = next((l for l in linhas if l["text"] == label_exato), None)
+    if not alvo:
+        return ""
+    x0, y0, x1, y1 = alvo["bbox"]
+    ymid = (y0 + y1) / 2
+    candidatos = [
+        l for l in linhas
+        if l is not alvo
+        and l["bbox"][0] >= x1 - 1
+        and abs((l["bbox"][1] + l["bbox"][3]) / 2 - ymid) < 4
+    ]
+    if not candidatos:
+        return ""
+    candidatos.sort(key=lambda l: l["bbox"][0])
+    return candidatos[0]["text"]
+
+
+def extrair_vendedor_alm(alm_doc, page_index):
+    """VENDEDOR: no primeiro bloco de cabecalho do W-Vetro."""
+    try:
+        return _valor_ao_lado(alm_doc[page_index], "VENDEDOR:")
+    except Exception:
+        return ""
+
+
+def extrair_cliente_alm(alm_doc, page_index):
+    """CLIENTE: no segundo bloco de cabecalho do W-Vetro."""
+    try:
+        return _valor_ao_lado(alm_doc[page_index], "CLIENTE:")
+    except Exception:
+        return ""
+
+
+def extrair_pedido_alm(alm_doc, page_index):
+    """Numero do orcamento do W-Vetro (ex: "ORÇAMENTO: 2335") vira o Numero
+    do Pedido na capa."""
+    try:
+        text = alm_doc[page_index].get_text()
+        # cuidado: "DATA DO ORÇAMENTO:" tambem contem "ORÇAMENTO:" -- exige
+        # que o valor capturado seja numerico pra nao pegar esse rotulo errado
+        m = re.search(r"OR[ÇC]AMENTO:\s*(\d+)", text, re.IGNORECASE)
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
+def extrair_pedido_pvc(pvc_doc, start_page, end_page):
+    """Codigo do orcamento do sistema de PVC (ex: "OAD-2506015-00") vira o
+    Numero do Pedido na capa quando nao tem W-Vetro no orcamento."""
+    try:
+        text = "".join(pvc_doc[i].get_text() for i in range(start_page, min(end_page, len(pvc_doc) - 1) + 1))
+        m = re.search(r"OAD-[\d-]+", text)
+        return m.group(0) if m else ""
+    except Exception:
+        return ""
+
+
+PALAVRAS_RESERVADAS_NOME_ARQUIVO = {"COMPLETO", "PVC", "MAD", "ALM", "PROPOSTA", "COMERCIAL"}
+
+
+def extrair_vendedor_do_nome_arquivo(pdf_path):
+    """PVC sozinho nao vem com VENDEDOR: no PDF -- o usuario digita o nome
+    do vendedor como a ULTIMA palavra do nome do arquivo ao salvar (ex:
+    "orcamento cliente completo JACKSON.pdf")."""
+    stem = Path(pdf_path).stem
+    palavras = [p for p in re.split(r"[ _]+", stem) if p]
+    if not palavras:
+        return ""
+    ultima = palavras[-1]
+    if ultima.upper() in PALAVRAS_RESERVADAS_NOME_ARQUIVO:
+        return ""
+    if not re.fullmatch(r"[A-Za-zÀ-ÖØ-öø-ÿ]+", ultima):
+        return ""
+    return ultima
 
 
 def detect_alm_subtipo(pdf_path):
@@ -293,112 +459,6 @@ def detect_alm_subtipo(pdf_path):
     if has_mad:
         return "mad"
     return "alm_mad"
-
-
-def update_resumo_page(capa_pdf_path, pvc_total_str, alm_total_str, alm_subtipo="alm_mad"):
-    pvc   = parse_brl(pvc_total_str)
-    alm   = parse_brl(alm_total_str)
-    total = pvc + alm
-    novo_label = LABELS_SUBTIPO.get(alm_subtipo, "Esquadrias de Madeira e Alumínio")
-    capa_doc   = fitz.open(capa_pdf_path)
-    fn_bold, fn_reg = _get_resumo_fonts(capa_pdf_path)
-    resumo_doc = fitz.open()
-    resumo_doc.insert_pdf(capa_doc, from_page=1, to_page=1)
-    page = resumo_doc[0]
-
-    # Coleta spans com origem (baseline) para posicionamento exato
-    # Estrutura: { "pvc_val": (origin, font, size, color), "alm_label": ..., "alm_val": ..., "total_val": ... }
-    spans_por_linha = []  # lista de (y_baseline, origin, text, font, size, color)
-    for b in page.get_text("dict")["blocks"]:
-        if b["type"] != 0:
-            continue
-        for line in b["lines"]:
-            for span in line["spans"]:
-                t = span["text"].strip()
-                if not t:
-                    continue
-                spans_por_linha.append({
-                    "text":   t,
-                    "origin": span["origin"],   # (x, y) baseline exato
-                    "bbox":   span["bbox"],     # (x0, y0, x1, y1)
-                    "font":   span["font"],
-                    "size":   span["size"],
-                    "color":  span["color"],
-                })
-
-    # Identifica os 3 valores R$ por ordem vertical (baseline y)
-    money_spans = sorted(
-        [s for s in spans_por_linha if s["text"].startswith("R$")],
-        key=lambda s: s["origin"][1]
-    )
-
-    # Identifica label ALM (linha que tem "Esquadrias de" mas nao "PVC")
-    alm_label_span = next(
-        (s for s in spans_por_linha if "Esquadrias de" in s["text"] and "PVC" not in s["text"]),
-        None
-    )
-
-    # Identifica label PVC (linha que tem "Esquadrias de" e "PVC")
-    pvc_label_span = next(
-        (s for s in spans_por_linha if "Esquadrias de" in s["text"] and "PVC" in s["text"]),
-        None
-    )
-
-    to_redact = []
-    to_insert = []  # (x, y_baseline, text, fontfile, fontsize, color)
-
-    # Valor PVC (1º por y)
-    if len(money_spans) >= 1:
-        s = money_spans[0]
-        for r in page.search_for(s["text"]):
-            to_redact.append(r)
-        if pvc_label_span:
-            # Posiciona a partir da borda direita real do label "Esquadrias de PVC:"
-            # (a posicao original do placeholder ficava colada/sobreposta ao label)
-            ox = pvc_label_span["bbox"][2] + 4
-            oy = pvc_label_span["origin"][1]
-        else:
-            ox, oy = s["origin"]
-        to_insert.append((ox, oy, f"R${format_brl(pvc)}", fn_bold, s["size"], (0, 0, 0)))
-
-    # Label ALM + valor ALM (2º por y)
-    if alm_label_span:
-        for r in page.search_for(alm_label_span["text"]):
-            to_redact.append(r)
-        lx, ly = alm_label_span["origin"]
-        # Mede largura do novo label para posicionar o valor ao lado
-        font_reg_obj = fitz.Font(fontfile=fn_reg)
-        lw = font_reg_obj.text_length(novo_label + ":", fontsize=alm_label_span["size"])
-        to_insert.append((lx, ly, novo_label + ":", fn_reg, alm_label_span["size"], (0, 0, 0)))
-        if len(money_spans) >= 2:
-            s2 = money_spans[1]
-            for r in page.search_for(s2["text"]):
-                to_redact.append(r)
-            to_insert.append((lx + lw + 4, ly, f"R${format_brl(alm)}", fn_bold, s2["size"], (0, 0, 0)))
-
-    # Valor Total (3º por y)
-    if len(money_spans) >= 3:
-        s = money_spans[2]
-        for r in page.search_for(s["text"]):
-            to_redact.append(r)
-        ox, oy = s["origin"]
-        col = _color_tuple(s["color"])
-        to_insert.append((ox, oy, f"R${format_brl(total)}", fn_bold, s["size"], col))
-
-    for rect in to_redact:
-        page.add_redact_annot(rect, fill=(1, 1, 1))
-    page.apply_redactions()
-    for x, y, text, ff, fs, col in to_insert:
-        if ff:
-            # fontname precisa ser explicito: sem ele o PyMuPDF ignora o
-            # fontfile e cai no Helvetica padrao (fontname="helv" e o default).
-            alias = re.sub(r"[^A-Za-z0-9]+", "_", Path(ff).stem)
-            page.insert_text((x, y), text, fontfile=ff, fontname=alias, fontsize=fs, color=col)
-        else:
-            page.insert_text((x, y), text, fontname="helv", fontsize=fs, color=col)
-
-    return resumo_doc
-
 
 
 def _has_system_capa(doc):
@@ -421,31 +481,39 @@ def _saida_valida(output_path, minimo_paginas):
 
 
 def _content_range(doc):
+    """Paginas de conteudo de um PDF ja envolvido por este programa (pula as
+    2 paginas de Capa no inicio e a Pagina Final no fim)."""
     n = len(doc)
-    start = 1 if n > 1 else 0
-    end = n - 2 if n > 2 else n - 1
+    if n > 3:
+        start = 2
+    elif n > 1:
+        start = 1
+    else:
+        start = 0
+    end = n - 2 if n > 2 else max(n - 1, 0)
     return start, end
 
 
 def _alm_range(alm_doc, alm_pdf_path):
-    """Paginas de conteudo W-Vetro: todas se original, sem capa/contra-capa se ja e wrap."""
+    """Paginas de conteudo W-Vetro: todas se original, sem capa/pagina final se ja e wrap."""
     if _is_proposta_gerada(alm_pdf_path):
         return _content_range(alm_doc)
     return 0, len(alm_doc) - 1
 
 
-def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, output_path, alm_subtipo="alm_mad"):
-    capa_doc = fitz.open(capa_pdf_path)
-    pvc_doc  = fitz.open(pvc_pdf_path)
-    alm_doc  = fitz.open(alm_pdf_path)
-    resumo_doc = update_resumo_page(capa_pdf_path, pvc_total, alm_total, alm_subtipo)
+def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, output_path,
+              vendedor="", cliente="", pedido=""):
+    pvc_doc = fitz.open(pvc_pdf_path)
+    alm_doc = fitz.open(alm_pdf_path)
+    total = parse_brl(pvc_total) + parse_brl(alm_total)
+    capa_editada = montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, format_brl_investimento(total))
 
     result = fitz.open()
-    result.insert_pdf(capa_doc, from_page=0, to_page=0)
+    result.insert_pdf(capa_editada, from_page=0, to_page=1)  # Capa 1 + Capa 2
 
     if _is_proposta_gerada(pvc_pdf_path):
-        # Wrap nosso: pula nossa Capa (pg 0) e nossa Contra Capa (ultima pg)
-        pvc_start = 1
+        # Wrap nosso: pula nossas 2 paginas de Capa e a Pagina Final
+        pvc_start = 2
         pvc_end   = len(pvc_doc) - 2
     else:
         # PDF original do Sintegra: pula capa do sistema se houver
@@ -460,18 +528,18 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
     if alm_start <= alm_end:
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
-    result.insert_pdf(resumo_doc)
-    result.insert_pdf(capa_doc, from_page=2, to_page=2)
+    result.insert_pdf(capa_editada, from_page=2, to_page=2)  # Pagina Final
     result.save(output_path)
     result.close()
 
 
-def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
-    capa_doc = fitz.open(capa_pdf_path)
-    alm_doc  = fitz.open(alm_pdf_path)
+def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="", pedido="", alm_total=""):
+    alm_doc = fitz.open(alm_pdf_path)
+    total = parse_brl(alm_total) if alm_total else 0.0
+    capa_editada = montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, format_brl_investimento(total))
 
     result = fitz.open()
-    result.insert_pdf(capa_doc, from_page=0, to_page=0)
+    result.insert_pdf(capa_editada, from_page=0, to_page=1)
 
     alm_start, alm_end = _alm_range(alm_doc, alm_pdf_path)
     if not _is_proposta_gerada(alm_pdf_path):
@@ -479,7 +547,7 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path):
     if alm_start <= alm_end:
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
-    result.insert_pdf(capa_doc, from_page=2, to_page=2)
+    result.insert_pdf(capa_editada, from_page=2, to_page=2)
     result.save(output_path)
     result.close()
 
@@ -517,24 +585,27 @@ def _is_proposta_gerada(path):
 
 
 def _is_proposta_final(path):
-    """Proposta final completa (sem sufixo PVC/ALM) — nao usar como fonte no COMPLETO."""
+    """Proposta final completa (sem sufixo PVC/ALM/MAD) — nao usar como fonte no COMPLETO."""
     stem = Path(path).stem
     if not stem.startswith("Proposta Comercial"):
         return False
-    upper = stem.upper()
-    # Wraps individuais (sufixo PVC, ALM, MAD ou MAD ALM) PODEM ser usados como fonte
-    if upper.endswith(" PVC") or upper.endswith(" ALM") or upper.endswith(" MAD"):
+    # Verifica as ultimas palavras: cobre "... PVC", "... PVC NOME" (vendedor
+    # digitado no arquivo) e "... MAD ALM" (wrap individual do W-Vetro)
+    palavras = stem.upper().split()
+    if any(p in ("PVC", "ALM", "MAD") for p in palavras[-3:]):
         return False
     return True
 
 
-def merge_individual(capa_pdf_path, src_pdf_path, output_path):
-    """Envolve um unico PDF (PVC ou ALM) com Capa + conteudo + Contra Capa."""
-    capa_doc = fitz.open(capa_pdf_path)
-    src_doc  = fitz.open(src_pdf_path)
-    result   = fitz.open()
+def merge_individual(capa_pdf_path, src_pdf_path, output_path,
+                      vendedor="", cliente="", pedido="", total_str=""):
+    """Envolve um unico PDF (PVC ou ALM) com Capa 1 + Capa 2 + conteudo + Pagina Final."""
+    src_doc = fitz.open(src_pdf_path)
+    total = parse_brl(total_str) if total_str else 0.0
+    capa_editada = montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, format_brl_investimento(total))
 
-    result.insert_pdf(capa_doc, from_page=0, to_page=0)
+    result = fitz.open()
+    result.insert_pdf(capa_editada, from_page=0, to_page=1)
 
     tipo = detect_pdf_type(src_pdf_path)
     if tipo == "pvc":
@@ -548,7 +619,7 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path):
         if start <= end:
             result.insert_pdf(src_doc, from_page=start, to_page=end)
 
-    result.insert_pdf(capa_doc, from_page=2, to_page=2)
+    result.insert_pdf(capa_editada, from_page=2, to_page=2)
     result.save(output_path)
     result.close()
 
@@ -592,7 +663,7 @@ class PropostaHandler(FileSystemEventHandler):
         import traceback
         now = time.time()
 
-        # PDFs individuais: envolve com Capa + Contra Capa (6s de espera)
+        # PDFs individuais: envolve com Capa + Pagina Final (6s de espera)
         prontos = [k for k, (t, _) in list(self._pending_single.items()) if now - t >= 6]
         for key in prontos:
             _, src_path = self._pending_single.pop(key)
@@ -602,7 +673,7 @@ class PropostaHandler(FileSystemEventHandler):
                 log(f"ERRO ao envolver {src_path}: {e}")
                 log(traceback.format_exc())
 
-        # COMPLETO: junta tudo com Resumo (8s de espera)
+        # COMPLETO: junta tudo (8s de espera)
         prontos = [k for k, (t, _, __) in list(self._pending_completo.items()) if now - t >= WAIT_SECONDS]
         for key in prontos:
             _, folder, trigger_path = self._pending_completo.pop(key)
@@ -613,7 +684,7 @@ class PropostaHandler(FileSystemEventHandler):
                 log(traceback.format_exc())
 
     def _wrap_individual(self, src_path):
-        """Envolve PVC ou ALM com Capa + Contra Capa."""
+        """Envolve PVC ou ALM com Capa 1 + Capa 2 + Pagina Final."""
         tipo = detect_pdf_type(src_path)
         if tipo not in ("pvc", "alm"):
             return
@@ -621,26 +692,41 @@ class PropostaHandler(FileSystemEventHandler):
         folder = str(Path(src_path).parent)
         client = suggest_client_name(folder)
         today  = date.today().strftime("%d-%m")
+
         if tipo == "pvc":
-            sufixo = "PVC"
+            vendedor = extrair_vendedor_do_nome_arquivo(src_path)
+            cliente_capa = client
+            doc_tmp = fitz.open(src_path)
+            start_tmp = 1 if _has_system_capa(doc_tmp) else 0
+            pedido = extrair_pedido_pvc(doc_tmp, start_tmp, len(doc_tmp) - 1)
+            total_str = extract_total_pvc(src_path)
+            sufixo = f"PVC {vendedor}" if vendedor else "PVC"
         else:
             # Preserva MAD/ALM do nome original no arquivo renomeado, senao a
             # informacao de madeira+aluminio se perde e o COMPLETO usa so "ALM"
             subtipo = detect_alm_subtipo(src_path)
             sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
+            doc_tmp = fitz.open(src_path)
+            start_tmp, _end_tmp = _alm_range(doc_tmp, src_path)
+            vendedor = extrair_vendedor_alm(doc_tmp, start_tmp)
+            cliente_capa = extrair_cliente_alm(doc_tmp, start_tmp) or client
+            pedido = extrair_pedido_alm(doc_tmp, start_tmp)
+            total_str = extract_total_alm(src_path)
+
         out_name = f"Proposta Comercial {client} {today} {sufixo}"
         output_path = output_path_do_dia(folder, out_name, client)
 
-        log(f"[{client}] {sufixo} detectado — adicionando Capa e Contra Capa...")
-        merge_individual(self.capa_pdf, src_path, output_path)
-        if not _saida_valida(output_path, 3):
+        log(f"[{client}] {sufixo} detectado — adicionando Capa e Pagina Final...")
+        merge_individual(self.capa_pdf, src_path, output_path,
+                          vendedor=vendedor, cliente=cliente_capa, pedido=pedido, total_str=total_str)
+        if not _saida_valida(output_path, 4):
             log(f"[{client}] ATENCAO: arquivo envolvido saiu com poucas paginas — mantendo o original por seguranca.")
             return
         log(f"[{client}] SALVO: {Path(output_path).name}")
         _apagar(src_path, client)
 
     def _process_completo(self, folder, trigger_path):
-        """Junta PVC + ALM com Resumo somando os totais."""
+        """Junta PVC + ALM com Capa/Pagina Final, somando os totais."""
         pdfs = find_pdfs_in_folder(folder)
         trigger_norm = _norm(trigger_path)
 
@@ -674,12 +760,19 @@ class PropostaHandler(FileSystemEventHandler):
                 log(f"[{client}] Nao foi possivel extrair totais. PVC={pvc_total or 'N/A'}  ALM={alm_total or 'N/A'}")
                 return
 
+            # Vendedor/Cliente/Pedido sempre seguem o W-Vetro quando ele existe
+            alm_doc_tmp = fitz.open(alm_path)
+            alm_start_tmp, _ = _alm_range(alm_doc_tmp, alm_path)
+            vendedor = extrair_vendedor_alm(alm_doc_tmp, alm_start_tmp)
+            cliente_capa = extrair_cliente_alm(alm_doc_tmp, alm_start_tmp) or client
+            pedido = extrair_pedido_alm(alm_doc_tmp, alm_start_tmp)
+
             out_name = f"Proposta Comercial {client} {today}"
             output_path = output_path_do_dia(folder, out_name, client)
-            log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando com Resumo...")
-            alm_subtipo = detect_alm_subtipo(alm_path)
-            merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path, alm_subtipo)
-            if not _saida_valida(output_path, 4):
+            log(f"[{client}] PVC R${pvc_total} + ALM R${alm_total} — montando proposta final...")
+            merge_pvc(self.capa_pdf, pvc_path, alm_path, pvc_total, alm_total, output_path,
+                      vendedor=vendedor, cliente=cliente_capa, pedido=pedido)
+            if not _saida_valida(output_path, 5):
                 log(f"[{client}] ATENCAO: proposta final saiu com poucas paginas — mantendo os arquivos originais por seguranca.")
                 return
             log(f"[{client}] SALVO: {Path(output_path).name}")
@@ -689,12 +782,20 @@ class PropostaHandler(FileSystemEventHandler):
                 _apagar(trigger_path, client)
 
         elif has_alm:
-            alm_path = pdfs["alm"][0]
+            alm_path  = pdfs["alm"][0]
+            alm_total = extract_total_alm(alm_path)
+            alm_doc_tmp = fitz.open(alm_path)
+            alm_start_tmp, _ = _alm_range(alm_doc_tmp, alm_path)
+            vendedor = extrair_vendedor_alm(alm_doc_tmp, alm_start_tmp)
+            cliente_capa = extrair_cliente_alm(alm_doc_tmp, alm_start_tmp) or client
+            pedido = extrair_pedido_alm(alm_doc_tmp, alm_start_tmp)
+
             out_name = f"Proposta Comercial {client} {today}"
             output_path = output_path_do_dia(folder, out_name, client)
-            log(f"[{client}] Aluminio — montando Capa + Conteudo + Contra Capa...")
-            merge_alm(self.capa_pdf, alm_path, output_path)
-            if not _saida_valida(output_path, 3):
+            log(f"[{client}] Aluminio — montando Capa + Conteudo + Pagina Final...")
+            merge_alm(self.capa_pdf, alm_path, output_path,
+                      vendedor=vendedor, cliente=cliente_capa, pedido=pedido, alm_total=alm_total)
+            if not _saida_valida(output_path, 4):
                 log(f"[{client}] ATENCAO: proposta final saiu com poucas paginas — mantendo os arquivos originais por seguranca.")
                 return
             log(f"[{client}] SALVO: {Path(output_path).name}")
@@ -718,7 +819,7 @@ def validar_capa(capa_pdf):
         n = len(doc)
         doc.close()
         if n < 3:
-            return (f"O PDF de Capa precisa ter 3 paginas (Capa / Resumo / Contra Capa).\n"
+            return (f"O PDF de Capa precisa ter 3 paginas (Capa 1 / Capa 2 / Pagina Final).\n"
                     f"  '{Path(capa_pdf).name}' tem apenas {n} pagina(s).")
     except Exception as e:
         return f"Erro ao abrir PDF de Capa: {e}"
