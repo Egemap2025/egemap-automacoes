@@ -1213,13 +1213,15 @@ def parse_mensagem(texto):
         mud, ambiente = {}, []
 
         # SUBSTITUIR PROJETO. Aceita varios jeitos de escrever:
-        #   'substituir por <modelo> - ...'   'substituir - <modelo> - ...'
-        #   'substituir <modelo> - ...'       'trocar por/para <modelo> - ...'
-        # (o 'trocar' exige por/para p/ nao confundir com 'trocar vidro').
-        m_sub = _re.match(r"^\s*substituir\b\s*(?:por|para)?\s*[-–]?\s*(.*)$",
+        #   'substituir projeto - <modelo> - ...' 'substituir por <modelo> - ...'
+        #   'substituir - <modelo> - ...'         'substituir <modelo> - ...'
+        #   'trocar projeto por/para <modelo>...' 'trocar por/para <modelo> - ...'
+        # (o 'trocar' exige por/para p/ nao confundir com 'trocar vidro'.)
+        # O '(?:projeto)?' consome a palavra 'Projeto' de 'Substituir Projeto'.
+        m_sub = _re.match(r"^\s*substituir(?:\s+projeto)?\b\s*(?:por|para)?\s*[-–]?\s*(.*)$",
                           conteudo, _re.I)
         if not m_sub:
-            m_sub = _re.match(r"^\s*troc(?:ar|a)\b\s*(?:por|para)\s*[-–]?\s*(.*)$",
+            m_sub = _re.match(r"^\s*troc(?:ar|a)(?:\s+projeto)?\b\s*(?:por|para)\s*[-–]?\s*(.*)$",
                               conteudo, _re.I)
         if m_sub:
             mud["substituir"] = True
