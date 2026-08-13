@@ -109,10 +109,9 @@ def format_brl(value):
 
 
 def format_brl_investimento(value):
-    """Formata o valor grande da pagina final (Proposta de Investimento) --
-    sem centavos, so os milhares (ex: 75.090), igual ao padrao "R$ 000.000"
-    do template novo."""
-    return f"{round(value):,}".replace(",", ".")
+    """Formata o valor grande da pagina final (Proposta de Investimento),
+    com centavos -- soma exata de PVC + ALM (ex: 121.125,19)."""
+    return format_brl(value)
 
 
 def output_path_do_dia(folder, name, client=""):
