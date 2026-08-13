@@ -215,27 +215,38 @@ def limpar_campos_vazios_alm(doc, page_index=0):
 #   3. Página final — "[NOME DO CLIENTE]" (dentro de uma frase) + "R$ 000.000"
 #      (valor total do investimento = PVC + ALM somados)
 
-def _caminho_fonte_bundled():
-    """Caminho da fonte DM Sans (completa) que vem empacotada junto com o
-    programa -- funciona tanto rodando via "python monitorar.py" quanto no
-    .exe gerado pelo PyInstaller (--add-data)."""
+#   - Capa 1 (vendedor/cliente/pedido) usa News Cycle (Bold)
+#   - Página final (nome do cliente na frase + valor) usa DM Sans
+_FONTES_BUNDLED = {
+    "newscycle": "NewsCycle-Bold.ttf",
+    "dmsans":    "DMSans-Regular.ttf",
+}
+
+
+def _caminho_fonte_bundled(chave):
+    """Caminho da fonte (completa) que vem empacotada junto com o programa --
+    funciona tanto rodando via "python monitorar.py" quanto no .exe gerado
+    pelo PyInstaller (--add-data)."""
+    nome_arquivo = _FONTES_BUNDLED.get(chave)
+    if not nome_arquivo:
+        return None
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base = Path(sys._MEIPASS)
     else:
         base = Path(__file__).resolve().parent
-    caminho = base / "DMSans-Regular.ttf"
+    caminho = base / nome_arquivo
     return str(caminho) if caminho.exists() else None
 
 
 _CAPA_FONT_CACHE: dict = {}
 
-def _extrair_fonte_da_capa(capa_pdf_path):
-    """Fallback: extrai a fonte DM Sans direto do PDF da capa. So usado se a
-    fonte empacotada (DMSans-Regular.ttf) nao for encontrada -- a fonte
-    dentro do PDF costuma vir "picotada" (so tem as letras que ja apareciam
-    no texto original dos placeholders, faltando letras/numeros/simbolos
-    necessarios pra inserir nomes e valores novos)."""
-    cache_key = str(capa_pdf_path)
+def _extrair_fonte_da_capa(capa_pdf_path, chave):
+    """Fallback: extrai a fonte direto do PDF da capa. So usado se a fonte
+    empacotada nao for encontrada -- a fonte dentro do PDF costuma vir
+    "picotada" (so tem as letras que ja apareciam no texto original dos
+    placeholders, faltando letras/numeros/simbolos necessarios pra inserir
+    nomes e valores novos)."""
+    cache_key = (str(capa_pdf_path), chave)
     if cache_key in _CAPA_FONT_CACHE:
         return _CAPA_FONT_CACHE[cache_key]
     result = None
@@ -248,11 +259,11 @@ def _extrair_fonte_da_capa(capa_pdf_path):
                 continue
             for finfo in doc[page_idx].get_fonts():
                 xref, ext, _t, basename, _name, _enc = finfo[:6]
-                chave = basename.lower().replace(" ", "").replace("-", "")
-                if "dmsans" in chave:
+                nome_chave = basename.lower().replace(" ", "").replace("-", "")
+                if chave in nome_chave:
                     data = doc.extract_font(xref)
                     if data and data[3]:
-                        tmp = Path(tempfile.gettempdir()) / f"egemap_dmsans.{ext or 'ttf'}"
+                        tmp = Path(tempfile.gettempdir()) / f"egemap_{chave}.{ext or 'ttf'}"
                         tmp.write_bytes(data[3])
                         result = str(tmp)
                         break
@@ -264,11 +275,11 @@ def _extrair_fonte_da_capa(capa_pdf_path):
     return result
 
 
-def _get_capa_dinamica_font(capa_pdf_path):
-    """Fonte usada nos textos dinamicos da capa (DM Sans). Prioriza a fonte
-    completa empacotada com o programa; so cai pro fallback (extrair do PDF,
-    que pode vir com letras faltando) se ela nao existir."""
-    return _caminho_fonte_bundled() or _extrair_fonte_da_capa(capa_pdf_path)
+def _get_capa_dinamica_font(capa_pdf_path, chave):
+    """Fonte usada nos textos dinamicos da capa. Prioriza a fonte completa
+    empacotada com o programa; so cai pro fallback (extrair do PDF, que pode
+    vir com letras faltando) se ela nao existir."""
+    return _caminho_fonte_bundled(chave) or _extrair_fonte_da_capa(capa_pdf_path, chave)
 
 
 def _medir_texto(texto, fontfile, size):
@@ -342,18 +353,19 @@ def montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, total_str):
     investimento) editadas; Capa 2 (institucional) fica intocada. Retorna um
     doc de 3 paginas -- as paginas 0-1 vao no inicio da proposta final e a
     pagina 2 vai no fim."""
-    fontfile = _get_capa_dinamica_font(capa_pdf_path)
+    fonte_capa1 = _get_capa_dinamica_font(capa_pdf_path, "newscycle")
+    fonte_final = _get_capa_dinamica_font(capa_pdf_path, "dmsans")
     doc = fitz.open()
     doc.insert_pdf(fitz.open(capa_pdf_path))
 
     p1 = doc[0]
-    _substituir_linha_inteira(p1, "[nome do vendedor]", vendedor or "[nome do vendedor]", fontfile)
-    _substituir_linha_inteira(p1, "[nome do cliente]", cliente or "[nome do cliente]", fontfile)
-    _substituir_linha_inteira(p1, "[número do pedido]", pedido or "[número do pedido]", fontfile)
+    _substituir_linha_inteira(p1, "[nome do vendedor]", vendedor or "[nome do vendedor]", fonte_capa1)
+    _substituir_linha_inteira(p1, "[nome do cliente]", cliente or "[nome do cliente]", fonte_capa1)
+    _substituir_linha_inteira(p1, "[número do pedido]", pedido or "[número do pedido]", fonte_capa1)
 
     pf = doc[len(doc) - 1]
-    _substituir_dentro_da_linha(pf, "[NOME DO CLIENTE]", (cliente or "[NOME DO CLIENTE]").upper(), fontfile)
-    _substituir_linha_inteira(pf, "R$ 000.000", f"R$ {total_str}", fontfile)
+    _substituir_dentro_da_linha(pf, "[NOME DO CLIENTE]", (cliente or "[NOME DO CLIENTE]").upper(), fonte_final)
+    _substituir_linha_inteira(pf, "R$ 000.000", f"R$ {total_str}", fonte_final)
 
     return doc
 
