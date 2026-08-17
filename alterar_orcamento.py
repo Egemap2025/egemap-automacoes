@@ -1827,7 +1827,7 @@ def _escolher_card_auto(page, modelo, num=""):
         except Exception:
             pass
     # ultimo recurso: se o clique abriu um popup de variacoes, escolhe nele
-    if _escolher_variacao_popup(page, modelo):
+    if _escolher_variacao_popup(page, modelo, num):
         return True
     # DIAGNOSTICO: salva a estrutura (HTML) do card para eu ver como clicar
     try:
@@ -1884,12 +1884,15 @@ _JS_MARCAR_VARIACAO = r"""
   best.scrollIntoView({block:'center'});
   let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
   if (titulo.length > 80) titulo = titulo.slice(0,80) + '...';
-  return {score: bestScore, titulo, viaModal: !!modal};
+  // estrutura da variacao E do modal em volta (para diagnostico)
+  let html = ((modal||best).outerHTML||'').replace(/\s+/g,' ');
+  if (html.length > 3500) html = html.slice(0,3500) + '...';
+  return {score: bestScore, titulo, viaModal: !!modal, html};
 }
 """
 
 
-def _escolher_variacao_popup(page, modelo):
+def _escolher_variacao_popup(page, modelo, num=""):
     """Escolhe e clica a variacao certa no popup de variacoes (painel fixo etc.).
     Retorna True se conseguiu navegar para a tela do projeto."""
     palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(modelo.lower()))
@@ -1901,18 +1904,46 @@ def _escolher_variacao_popup(page, modelo):
     if not res:
         return False
     print(f"     variacao escolhida -> {res.get('titulo','?')}")
-    for sel in ('[data-egevar="img"]', '[data-egevar="row"]'):
+    # clique REAL de mouse no meio da variacao (row) e na imagem dela
+    for sel, fy in (('[data-egevar="img"]', 0.5), ('[data-egevar="row"]', 0.5)):
         loc = page.locator(sel).first
         try:
             if loc.count() == 0:
                 continue
             loc.scroll_into_view_if_needed(timeout=2000)
-            loc.click(timeout=3000)
+            box = loc.bounding_box()
         except Exception:
-            continue
-        if _esperar_url_ou_texto(page, "confirmadadosprojeto",
-                                 "Detalhes do Projeto", 5000):
-            return True
+            box = None
+        if box:
+            x = box["x"] + box["width"] * 0.5
+            y = box["y"] + box["height"] * fy
+            for func in (page.mouse.click, page.mouse.dblclick):
+                try:
+                    func(x, y)
+                except Exception:
+                    continue
+                if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                         "Detalhes do Projeto", 4000):
+                    return True
+        # tambem tenta o clique normal/forcado do Playwright
+        for forcar in (False, True):
+            try:
+                loc.click(timeout=2500, force=forcar)
+            except Exception:
+                continue
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 4000):
+                return True
+    # DIAGNOSTICO: salva o HTML do popup de variacoes
+    try:
+        html = res.get("html", "")
+        if html:
+            PRINTS_DIR.mkdir(parents=True, exist_ok=True)
+            caminho = PRINTS_DIR / f"sub_variacao_html_{num}.txt"
+            caminho.write_text(html, encoding="utf-8")
+            print(f"     (salvei a estrutura da variacao em: {caminho})")
+    except Exception:
+        pass
     return False
 
 
