@@ -1169,10 +1169,10 @@ def _classificar_parte(p, mud, ambiente):
     if md:
         mud["largura"], mud["altura"] = md.group(1), md.group(2)
         return
-    # quantidade: 2un / 2und / 2unid / 2 unidades / qtde 2 / 2 pecas
+    # quantidade: 2un / 2und / 2 unidades / 3 itens / 2 pecas / qtde 2
     mq = (_re.search(r"(\d+)\s*un[a-z]*\b", low)
           or _re.search(r"qtde?\s*[:]?\s*(\d+)", low)
-          or _re.search(r"(\d+)\s*(?:pe[cç]as?|pcs?)\b", low))
+          or _re.search(r"(\d+)\s*(?:itens?|item|pe[cç]as?|pcs?)\b", low))
     if mq:
         mud["qtde"] = mq.group(1)
         return
@@ -1231,7 +1231,11 @@ def parse_mensagem(texto):
             mud["modelo"] = partes[0] if partes else ""
             for p in partes[1:]:
                 low = p.lower()
-                if _eh_linha(low):
+                # 'linha 25' / 'linha versatic 25' -> linha (tira a palavra 'linha')
+                ml = _re.match(r"^\s*linha\s+(.+)$", p, _re.I)
+                if ml:
+                    mud["linha"] = ml.group(1).strip()
+                elif _eh_linha(low):
                     mud["linha"] = p
                 elif _eh_acionamento(low):
                     mud["acionamento"] = _norm_acionamento(low)
