@@ -1733,6 +1733,18 @@ _JS_MARCAR_CARD = r"""
         (tt.includes('mais') && tt.includes('desenho')))){ maisEl = el; break; }
   }
   if (maisEl) maisEl.setAttribute('data-egerobo','mais');
+  // Elemento de ACAO: um <a>/onclick dentro do card (ou o proprio card), que
+  // costuma ser o que dispara a navegacao ao clicar.
+  let acaoEl = null;
+  if (best.tagName === 'A' || best.getAttribute('onclick')) acaoEl = best;
+  if (!acaoEl){
+    for (const el of best.querySelectorAll('a,[onclick]')){
+      const tt = nd(el.textContent);
+      if (tt.includes('opcoes') || tt.includes('projeto com')) continue; // pula o botao vermelho
+      acaoEl = el; break;
+    }
+  }
+  if (acaoEl) acaoEl.setAttribute('data-egerobo','acao');
   best.scrollIntoView({block:'center'});
   let titulo = (best.textContent||'').replace(/\s+/g,' ').trim();
   if (titulo.length > 90) titulo = titulo.slice(0,90) + '...';
@@ -1793,6 +1805,18 @@ def _escolher_card_auto(page, modelo, num=""):
                 return True
         return False
 
+    # 0) elemento de ACAO (link/onclick) -- costuma ser o que navega
+    acao = page.locator('[data-egerobo="acao"]').first
+    if acao.count() > 0:
+        for forcar in (False, True):
+            try:
+                acao.click(timeout=2500, force=forcar)
+            except Exception:
+                continue
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 5000):
+                return True
+
     card = page.locator('[data-egerobo="card"]').first
     # meio do desenho (a foto ocupa a parte de cima do card)
     if card.count() > 0 and _clicar_ponto(card, 0.5, 0.40):
@@ -1829,15 +1853,18 @@ def _escolher_card_auto(page, modelo, num=""):
     # ultimo recurso: se o clique abriu um popup de variacoes, escolhe nele
     if _escolher_variacao_popup(page, modelo, num):
         return True
-    # DIAGNOSTICO: salva a estrutura (HTML) do card para eu ver como clicar
+    # DIAGNOSTICO: salva E IMPRIME a estrutura (HTML) do card (cole aqui p/ eu
+    # descobrir o clique certo).
     try:
         html = (res or {}).get("html", "")
         if html:
             PRINTS_DIR.mkdir(parents=True, exist_ok=True)
-            caminho = PRINTS_DIR / f"sub_card_html_{num}.txt"
-            caminho.write_text(html, encoding="utf-8")
-            print(f"     (salvei a estrutura do card em: {caminho})")
-            print("     >> me manda esse arquivo .txt que eu descubro como clicar sozinho.")
+            (PRINTS_DIR / f"sub_card_html_{num}.txt").write_text(html, encoding="utf-8")
+            print("     " + "-" * 54)
+            print("     ESTRUTURA DO CARD (copie tudo abaixo e cole na conversa):")
+            print("     " + "-" * 54)
+            print(html[:1600])
+            print("     " + "-" * 54)
     except Exception:
         pass
     return False
