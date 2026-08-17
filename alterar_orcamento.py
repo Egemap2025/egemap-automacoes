@@ -1926,8 +1926,8 @@ def substituir_item_projeto(page, linha_item, num, mud):
     acion = mud.get("acionamento")
     print(f"\n  >> Item {num}: SUBSTITUIR por '{modelo}'"
           + (f" (linha {linha})" if linha else ""))
-    if not modelo or not linha:
-        print("     [!] falta modelo ou linha na mensagem -- pulando por seguranca.")
+    if not modelo:
+        print("     [!] falta o MODELO na mensagem (ex.: 'maxim ar') -- pulando.")
         return False
 
     # 1) menu ☰ -> Substituir Projeto
@@ -1960,8 +1960,11 @@ def substituir_item_projeto(page, linha_item, num, mud):
 
     # 4) LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
     #    modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
-    _selecionar_select_rotulo(page, "LINHA", linha, "linha")
-    page.wait_for_timeout(700)
+    if linha:
+        _selecionar_select_rotulo(page, "LINHA", linha, "linha")
+        page.wait_for_timeout(700)
+    else:
+        print("     [i] linha nao informada -- usando a linha PADRAO da tela (confira!).")
     _selecionar_select_rotulo(page, "MODELO", _modelo_dropdown(modelo), "modelo")
     page.wait_for_timeout(700)
 
