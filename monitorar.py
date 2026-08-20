@@ -8,6 +8,7 @@ import sys
 import time
 import re
 import os
+import threading
 from pathlib import Path
 from datetime import date
 
@@ -26,6 +27,12 @@ except ImportError:
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pymupdf"])
     import fitz
+
+# Integracao com o CRM (opcional -- o monitor funciona sem ela)
+try:
+    import crm as crm_egemap
+except Exception:
+    crm_egemap = None
 
 # ── Config salva em arquivo texto simples ─────────────────────────────────────
 
@@ -571,6 +578,44 @@ def log(msg):
     print(f"[{hora}] {msg}", flush=True)
 
 
+# ── CRM ───────────────────────────────────────────────────────────────────────
+
+# Materiais que cada tipo de orcamento representa no CRM
+MATERIAIS_ALM = {
+    "mad": {"madeira"},
+    "alm": {"aluminio"},
+    "alm_mad": {"aluminio", "madeira"},
+}
+
+
+def _valor(total_str):
+    """Converte o total lido do PDF em numero. 0.0 se nao veio nada."""
+    try:
+        return parse_brl(total_str) if total_str else 0.0
+    except Exception:
+        return 0.0
+
+
+def _lancar_no_crm(output_path, client, total_str, materiais):
+    """Lanca a proposta pronta no CRM sem travar o monitor.
+
+    Roda em segundo plano: se a internet cair ou o CRM demorar, o monitor
+    continua montando as proximas propostas normalmente.
+    """
+    if crm_egemap is None or not crm_egemap.configurado():
+        return
+    valor = _valor(total_str)
+    if valor <= 0:
+        log(f"[{client}] CRM: nao lancei — nao consegui ler o valor da proposta.")
+        return
+    threading.Thread(
+        target=crm_egemap.lancar_proposta,
+        args=(output_path, client, valor, materiais),
+        kwargs={"log": log},
+        daemon=True,
+    ).start()
+
+
 # Arquivos que nao conseguimos apagar de cara ficam aqui, e o tick() do
 # monitor vai tentando de novo em segundo plano (sem travar o programa) por
 # alguns minutos -- cobre o caso do OneDrive segurar o arquivo travado por
@@ -746,11 +791,13 @@ class PropostaHandler(FileSystemEventHandler):
             pedido = extrair_pedido_pvc(doc_tmp, start_tmp, len(doc_tmp) - 1)
             total_str = extract_total_pvc(src_path)
             sufixo = f"PVC {vendedor}" if vendedor else "PVC"
+            materiais = {"pvc"}
         else:
             # Preserva MAD/ALM do nome original no arquivo renomeado, senao a
             # informacao de madeira+aluminio se perde e o COMPLETO usa so "ALM"
             subtipo = detect_alm_subtipo(src_path)
             sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
+            materiais = MATERIAIS_ALM[subtipo]
             doc_tmp = fitz.open(src_path)
             start_tmp, _end_tmp = _alm_range(doc_tmp, src_path)
             vendedor = extrair_vendedor_alm(doc_tmp, start_tmp)
@@ -769,6 +816,7 @@ class PropostaHandler(FileSystemEventHandler):
             return
         log(f"[{client}] SALVO: {Path(output_path).name}")
         _apagar(src_path, client)
+        _lancar_no_crm(output_path, client, total_str, materiais)
 
     def _process_completo(self, folder, trigger_path):
         """Junta PVC + ALM com Capa/Pagina Final, somando os totais."""
@@ -826,6 +874,12 @@ class PropostaHandler(FileSystemEventHandler):
             if trigger_is_signal:
                 _apagar(trigger_path, client)
 
+            # A proposta final ja contem o PVC e o ALM, entao no CRM ela toma o
+            # lugar dos orcamentos individuais lancados antes (nao soma em cima)
+            total_final = format_brl(_valor(pvc_total) + _valor(alm_total))
+            materiais = {"pvc"} | MATERIAIS_ALM[detect_alm_subtipo(alm_path)]
+            _lancar_no_crm(output_path, client, total_final, materiais)
+
         elif has_alm:
             alm_path  = pdfs["alm"][0]
             alm_total = extract_total_alm(alm_path)
@@ -847,6 +901,9 @@ class PropostaHandler(FileSystemEventHandler):
             _apagar(alm_path, client)
             if trigger_is_signal:
                 _apagar(trigger_path, client)
+
+            _lancar_no_crm(output_path, client, alm_total,
+                           MATERIAIS_ALM[detect_alm_subtipo(alm_path)])
 
         elif has_pvc:
             log(f"[{client}] So PVC encontrado — falta o ALM (portas internas).")
@@ -890,6 +947,16 @@ def registrar_inicio_automatico():
 
 
 def main():
+    # "EGEMAP-Monitor.exe --crm" abre so a conexao com o CRM (CONECTAR_CRM.bat)
+    if "--crm" in sys.argv[1:]:
+        if crm_egemap is None:
+            print("Integracao com o CRM indisponivel nesta versao.")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        codigo = crm_egemap.configurar()
+        input("\nPressione ENTER para fechar.")
+        sys.exit(codigo)
+
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 55)
     print("   EGEMAP - Monitor de Propostas Comerciais")
@@ -935,10 +1002,26 @@ def main():
         registrar_inicio_automatico()
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
 
+        # So pergunta do CRM aqui, na configuracao inicial. Quando o monitor
+        # abre sozinho com o Windows ele nunca para esperando resposta.
+        if crm_egemap is not None and not crm_egemap.configurado():
+            print("3. Conectar ao CRM? (opcional)")
+            print("   Com o CRM conectado, a proposta pronta e lancada sozinha:")
+            print("   valor, PDF anexado e o cliente movido para 'Orcamento Pronto'.")
+            if input("\n   Conectar agora? (s/N) ").strip().lower().startswith("s"):
+                print()
+                crm_egemap.configurar()
+            else:
+                print("\n   Sem problema — depois e so abrir CONECTAR_CRM.bat.")
+
     print()
     print("=" * 55)
     print(f"  Monitorando: {pasta_raiz}")
     print(f"  Capa: {Path(capa_pdf).name}")
+    if crm_egemap is not None:
+        email_crm = crm_egemap.carregar_config()[0]
+        print(f"  CRM: {email_crm}" if email_crm
+              else "  CRM: nao conectado (abra CONECTAR_CRM.bat)")
     print()
     print("  Salve qualquer PDF com COMPLETO no nome para")
     print("  disparar a montagem automatica da proposta.")
