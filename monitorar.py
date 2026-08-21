@@ -946,6 +946,73 @@ def registrar_inicio_automatico():
         pass  # nao critico se falhar
 
 
+def _perguntar_com_tempo(pergunta, segundos=20):
+    """input() que desiste sozinho depois de alguns segundos.
+
+    Precisa desistir porque o monitor abre junto com o Windows: se ficasse
+    parado esperando resposta, nunca comecaria a monitorar a pasta.
+    """
+    print(pergunta, end="", flush=True)
+
+    if os.name != "nt":
+        try:
+            return input().strip()
+        except EOFError:
+            return ""
+
+    import msvcrt
+    digitado = ""
+    limite = time.time() + segundos
+    while time.time() < limite:
+        if msvcrt.kbhit():
+            tecla = msvcrt.getwche()
+            if tecla in ("\r", "\n"):
+                print()
+                return digitado.strip()
+            if tecla == "\b":
+                digitado = digitado[:-1]
+            else:
+                digitado += tecla
+            limite = time.time() + segundos  # esta digitando: renova o prazo
+        time.sleep(0.05)
+    print()
+    return ""
+
+
+def oferecer_conexao_crm():
+    """Pergunta uma vez, na abertura, se quer conectar o CRM.
+
+    Some sozinha depois de conectado. Se ninguem responder, o monitor segue
+    normalmente sem o CRM.
+    """
+    if crm_egemap is None or crm_egemap.configurado():
+        return
+
+    print()
+    print("  " + "-" * 51)
+    print("  O CRM ainda nao esta conectado.")
+    print()
+    print("  Conectando, a proposta pronta vai sozinha para o CRM:")
+    print("  lanca o valor, anexa o PDF e move o cliente de coluna.")
+    print("  " + "-" * 51)
+    print()
+
+    resposta = _perguntar_com_tempo(
+        "  Digite 1 e ENTER para conectar agora (ou aguarde para pular): ", 20
+    )
+    if resposta != "1":
+        print("\n  Pulado. Da pra conectar depois: e so abrir este programa de novo.")
+        return
+
+    print()
+    try:
+        crm_egemap.configurar()
+    except Exception as e:
+        print(f"\n  Nao consegui conectar: {e}")
+    print()
+    input("  Pressione ENTER para comecar a monitorar.")
+
+
 def main():
     # "EGEMAP-Monitor.exe --crm" abre so a conexao com o CRM (CONECTAR_CRM.bat)
     if "--crm" in sys.argv[1:]:
@@ -1002,17 +1069,7 @@ def main():
         registrar_inicio_automatico()
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
 
-        # So pergunta do CRM aqui, na configuracao inicial. Quando o monitor
-        # abre sozinho com o Windows ele nunca para esperando resposta.
-        if crm_egemap is not None and not crm_egemap.configurado():
-            print("3. Conectar ao CRM? (opcional)")
-            print("   Com o CRM conectado, a proposta pronta e lancada sozinha:")
-            print("   valor, PDF anexado e o cliente movido para 'Orcamento Pronto'.")
-            if input("\n   Conectar agora? (s/N) ").strip().lower().startswith("s"):
-                print()
-                crm_egemap.configurar()
-            else:
-                print("\n   Sem problema — depois e so abrir CONECTAR_CRM.bat.")
+    oferecer_conexao_crm()
 
     print()
     print("=" * 55)
@@ -1020,8 +1077,7 @@ def main():
     print(f"  Capa: {Path(capa_pdf).name}")
     if crm_egemap is not None:
         email_crm = crm_egemap.carregar_config()[0]
-        print(f"  CRM: {email_crm}" if email_crm
-              else "  CRM: nao conectado (abra CONECTAR_CRM.bat)")
+        print(f"  CRM: {email_crm}" if email_crm else "  CRM: nao conectado")
     print()
     print("  Salve qualquer PDF com COMPLETO no nome para")
     print("  disparar a montagem automatica da proposta.")

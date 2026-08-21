@@ -68,10 +68,13 @@ Nesses casos é só lançar na mão, como antes.
 
 ### Conectar ao CRM
 
-Na primeira execução o monitor pergunta se quer conectar. Para conectar depois,
-abra o **`CONECTAR_CRM.bat`** (ou rode `python crm.py configurar`) e informe o
-mesmo email e senha que você usa no CRM — o monitor age com a sua permissão. A
-senha fica guardada só nesta máquina, protegida pelo Windows (DPAPI).
+Abra o `EGEMAP-Monitor.exe`. Enquanto o CRM não estiver conectado, ele pergunta
+na abertura: **digite `1` e ENTER**, e informe o mesmo email e senha que você usa
+no CRM — o monitor age com a sua permissão. Se ninguém responder em 20 segundos
+ele segue monitorando normalmente, então nunca trava quando abre junto com o
+Windows. Depois de conectado a pergunta some.
+
+A senha fica guardada só nesta máquina, protegida pelo Windows (DPAPI).
 
 Para conferir sem escrever nada no CRM:
 
@@ -82,11 +85,12 @@ python crm.py testar "Lara Castilho"  # mostra com qual card esse nome casaria
 
 ## Uso
 
-1. Baixe o `EGEMAP-Monitor.exe` (gerado automaticamente pelo GitHub Actions a cada push, veja a aba Actions do repositório).
+1. Baixe o **[EGEMAP-Monitor.exe](https://github.com/Egemap2025/egemap-automacoes/releases/latest/download/EGEMAP-Monitor.exe)** — link fixo, sempre a versão mais nova.
 2. Abra o `.exe`. Na primeira execução ele pede:
    - Caminho do PDF de Capa (3 páginas: Capa / Resumo / Contra Capa)
    - Caminho da pasta raiz de orçamentos
-3. A partir daí ele salva a configuração e abre sozinho com o Windows.
+   - Se quer conectar o CRM (digite `1` e ENTER)
+3. A partir daí ele salva tudo e abre sozinho com o Windows.
 
 ## Desenvolvimento local
 
