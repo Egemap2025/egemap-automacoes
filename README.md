@@ -29,11 +29,23 @@ exatamente o que era feito na mão:
 4. Marca o orçamento como feito
 5. Move o card para **Orçamento Pronto**
 
-**Só o primeiro orçamento é automático.** Depois que o card sai de *Orçamentos
-a Fazer*, o monitor não mexe mais naquele cliente. Cliente costuma pedir várias
-alterações, e ficar trocando o anexo a cada PDF novo só bagunçaria o negócio —
-então as alterações seguintes você lança na mão, se quiser. O monitor avisa no
-log: `'Bruna Enzveiler' ja esta em 'Orçamento Pronto' — alteracao nao lancada`.
+**O PDF mais novo sempre fica no orçamento, em qualquer etapa do funil.** É
+assim que o vendedor pega a proposta atual sozinho, sem precisar te pedir. Cada
+opção (PVC, Alumínio, Madeira) tem a sua linha, e cada uma guarda o seu último
+PDF — mandar um PVC novo não mexe na linha do Alumínio.
+
+**Freios nas etapas mais adiantadas.** Trocar o PDF é sempre seguro; mexer no
+resto nem sempre:
+
+| O que o monitor faz | Onde acontece |
+|---|---|
+| Troca o PDF e o valor da linha do orçamento | Em qualquer etapa |
+| Atualiza o **valor do negócio** | Até *Orçamento Pronto*. De *Orçamento Apresentado* em diante o número é do vendedor (pode ter negociado desconto) e não é tocado |
+| Marca o orçamento como **feito** | Só nas filas de trabalho: *Orçamentos a Fazer* e *Atualizações* |
+| **Move o card** para *Orçamento Pronto* | Só saindo de *Orçamentos a Fazer* |
+
+Em *Atualizações* ele lança o PDF e marca como feito, mas **não move o card** —
+fica com você conferir e arrastar.
 
 **Quando o card NÃO é movido:** se o negócio pede mais de um orçamento (ex.: PVC
 e Alumínio) e só um ficou pronto, o valor e o PDF são lançados, o orçamento sai

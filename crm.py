@@ -5,15 +5,27 @@ EGEMAP - Integracao com o CRM
 Quando a proposta comercial fica pronta, este modulo faz no CRM exatamente o
 que voce fazia na mao:
 
-  1. Acha o cliente na coluna "Orcamentos a Fazer"
+  1. Acha o cliente pelo nome da pasta
   2. Lanca o orcamento (nome + valor) e anexa o PDF da proposta
   3. Atualiza o valor do negocio (soma dos orcamentos)
   4. Marca o orcamento como feito
   5. Arrasta o cliente para "Orcamento Pronto"
 
-O passo 5 so acontece quando TODOS os orcamentos pedidos no negocio estao
-feitos -- se o cliente pediu PVC e Aluminio e so o PVC ficou pronto, o card
-continua em "Orcamentos a Fazer" ate o segundo sair.
+O PDF mais novo sempre fica no orcamento, em qualquer etapa do funil -- e
+assim que o vendedor pega a proposta atual sozinho, sem precisar pedir. Cada
+opcao (PVC, Aluminio, Madeira) tem a sua linha, e cada uma guarda o seu
+ultimo PDF.
+
+Os passos 3, 4 e 5 tem freio:
+
+  - o valor do negocio so e mexido enquanto ele ainda e do orcamento. Depois
+    de "Orcamento Apresentado" o numero e do vendedor (pode ter negociado
+    desconto), e o monitor so troca o PDF.
+  - marcar feito so acontece com o card numa fila de trabalho ("Orcamentos a
+    Fazer" ou "Atualizacoes").
+  - mover para "Orcamento Pronto" so sai de "Orcamentos a Fazer", e so quando
+    TODOS os orcamentos pedidos estao feitos: se o cliente pediu PVC e
+    Aluminio e so o PVC saiu, o card espera o segundo.
 
 Conversa com o CRM usando o seu proprio login (mesma permissao que voce tem na
 tela). Sem dependencia externa: so a biblioteca padrao do Python.
@@ -48,6 +60,18 @@ ETAPA_DESTINO = "Orcamento Pronto"
 # Comparado sem acento/maiuscula, entao casa com "Orçamentos a Fazer" do CRM
 ETAPA_ORIGEM_NORM = "orcamentos a fazer"
 
+# Filas de trabalho: card parado aqui esperando o orcamento sair. A proposta
+# que chega e o orcamento sendo feito, entao marca como feito.
+ETAPAS_FILA = {"orcamentos a fazer", "atualizacoes"}
+
+# Etapas em que o valor do negocio ainda e do orcamento. Depois que a proposta
+# foi apresentada, o numero passa a ser do vendedor (pode ter negociado
+# desconto), entao o monitor nunca sobrescreve -- so troca o PDF.
+ETAPAS_VALOR_DO_ORCAMENTO = {
+    "novo lead", "contato realizado", "orcamento a definir",
+    "orcamentos a fazer", "atualizacoes", "orcamento pronto",
+}
+
 CONFIG_FILE = Path.home() / ".egemap_crm_config.json"
 
 TIMEOUT = 60
@@ -66,15 +90,6 @@ class CRMErro(Exception):
 
 class ClienteNaoEncontrado(CRMErro):
     """Nenhum card corresponde ao nome -- ou mais de um corresponde."""
-
-
-class AlteracaoIgnorada(CRMErro):
-    """O cliente ja saiu de 'Orcamentos a Fazer'.
-
-    So o primeiro orcamento e lancado automaticamente. Depois disso o cliente
-    costuma pedir varias alteracoes, e ficar trocando o anexo a cada PDF novo
-    so bagunçaria o negocio -- entao a partir dai o monitor nao mexe mais.
-    """
 
 
 # ── Guarda a senha protegida pelo Windows (DPAPI) ─────────────────────────────
@@ -343,11 +358,11 @@ class CRM:
         return negocio, None
 
     def encontrar_negocio(self, cliente):
-        """Acha o card do cliente e so devolve se ele estiver na fila.
+        """Acha o card do cliente entre todos os negocios abertos.
 
-        Procura entre todos os negocios abertos e fica com o mais parecido.
-        Se o vencedor ja passou de 'Orcamentos a Fazer', a proposta e uma
-        alteracao pedida depois -- nao lanca nada (AlteracaoIgnorada).
+        Procura em todas as etapas (e nao so na fila) porque o cliente certo
+        pode ja ter passado: olhar so a coluna faria uma pasta "Samuel Neotti"
+        cair no card "Samuel".
         """
         negocio, duvida = self._escolher(self._ranquear(cliente, self.negocios_abertos()))
 
@@ -360,11 +375,6 @@ class CRM:
         if not negocio:
             raise ClienteNaoEncontrado(f"nenhum cliente parecido com '{cliente}' no CRM.")
 
-        etapa = _etapa_de(negocio)
-        if etapa != ETAPA_ORIGEM_NORM:
-            raise AlteracaoIgnorada(
-                f"'{negocio['title']}' ja esta em '{_nome_etapa(negocio)}'"
-            )
         return negocio
 
     # -- lancar o orcamento --
@@ -439,11 +449,10 @@ class CRM:
         self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {"value": total})
         return total
 
-    def marcar_feito_e_mover(self, negocio, materiais):
-        """Marca o orcamento como feito e move pra 'Orcamento Pronto' quando
-        nao sobrar nenhum pendente.
+    def marcar_feito(self, negocio, materiais):
+        """Marca como feitos os orcamentos que esta proposta cobre.
 
-        Retorna (moveu, pendentes).
+        Retorna a lista do que ainda falta (vazia se nao falta nada).
         """
         detalhes = negocio.get("orcamento_detalhes") or []
         if isinstance(detalhes, str):
@@ -481,16 +490,16 @@ class CRM:
             self._tabela("deals", f"id=eq.{negocio['id']}", "PATCH",
                          {"orcamento_detalhes": detalhes})
 
-            faltando = [i.get("nome") or "orcamento"
-                        for i in detalhes if isinstance(i, dict) and not i.get("feito")]
-            if faltando:
-                return False, faltando
+            return [i.get("nome") or "orcamento"
+                    for i in detalhes if isinstance(i, dict) and not i.get("feito")]
 
-        self._tabela("deals", f"id=eq.{negocio['id']}", "PATCH", {
+        return []
+
+    def mover_para_pronto(self, negocio_id):
+        self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {
             "stage_id": self.etapa(ETAPA_DESTINO),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
-        return True, []
 
 
 # ── Ponto de entrada usado pelo monitor ───────────────────────────────────────
@@ -537,23 +546,43 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print):
         negocio = crm.encontrar_negocio(cliente)
 
         titulo = negocio.get("title") or cliente
+        etapa = _etapa_de(negocio)
+        na_fila = etapa in ETAPAS_FILA
+
+        # 1. O PDF mais novo sempre fica no orcamento, em qualquer etapa --
+        #    e assim que o vendedor pega a proposta atual sozinho.
         nome_orcamento, substituidos = crm.enviar_orcamento(negocio, pdf_path, materiais, valor)
         acao = "Atualizado" if substituidos else "Lancado"
-        log(f"[{cliente}] CRM: {acao} '{nome_orcamento}' em '{titulo}' — {_reais(valor)}")
+        log(f"[{cliente}] CRM: {acao} '{nome_orcamento}' em '{titulo}' "
+            f"({_nome_etapa(negocio)}) — {_reais(valor)}")
 
-        total = crm.atualizar_valor(negocio["id"])
-        moveu, faltando = crm.marcar_feito_e_mover(negocio, materiais)
-
-        if moveu:
-            log(f"[{cliente}] CRM: movido para '{ETAPA_DESTINO}' — total {_reais(total)}")
+        # 2. Valor do negocio: so enquanto ele ainda e do orcamento.
+        if etapa in ETAPAS_VALOR_DO_ORCAMENTO:
+            total = crm.atualizar_valor(negocio["id"])
         else:
-            log(f"[{cliente}] CRM: orcamento lancado, mas o card fica em "
-                f"'{ETAPA_ORIGEM}' — ainda falta: {', '.join(faltando)}")
+            total = None
+            log(f"[{cliente}] CRM: valor do negocio nao foi mexido — "
+                f"'{_nome_etapa(negocio)}' e numero do vendedor.")
+
+        # 3. Marcar feito e mover: so quando o card esta numa fila de trabalho.
+        if not na_fila:
+            return True
+
+        faltando = crm.marcar_feito(negocio, materiais)
+        if faltando:
+            log(f"[{cliente}] CRM: card fica em '{_nome_etapa(negocio)}' — "
+                f"ainda falta: {', '.join(faltando)}")
+            return True
+
+        if etapa == ETAPA_ORIGEM_NORM:
+            crm.mover_para_pronto(negocio["id"])
+            log(f"[{cliente}] CRM: movido para '{ETAPA_DESTINO}'"
+                + (f" — total {_reais(total)}" if total is not None else ""))
+        else:
+            log(f"[{cliente}] CRM: orcamento marcado como feito — card segue em "
+                f"'{_nome_etapa(negocio)}' para voce conferir.")
         return True
 
-    except AlteracaoIgnorada as e:
-        log(f"[{cliente}] CRM: {e} — alteracao nao lancada (so o primeiro "
-            f"orcamento e automatico).")
     except ClienteNaoEncontrado as e:
         log(f"[{cliente}] CRM: nao lancei nada — {e}")
     except CRMErro as e:
