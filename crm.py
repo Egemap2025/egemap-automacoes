@@ -21,11 +21,12 @@ Os passos 3, 4 e 5 tem freio:
   - o valor do negocio so e mexido enquanto ele ainda e do orcamento. Depois
     de "Orcamento Apresentado" o numero e do vendedor (pode ter negociado
     desconto), e o monitor so troca o PDF.
-  - marcar feito so acontece com o card numa fila de trabalho ("Orcamentos a
-    Fazer" ou "Atualizacoes").
-  - mover para "Orcamento Pronto" so sai de "Orcamentos a Fazer", e so quando
-    TODOS os orcamentos pedidos estao feitos: se o cliente pediu PVC e
-    Aluminio e so o PVC saiu, o card espera o segundo.
+  - marcar feito e mover so acontece com o card numa fila de trabalho
+    ("Orcamentos a Fazer" ou "Atualizacoes"). Card ja adiantado no funil so
+    recebe o PDF novo, e nao volta pra tras.
+  - mover para "Orcamento Pronto" so quando TODOS os orcamentos pedidos estao
+    feitos: se o cliente pediu PVC e Aluminio e so o PVC saiu, o card espera
+    o segundo.
 
 Conversa com o CRM usando o seu proprio login (mesma permissao que voce tem na
 tela). Sem dependencia externa: so a biblioteca padrao do Python.
@@ -574,13 +575,10 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print):
                 f"ainda falta: {', '.join(faltando)}")
             return True
 
-        if etapa == ETAPA_ORIGEM_NORM:
-            crm.mover_para_pronto(negocio["id"])
-            log(f"[{cliente}] CRM: movido para '{ETAPA_DESTINO}'"
-                + (f" — total {_reais(total)}" if total is not None else ""))
-        else:
-            log(f"[{cliente}] CRM: orcamento marcado como feito — card segue em "
-                f"'{_nome_etapa(negocio)}' para voce conferir.")
+        crm.mover_para_pronto(negocio["id"])
+        log(f"[{cliente}] CRM: movido de '{_nome_etapa(negocio)}' para "
+            f"'{ETAPA_DESTINO}'"
+            + (f" — total {_reais(total)}" if total is not None else ""))
         return True
 
     except ClienteNaoEncontrado as e:

@@ -42,10 +42,10 @@ resto nem sempre:
 | Troca o PDF e o valor da linha do orçamento | Em qualquer etapa |
 | Atualiza o **valor do negócio** | Até *Orçamento Pronto*. De *Orçamento Apresentado* em diante o número é do vendedor (pode ter negociado desconto) e não é tocado |
 | Marca o orçamento como **feito** | Só nas filas de trabalho: *Orçamentos a Fazer* e *Atualizações* |
-| **Move o card** para *Orçamento Pronto* | Só saindo de *Orçamentos a Fazer* |
+| **Move o card** para *Orçamento Pronto* | Saindo das filas: *Orçamentos a Fazer* e *Atualizações* |
 
-Em *Atualizações* ele lança o PDF e marca como feito, mas **não move o card** —
-fica com você conferir e arrastar.
+Card já adiantado no funil (*Orçamento Apresentado* em diante) só recebe o PDF
+novo — nunca volta pra trás.
 
 **Quando o card NÃO é movido:** se o negócio pede mais de um orçamento (ex.: PVC
 e Alumínio) e só um ficou pronto, o valor e o PDF são lançados, o orçamento sai
