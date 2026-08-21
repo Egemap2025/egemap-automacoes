@@ -6,11 +6,14 @@ on:
       - main
       - claude/budget-cover-automation-qjkemj
       - claude/egemap-proposal-monitor-zw7dzh
+      - claude/automacao-adicional-lshf3u
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Baixar código
@@ -27,7 +30,7 @@ jobs:
 
       - name: Gerar EXE
         run: |
-          pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." monitorar.py
+          pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." --hidden-import crm monitorar.py
 
       - name: Publicar EXE como artefato
         uses: actions/upload-artifact@v4
@@ -35,3 +38,16 @@ jobs:
           name: EGEMAP-Monitor-Windows
           path: dist/EGEMAP-Monitor.exe
           retention-days: 90
+
+      # Deixa o EXE baixavel por um link fixo, sem zip e sem procurar na
+      # pagina do Actions:
+      #   .../releases/latest/download/EGEMAP-Monitor.exe
+      - name: Publicar release com o EXE
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "monitor-${{ github.run_number }}" dist/EGEMAP-Monitor.exe `
+            --target "${{ github.sha }}" `
+            --title "EGEMAP-Monitor (build ${{ github.run_number }})" `
+            --notes "Baixe o EGEMAP-Monitor.exe aqui embaixo e abra. Ele pergunta o que precisa na primeira vez."
+

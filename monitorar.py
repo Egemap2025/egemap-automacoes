@@ -8,6 +8,7 @@ import sys
 import time
 import re
 import os
+import threading
 from pathlib import Path
 from datetime import date
 
@@ -26,6 +27,12 @@ except ImportError:
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pymupdf"])
     import fitz
+
+# Integracao com o CRM (opcional -- o monitor funciona sem ela)
+try:
+    import crm as crm_egemap
+except Exception:
+    crm_egemap = None
 
 # ── Config salva em arquivo texto simples ─────────────────────────────────────
 
@@ -118,11 +125,50 @@ def output_path_do_dia(folder, name, client=""):
     """Caminho de saida da proposta. O nome ja inclui a data (DD-MM), entao
     se ja existe um arquivo com esse nome e porque a proposta deste cliente
     foi refeita hoje (ex: cliente pediu alteracao) -- substitui a versao
-    anterior de hoje em vez de criar um "(1)" duplicado."""
-    path = Path(folder) / f"{name}.pdf"
-    if path.exists():
-        _apagar(str(path), client)
-    return str(path)
+    anterior de hoje em vez de criar um "(1)" duplicado.
+
+    Nao apaga a versao anterior aqui: quem grava (_salvar_pdf) troca o arquivo
+    de uma vez so. Apagar antes abria duas brechas -- ficar sem proposta
+    nenhuma se a gravacao falhasse, e a retentativa em segundo plano apagar
+    depois justamente a proposta nova."""
+    return str(Path(folder) / f"{name}.pdf")
+
+
+def _salvar_pdf(doc, output_path, tentativas=6, espera=2):
+    """Grava a proposta por cima da anterior sem depender do arquivo antigo
+    estar livre na hora.
+
+    A pasta de orcamentos fica no OneDrive, que trava o arquivo enquanto
+    sincroniza. Gravar direto por cima falha com "Permission denied" e derruba
+    a montagem inteira -- foi o que aconteceu ao refazer uma proposta ja
+    enviada. Entao grava num temporario (fora do alcance do monitor, que so
+    olha .pdf) e so no fim troca pelo definitivo, insistindo enquanto o
+    OneDrive nao solta.
+    """
+    destino = Path(output_path)
+    temporario = destino.with_name(destino.name + ".tmp")
+
+    doc.save(str(temporario))
+    doc.close()
+
+    erro = None
+    for tentativa in range(tentativas):
+        try:
+            os.replace(temporario, destino)
+            return
+        except OSError as e:
+            erro = e
+            if tentativa == 0:
+                log(f"Arquivo anterior em uso, aguardando liberar: {destino.name}")
+            time.sleep(espera)
+
+    # Nao soltou: joga fora o temporario e deixa o erro subir. O orcamento
+    # original nao e apagado, entao e so salvar de novo depois.
+    try:
+        temporario.unlink()
+    except Exception:
+        pass
+    raise erro
 
 
 def suggest_client_name(folder_path):
@@ -540,8 +586,7 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
     result.insert_pdf(capa_editada, from_page=2, to_page=2)  # Pagina Final
-    result.save(output_path)
-    result.close()
+    _salvar_pdf(result, output_path)
 
 
 def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="", pedido="", alm_total=""):
@@ -559,8 +604,7 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="",
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
     result.insert_pdf(capa_editada, from_page=2, to_page=2)
-    result.save(output_path)
-    result.close()
+    _salvar_pdf(result, output_path)
 
 # ── Watchdog handler ──────────────────────────────────────────────────────────
 
@@ -569,6 +613,44 @@ WAIT_SECONDS = 8  # espera 8s apos o ultimo evento para garantir que o PDF foi s
 def log(msg):
     hora = time.strftime("%H:%M:%S")
     print(f"[{hora}] {msg}", flush=True)
+
+
+# ── CRM ───────────────────────────────────────────────────────────────────────
+
+# Materiais que cada tipo de orcamento representa no CRM
+MATERIAIS_ALM = {
+    "mad": {"madeira"},
+    "alm": {"aluminio"},
+    "alm_mad": {"aluminio", "madeira"},
+}
+
+
+def _valor(total_str):
+    """Converte o total lido do PDF em numero. 0.0 se nao veio nada."""
+    try:
+        return parse_brl(total_str) if total_str else 0.0
+    except Exception:
+        return 0.0
+
+
+def _lancar_no_crm(output_path, client, total_str, materiais):
+    """Lanca a proposta pronta no CRM sem travar o monitor.
+
+    Roda em segundo plano: se a internet cair ou o CRM demorar, o monitor
+    continua montando as proximas propostas normalmente.
+    """
+    if crm_egemap is None or not crm_egemap.configurado():
+        return
+    valor = _valor(total_str)
+    if valor <= 0:
+        log(f"[{client}] CRM: nao lancei — nao consegui ler o valor da proposta.")
+        return
+    threading.Thread(
+        target=crm_egemap.lancar_proposta,
+        args=(output_path, client, valor, materiais),
+        kwargs={"log": log},
+        daemon=True,
+    ).start()
 
 
 # Arquivos que nao conseguimos apagar de cara ficam aqui, e o tick() do
@@ -588,6 +670,8 @@ def _apagar(path, client=""):
             Path(path).unlink()
             log(f"[{client}] Removido original: {Path(path).name}")
             return
+        except FileNotFoundError:
+            return  # ja saiu da pasta (movido, ou o OneDrive levou): nada a fazer
         except Exception:
             if tentativa < 2:
                 time.sleep(1)
@@ -608,6 +692,8 @@ def _processar_pendentes_apagar():
             Path(path).unlink()
             log(f"[{client}] Removido original (apos aguardar liberacao do arquivo): {Path(path).name}")
             del _PENDING_DELETE[chave]
+        except FileNotFoundError:
+            del _PENDING_DELETE[chave]  # sumiu sozinho, missao cumprida
         except Exception as e:
             if agora - inicio > _PENDING_DELETE_TIMEOUT:
                 log(f"[{client}] Nao foi possivel remover {Path(path).name} apos varios minutos (pode estar sincronizando no OneDrive) — apague manualmente: {e}")
@@ -659,8 +745,7 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path,
             result.insert_pdf(src_doc, from_page=start, to_page=end)
 
     result.insert_pdf(capa_editada, from_page=2, to_page=2)
-    result.save(output_path)
-    result.close()
+    _salvar_pdf(result, output_path)
 
 
 class PropostaHandler(FileSystemEventHandler):
@@ -746,11 +831,13 @@ class PropostaHandler(FileSystemEventHandler):
             pedido = extrair_pedido_pvc(doc_tmp, start_tmp, len(doc_tmp) - 1)
             total_str = extract_total_pvc(src_path)
             sufixo = f"PVC {vendedor}" if vendedor else "PVC"
+            materiais = {"pvc"}
         else:
             # Preserva MAD/ALM do nome original no arquivo renomeado, senao a
             # informacao de madeira+aluminio se perde e o COMPLETO usa so "ALM"
             subtipo = detect_alm_subtipo(src_path)
             sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
+            materiais = MATERIAIS_ALM[subtipo]
             doc_tmp = fitz.open(src_path)
             start_tmp, _end_tmp = _alm_range(doc_tmp, src_path)
             vendedor = extrair_vendedor_alm(doc_tmp, start_tmp)
@@ -769,6 +856,7 @@ class PropostaHandler(FileSystemEventHandler):
             return
         log(f"[{client}] SALVO: {Path(output_path).name}")
         _apagar(src_path, client)
+        _lancar_no_crm(output_path, client, total_str, materiais)
 
     def _process_completo(self, folder, trigger_path):
         """Junta PVC + ALM com Capa/Pagina Final, somando os totais."""
@@ -826,6 +914,12 @@ class PropostaHandler(FileSystemEventHandler):
             if trigger_is_signal:
                 _apagar(trigger_path, client)
 
+            # A proposta final ja contem o PVC e o ALM, entao no CRM ela toma o
+            # lugar dos orcamentos individuais lancados antes (nao soma em cima)
+            total_final = format_brl(_valor(pvc_total) + _valor(alm_total))
+            materiais = {"pvc"} | MATERIAIS_ALM[detect_alm_subtipo(alm_path)]
+            _lancar_no_crm(output_path, client, total_final, materiais)
+
         elif has_alm:
             alm_path  = pdfs["alm"][0]
             alm_total = extract_total_alm(alm_path)
@@ -847,6 +941,9 @@ class PropostaHandler(FileSystemEventHandler):
             _apagar(alm_path, client)
             if trigger_is_signal:
                 _apagar(trigger_path, client)
+
+            _lancar_no_crm(output_path, client, alm_total,
+                           MATERIAIS_ALM[detect_alm_subtipo(alm_path)])
 
         elif has_pvc:
             log(f"[{client}] So PVC encontrado — falta o ALM (portas internas).")
@@ -889,7 +986,84 @@ def registrar_inicio_automatico():
         pass  # nao critico se falhar
 
 
+def _perguntar_com_tempo(pergunta, segundos=20):
+    """input() que desiste sozinho depois de alguns segundos.
+
+    Precisa desistir porque o monitor abre junto com o Windows: se ficasse
+    parado esperando resposta, nunca comecaria a monitorar a pasta.
+    """
+    print(pergunta, end="", flush=True)
+
+    if os.name != "nt":
+        try:
+            return input().strip()
+        except EOFError:
+            return ""
+
+    import msvcrt
+    digitado = ""
+    limite = time.time() + segundos
+    while time.time() < limite:
+        if msvcrt.kbhit():
+            tecla = msvcrt.getwche()
+            if tecla in ("\r", "\n"):
+                print()
+                return digitado.strip()
+            if tecla == "\b":
+                digitado = digitado[:-1]
+            else:
+                digitado += tecla
+            limite = time.time() + segundos  # esta digitando: renova o prazo
+        time.sleep(0.05)
+    print()
+    return ""
+
+
+def oferecer_conexao_crm():
+    """Pergunta uma vez, na abertura, se quer conectar o CRM.
+
+    Some sozinha depois de conectado. Se ninguem responder, o monitor segue
+    normalmente sem o CRM.
+    """
+    if crm_egemap is None or crm_egemap.configurado():
+        return
+
+    print()
+    print("  " + "-" * 51)
+    print("  O CRM ainda nao esta conectado.")
+    print()
+    print("  Conectando, a proposta pronta vai sozinha para o CRM:")
+    print("  lanca o valor, anexa o PDF e move o cliente de coluna.")
+    print("  " + "-" * 51)
+    print()
+
+    resposta = _perguntar_com_tempo(
+        "  Digite 1 e ENTER para conectar agora (ou aguarde para pular): ", 20
+    )
+    if resposta != "1":
+        print("\n  Pulado. Da pra conectar depois: e so abrir este programa de novo.")
+        return
+
+    print()
+    try:
+        crm_egemap.configurar()
+    except Exception as e:
+        print(f"\n  Nao consegui conectar: {e}")
+    print()
+    input("  Pressione ENTER para comecar a monitorar.")
+
+
 def main():
+    # "EGEMAP-Monitor.exe --crm" abre so a conexao com o CRM (CONECTAR_CRM.bat)
+    if "--crm" in sys.argv[1:]:
+        if crm_egemap is None:
+            print("Integracao com o CRM indisponivel nesta versao.")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        codigo = crm_egemap.configurar()
+        input("\nPressione ENTER para fechar.")
+        sys.exit(codigo)
+
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 55)
     print("   EGEMAP - Monitor de Propostas Comerciais")
@@ -935,10 +1109,15 @@ def main():
         registrar_inicio_automatico()
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
 
+    oferecer_conexao_crm()
+
     print()
     print("=" * 55)
     print(f"  Monitorando: {pasta_raiz}")
     print(f"  Capa: {Path(capa_pdf).name}")
+    if crm_egemap is not None:
+        email_crm = crm_egemap.carregar_config()[0]
+        print(f"  CRM: {email_crm}" if email_crm else "  CRM: nao conectado")
     print()
     print("  Salve qualquer PDF com COMPLETO no nome para")
     print("  disparar a montagem automatica da proposta.")
