@@ -125,11 +125,50 @@ def output_path_do_dia(folder, name, client=""):
     """Caminho de saida da proposta. O nome ja inclui a data (DD-MM), entao
     se ja existe um arquivo com esse nome e porque a proposta deste cliente
     foi refeita hoje (ex: cliente pediu alteracao) -- substitui a versao
-    anterior de hoje em vez de criar um "(1)" duplicado."""
-    path = Path(folder) / f"{name}.pdf"
-    if path.exists():
-        _apagar(str(path), client)
-    return str(path)
+    anterior de hoje em vez de criar um "(1)" duplicado.
+
+    Nao apaga a versao anterior aqui: quem grava (_salvar_pdf) troca o arquivo
+    de uma vez so. Apagar antes abria duas brechas -- ficar sem proposta
+    nenhuma se a gravacao falhasse, e a retentativa em segundo plano apagar
+    depois justamente a proposta nova."""
+    return str(Path(folder) / f"{name}.pdf")
+
+
+def _salvar_pdf(doc, output_path, tentativas=6, espera=2):
+    """Grava a proposta por cima da anterior sem depender do arquivo antigo
+    estar livre na hora.
+
+    A pasta de orcamentos fica no OneDrive, que trava o arquivo enquanto
+    sincroniza. Gravar direto por cima falha com "Permission denied" e derruba
+    a montagem inteira -- foi o que aconteceu ao refazer uma proposta ja
+    enviada. Entao grava num temporario (fora do alcance do monitor, que so
+    olha .pdf) e so no fim troca pelo definitivo, insistindo enquanto o
+    OneDrive nao solta.
+    """
+    destino = Path(output_path)
+    temporario = destino.with_name(destino.name + ".tmp")
+
+    doc.save(str(temporario))
+    doc.close()
+
+    erro = None
+    for tentativa in range(tentativas):
+        try:
+            os.replace(temporario, destino)
+            return
+        except OSError as e:
+            erro = e
+            if tentativa == 0:
+                log(f"Arquivo anterior em uso, aguardando liberar: {destino.name}")
+            time.sleep(espera)
+
+    # Nao soltou: joga fora o temporario e deixa o erro subir. O orcamento
+    # original nao e apagado, entao e so salvar de novo depois.
+    try:
+        temporario.unlink()
+    except Exception:
+        pass
+    raise erro
 
 
 def suggest_client_name(folder_path):
@@ -547,8 +586,7 @@ def merge_pvc(capa_pdf_path, pvc_pdf_path, alm_pdf_path, pvc_total, alm_total, o
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
     result.insert_pdf(capa_editada, from_page=2, to_page=2)  # Pagina Final
-    result.save(output_path)
-    result.close()
+    _salvar_pdf(result, output_path)
 
 
 def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="", pedido="", alm_total=""):
@@ -566,8 +604,7 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="",
         result.insert_pdf(alm_doc, from_page=alm_start, to_page=alm_end)
 
     result.insert_pdf(capa_editada, from_page=2, to_page=2)
-    result.save(output_path)
-    result.close()
+    _salvar_pdf(result, output_path)
 
 # ── Watchdog handler ──────────────────────────────────────────────────────────
 
@@ -633,6 +670,8 @@ def _apagar(path, client=""):
             Path(path).unlink()
             log(f"[{client}] Removido original: {Path(path).name}")
             return
+        except FileNotFoundError:
+            return  # ja saiu da pasta (movido, ou o OneDrive levou): nada a fazer
         except Exception:
             if tentativa < 2:
                 time.sleep(1)
@@ -653,6 +692,8 @@ def _processar_pendentes_apagar():
             Path(path).unlink()
             log(f"[{client}] Removido original (apos aguardar liberacao do arquivo): {Path(path).name}")
             del _PENDING_DELETE[chave]
+        except FileNotFoundError:
+            del _PENDING_DELETE[chave]  # sumiu sozinho, missao cumprida
         except Exception as e:
             if agora - inicio > _PENDING_DELETE_TIMEOUT:
                 log(f"[{client}] Nao foi possivel remover {Path(path).name} apos varios minutos (pode estar sincronizando no OneDrive) — apague manualmente: {e}")
@@ -704,8 +745,7 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path,
             result.insert_pdf(src_doc, from_page=start, to_page=end)
 
     result.insert_pdf(capa_editada, from_page=2, to_page=2)
-    result.save(output_path)
-    result.close()
+    _salvar_pdf(result, output_path)
 
 
 class PropostaHandler(FileSystemEventHandler):
