@@ -47,10 +47,16 @@ resto nem sempre:
 Card já adiantado no funil (*Orçamento Apresentado* em diante) só recebe o PDF
 novo — nunca volta pra trás.
 
-**Quando o card NÃO é movido:** se o negócio pede mais de um orçamento (ex.: PVC
-e Alumínio) e só um ficou pronto, o valor e o PDF são lançados, o orçamento sai
-como feito, mas o card fica em *Orçamentos a Fazer* até o último sair. O monitor
-avisa no log o que ainda falta.
+**Um orçamento cadastrado = uma proposta.** Quando o negócio tem um só
+orçamento em *Detalhes do orçamento*, a proposta que chegar fecha ele e o card
+anda — não importa se o arquivo se chama `ALM`, `PVC` ou `MAD`, porque esse
+sufixo não corresponde aos materiais do CRM (o orçamento da Leticia pede
+Madeira + PVC e saiu num arquivo `ALM`).
+
+**Quando o card NÃO é movido:** se o negócio tem *duas ou mais* opções
+cadastradas (ex.: uma em PVC e outra em Alumínio) e só uma ficou pronta, o valor
+e o PDF são lançados, aquela opção sai como feita, mas o card espera a última.
+O monitor avisa no log o que ainda falta.
 
 **Proposta refeita:** a proposta nova substitui a linha que ela já contém, em vez
 de somar em cima. O `COMPLETO` (PVC + Alumínio) toma o lugar dos dois PDFs

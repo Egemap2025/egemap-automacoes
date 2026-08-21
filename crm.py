@@ -24,9 +24,10 @@ Os passos 3, 4 e 5 tem freio:
   - marcar feito e mover so acontece com o card numa fila de trabalho
     ("Orcamentos a Fazer" ou "Atualizacoes"). Card ja adiantado no funil so
     recebe o PDF novo, e nao volta pra tras.
-  - mover para "Orcamento Pronto" so quando TODOS os orcamentos pedidos estao
-    feitos: se o cliente pediu PVC e Aluminio e so o PVC saiu, o card espera
-    o segundo.
+  - mover para "Orcamento Pronto" so quando TODOS os orcamentos cadastrados
+    no negocio estao feitos. Um orcamento cadastrado = uma proposta; quando o
+    cliente pediu duas opcoes separadas (uma em PVC e outra em Aluminio), o
+    card espera as duas sairem.
 
 Conversa com o CRM usando o seu proprio login (mesma permissao que voce tem na
 tela). Sem dependencia externa: so a biblioteca padrao do Python.
@@ -463,30 +464,33 @@ class CRM:
                 detalhes = []
 
         if isinstance(detalhes, list) and detalhes:
-            marcou = False
-            sem_material = []
-            for item in detalhes:
-                if not isinstance(item, dict) or item.get("feito"):
-                    continue
-                do_item = {
-                    normalizar(m.get("material"))
-                    for m in (item.get("materiais") or []) if isinstance(m, dict)
-                }
-                do_item.discard("")
-                if not do_item:
-                    sem_material.append(item)
-                    continue
-                # So da o orcamento por feito quando a proposta cobre TUDO que
-                # ele pede. Um orcamento de "PVC + Aluminio" nao fica pronto so
-                # porque o PVC saiu -- senao o card iria embora cedo demais.
-                if do_item <= materiais:
-                    item["feito"] = True
-                    marcou = True
+            pendentes = [i for i in detalhes if isinstance(i, dict) and not i.get("feito")]
 
-            # Orcamento sem material anotado: nao da pra conferir. Se e o unico
-            # que falta, e esse mesmo.
-            if not marcou and len(sem_material) == 1:
-                sem_material[0]["feito"] = True
+            # Um orcamento cadastrado = uma proposta. O material do nome do
+            # arquivo (ALM/PVC/MAD) nao serve pra conferir: o orcamento da
+            # Leticia pede Madeira + PVC e veio num arquivo "ALM"; o do
+            # Dionatan pedia Alumínio + Madeira + PVC e saiu num "Pvc" so.
+            if len(detalhes) == 1:
+                detalhes[0]["feito"] = True
+
+            else:
+                # Varios orcamentos no mesmo negocio sao opcoes separadas (ex.:
+                # uma em PVC e outra em Aluminio). Ai o material ajuda a saber
+                # qual delas acabou de sair.
+                marcou = False
+                for item in pendentes:
+                    do_item = {
+                        normalizar(m.get("material"))
+                        for m in (item.get("materiais") or []) if isinstance(m, dict)
+                    }
+                    do_item.discard("")
+                    if do_item & materiais:
+                        item["feito"] = True
+                        marcou = True
+
+                # Nenhum casou pelo material, mas so falta um: e esse.
+                if not marcou and len(pendentes) == 1:
+                    pendentes[0]["feito"] = True
 
             self._tabela("deals", f"id=eq.{negocio['id']}", "PATCH",
                          {"orcamento_detalhes": detalhes})
