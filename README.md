@@ -23,11 +23,17 @@ Salva PVC (Sintegra) e/ou ALM/MAD (W-Vetro) na pasta do cliente
 Assim que a proposta fica pronta, o monitor faz no [CRM EGEMAP](https://crm.egemapesquadrias.com.br)
 exatamente o que era feito na mão:
 
-1. Acha o cliente na coluna **Orçamentos a Fazer** (pelo nome da pasta)
+1. Acha o cliente pelo nome da pasta e confere se ele está na coluna **Orçamentos a Fazer**
 2. Lança o orçamento com o valor e anexa o PDF da proposta
 3. Atualiza o valor do negócio (soma dos orçamentos)
 4. Marca o orçamento como feito
 5. Move o card para **Orçamento Pronto**
+
+**Só o primeiro orçamento é automático.** Depois que o card sai de *Orçamentos
+a Fazer*, o monitor não mexe mais naquele cliente. Cliente costuma pedir várias
+alterações, e ficar trocando o anexo a cada PDF novo só bagunçaria o negócio —
+então as alterações seguintes você lança na mão, se quiser. O monitor avisa no
+log: `'Bruna Enzveiler' ja esta em 'Orçamento Pronto' — alteracao nao lancada`.
 
 **Quando o card NÃO é movido:** se o negócio pede mais de um orçamento (ex.: PVC
 e Alumínio) e só um ficou pronto, o valor e o PDF são lançados, o orçamento sai
@@ -40,7 +46,8 @@ individuais, e um orçamento refeito depois substitui o anterior — assim o val
 negócio nunca dobra. PVC e Alumínio pedidos separados continuam sendo duas linhas.
 
 **Quando o monitor não mexe no CRM** (e avisa no log, sem travar nada):
-- nenhum cliente parecido em *Orçamentos a Fazer*
+- o cliente já passou de *Orçamentos a Fazer* (é alteração, não primeiro orçamento)
+- nenhum cliente parecido no CRM
 - o nome da pasta ficou parecido com dois cards ao mesmo tempo
 - não deu para ler o valor do PDF
 - internet fora ou CRM inacessível

@@ -45,6 +45,8 @@ BUCKET = "deal-budgets"
 
 ETAPA_ORIGEM = "Orcamentos a Fazer"
 ETAPA_DESTINO = "Orcamento Pronto"
+# Comparado sem acento/maiuscula, entao casa com "Orçamentos a Fazer" do CRM
+ETAPA_ORIGEM_NORM = "orcamentos a fazer"
 
 CONFIG_FILE = Path.home() / ".egemap_crm_config.json"
 
@@ -64,6 +66,15 @@ class CRMErro(Exception):
 
 class ClienteNaoEncontrado(CRMErro):
     """Nenhum card corresponde ao nome -- ou mais de um corresponde."""
+
+
+class AlteracaoIgnorada(CRMErro):
+    """O cliente ja saiu de 'Orcamentos a Fazer'.
+
+    So o primeiro orcamento e lancado automaticamente. Depois disso o cliente
+    costuma pedir varias alteracoes, e ficar trocando o anexo a cada PDF novo
+    so bagunçaria o negocio -- entao a partir dai o monitor nao mexe mais.
+    """
 
 
 # ── Guarda a senha protegida pelo Windows (DPAPI) ─────────────────────────────
@@ -183,6 +194,18 @@ def _reais(valor):
     return "R$ " + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _nome_etapa(negocio):
+    """Nome da etapa vindo junto do negocio na consulta."""
+    etapa = negocio.get("pipeline_stages") or {}
+    if isinstance(etapa, list):
+        etapa = etapa[0] if etapa else {}
+    return etapa.get("name") or "outra etapa"
+
+
+def _etapa_de(negocio):
+    return normalizar(_nome_etapa(negocio))
+
+
 # ── Conversa com o CRM ────────────────────────────────────────────────────────
 
 class CRM:
@@ -269,56 +292,79 @@ class CRM:
 
     # -- achar o cliente --
 
-    def negocios_a_fazer(self):
-        etapa_id = self.etapa(ETAPA_ORIGEM)
+    def negocios_abertos(self):
+        """Todos os negocios abertos, com o nome da etapa em que estao.
+
+        Busca todo mundo de uma vez (e nao so a coluna 'Orcamentos a Fazer')
+        porque o cliente certo pode ja ter passado de etapa: procurar so na
+        coluna faria uma pasta "Samuel Neotti" cair no card "Samuel".
+        """
         return self._tabela(
             "deals",
             "select=id,title,value,orcamento_detalhes,stage_id,contact_id,"
-            "contacts(first_name,last_name)"
-            f"&org_id=eq.{self.org_id}&stage_id=eq.{etapa_id}&status=eq.open",
+            "pipeline_stages(name),contacts(first_name,last_name)"
+            f"&org_id=eq.{self.org_id}&status=eq.open",
         )
 
-    def encontrar_negocio(self, cliente):
-        """Acha o card do cliente em 'Orcamentos a Fazer'.
+    def negocios_a_fazer(self):
+        return [n for n in self.negocios_abertos() if _etapa_de(n) == ETAPA_ORIGEM_NORM]
 
-        Levanta ClienteNaoEncontrado quando nao acha ninguem parecido, ou
-        quando dois cards empatam -- nesse caso e mais seguro avisar do que
-        lancar no cliente errado.
-        """
-        candidatos = self.negocios_a_fazer()
-        if not candidatos:
-            raise ClienteNaoEncontrado("Nao ha nenhum negocio em 'Orcamentos a Fazer'.")
+    @staticmethod
+    def _nomes_do_negocio(negocio):
+        nomes = [negocio.get("title") or ""]
+        contato = negocio.get("contacts") or {}
+        if isinstance(contato, list):
+            contato = contato[0] if contato else {}
+        nome_contato = " ".join(
+            p for p in [contato.get("first_name"), contato.get("last_name")] if p
+        )
+        if nome_contato:
+            nomes.append(nome_contato)
+        return [n for n in nomes if n]
 
-        notas = []
-        for negocio in candidatos:
-            nomes = [negocio.get("title") or ""]
-            contato = negocio.get("contacts") or {}
-            if isinstance(contato, list):
-                contato = contato[0] if contato else {}
-            nome_contato = " ".join(
-                p for p in [contato.get("first_name"), contato.get("last_name")] if p
-            )
-            if nome_contato:
-                nomes.append(nome_contato)
-            notas.append((max(_semelhanca(cliente, n) for n in nomes), negocio))
-
+    def _ranquear(self, cliente, candidatos):
+        notas = [
+            (max(_semelhanca(cliente, n) for n in self._nomes_do_negocio(neg)), neg)
+            for neg in candidatos if self._nomes_do_negocio(neg)
+        ]
         notas.sort(key=lambda x: x[0], reverse=True)
+        return notas
+
+    @staticmethod
+    def _escolher(notas):
+        """Retorna (negocio, duvida). negocio None se nao deu pra decidir."""
+        if not notas:
+            return None, None
         melhor, negocio = notas[0]
-
         if melhor < LIMITE_SEMELHANCA:
-            achados = ", ".join(f"'{n['title']}'" for _, n in notas[:3])
-            raise ClienteNaoEncontrado(
-                f"Nenhum cliente parecido com '{cliente}' em 'Orcamentos a Fazer'. "
-                f"Os mais proximos: {achados}."
-            )
-
+            return None, None
         if len(notas) > 1 and melhor - notas[1][0] < MARGEM_DESEMPATE:
-            raise ClienteNaoEncontrado(
-                f"'{cliente}' ficou parecido com mais de um card "
-                f"('{negocio['title']}' e '{notas[1][1]['title']}'). "
-                f"Renomeie a pasta com o nome completo do cliente."
-            )
+            return None, (negocio, notas[1][1])
+        return negocio, None
 
+    def encontrar_negocio(self, cliente):
+        """Acha o card do cliente e so devolve se ele estiver na fila.
+
+        Procura entre todos os negocios abertos e fica com o mais parecido.
+        Se o vencedor ja passou de 'Orcamentos a Fazer', a proposta e uma
+        alteracao pedida depois -- nao lanca nada (AlteracaoIgnorada).
+        """
+        negocio, duvida = self._escolher(self._ranquear(cliente, self.negocios_abertos()))
+
+        if duvida:
+            raise ClienteNaoEncontrado(
+                f"'{cliente}' ficou parecido com dois cards "
+                f"('{duvida[0]['title']}' e '{duvida[1]['title']}'). "
+                f"Confira o nome da pasta."
+            )
+        if not negocio:
+            raise ClienteNaoEncontrado(f"nenhum cliente parecido com '{cliente}' no CRM.")
+
+        etapa = _etapa_de(negocio)
+        if etapa != ETAPA_ORIGEM_NORM:
+            raise AlteracaoIgnorada(
+                f"'{negocio['title']}' ja esta em '{_nome_etapa(negocio)}'"
+            )
         return negocio
 
     # -- lancar o orcamento --
@@ -505,6 +551,9 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print):
                 f"'{ETAPA_ORIGEM}' — ainda falta: {', '.join(faltando)}")
         return True
 
+    except AlteracaoIgnorada as e:
+        log(f"[{cliente}] CRM: {e} — alteracao nao lancada (so o primeiro "
+            f"orcamento e automatico).")
     except ClienteNaoEncontrado as e:
         log(f"[{cliente}] CRM: nao lancei nada — {e}")
     except CRMErro as e:
