@@ -592,6 +592,41 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print):
 
 # ── Uso pela linha de comando ─────────────────────────────────────────────────
 
+def _ler_senha(rotulo):
+    """Le a senha mostrando * a cada tecla.
+
+    O getpass normal do Python nao mostra absolutamente nada enquanto se
+    digita, e quem nao conhece acha que o teclado travou.
+    """
+    print(rotulo, end="", flush=True)
+
+    if os.name == "nt":
+        import msvcrt
+        senha = ""
+        while True:
+            tecla = msvcrt.getwch()
+            if tecla in ("\r", "\n"):
+                print()
+                return senha
+            if tecla == "\x03":            # Ctrl+C
+                raise KeyboardInterrupt
+            if tecla == "\b":
+                if senha:
+                    senha = senha[:-1]
+                    print("\b \b", end="", flush=True)
+            elif tecla in ("\x00", "\xe0"):  # setas, F1..F12: ignora
+                msvcrt.getwch()
+            else:
+                senha += tecla
+                print("*", end="", flush=True)
+
+    try:
+        from getpass import getpass
+        return getpass("")
+    except Exception:
+        return input()
+
+
 def configurar():
     print("=" * 55)
     print("   EGEMAP - Conectar o monitor ao CRM")
@@ -601,29 +636,36 @@ def configurar():
     print("A senha fica protegida pelo Windows, so nesta maquina.")
     print()
 
-    email = input("Email do CRM: ").strip()
-    try:
-        from getpass import getpass
-        senha = getpass("Senha do CRM: ")
-    except Exception:
-        senha = input("Senha do CRM: ")
+    # Erro de digitacao no email ou na senha e comum: deixa tentar de novo
+    # em vez de fechar e obrigar a abrir o programa outra vez.
+    for tentativa in range(1, 4):
+        email = input("Email do CRM: ").strip()
+        senha = _ler_senha("Senha do CRM (aparece como ***): ")
 
-    if not email or not senha:
-        print("\nERRO: email e senha sao obrigatorios.")
-        return 1
+        if not email or not senha:
+            print("\nPreencha os dois campos.\n")
+            continue
 
-    print("\nTestando o login...")
-    try:
-        crm = CRM(email, senha).entrar()
-        quantos = len(crm.negocios_a_fazer())
-    except CRMErro as e:
-        print(f"\nERRO: {e}")
-        return 1
+        print(f"\nTestando o login de {email}...")
+        try:
+            crm = CRM(email, senha).entrar()
+            quantos = len(crm.negocios_a_fazer())
+        except CRMErro as e:
+            print(f"\nNao deu certo: {e}")
+            if tentativa < 3:
+                print("\nConfira se o email esta escrito exatamente igual ao do")
+                print("CRM e se a senha e a mesma do site. Vamos de novo:\n")
+                continue
+            print("\nDeixa pra la por enquanto -- o monitor funciona sem o CRM.")
+            print("Da pra tentar quando quiser, e so abrir o programa de novo.")
+            return 1
 
-    salvar_config(email, senha)
-    print(f"\nConectado! Encontrei {quantos} negocio(s) em '{ETAPA_ORIGEM}'.")
-    print("A partir de agora, toda proposta pronta vai sozinha para o CRM.")
-    return 0
+        salvar_config(email, senha)
+        print(f"\nConectado! Encontrei {quantos} negocio(s) em '{ETAPA_ORIGEM}'.")
+        print("A partir de agora, toda proposta pronta vai sozinha para o CRM.")
+        return 0
+
+    return 1
 
 
 def testar(nome=None):
