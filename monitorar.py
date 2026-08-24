@@ -854,18 +854,28 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
 
 # ── Google Drive ─────────────────────────────────────────────────────────────
 
-def _destino_drive(pdf_path, pasta_raiz):
-    """Caminho dentro da pasta da Egemap no Drive, espelhando a pasta local
-    onde a proposta foi salva (a mesma estrutura que voce ja usa)."""
-    try:
-        rel = Path(pdf_path).parent.resolve().relative_to(Path(pasta_raiz).resolve())
-        rel_str = rel.as_posix()
-        return "" if rel_str == "." else rel_str
-    except ValueError:
-        return Path(pdf_path).parent.name
+def _nome_canonico_cliente(nome):
+    """Normaliza maiusculas/minusculas do nome do cliente ("Felipe dos
+    Santos Coelho" e "Felipe Dos Santos Coelho" viram o mesmo nome).
+
+    Cada vendedor digita/organiza a pasta do jeito que da na maquina dele --
+    sem isso, a mesma pessoa virava duas pastas diferentes no Drive.
+    """
+    return " ".join(p.capitalize() for p in nome.split()) or "Cliente"
 
 
-def _lancar_no_drive(pdf_path, capa_pdf, pasta_raiz):
+def _destino_drive(pdf_path):
+    """Pasta do cliente na raiz do Drive -- sempre a MESMA pasta, com o
+    mesmo nome, nao importa em qual computador ou em que estrutura de
+    pastas a proposta foi montada. Antes isso espelhava o caminho local
+    inteiro, e como cada vendedor organiza a pasta de orcamentos de um
+    jeito diferente (nomes diferentes, mais ou menos niveis de pasta), a
+    mesma proposta acabava indo para varias pastas diferentes no Drive.
+    """
+    return _nome_canonico_cliente(suggest_client_name(Path(pdf_path).parent))
+
+
+def _lancar_no_drive(pdf_path, capa_pdf):
     """Manda a proposta pronta para o Drive, sem travar o monitor.
 
     Mesmas regras de seguranca do CRM: nunca um orcamento cru, e uma peca
@@ -891,7 +901,7 @@ def _lancar_no_drive(pdf_path, capa_pdf, pasta_raiz):
 
     _JA_ENVIADO_DRIVE[chave] = assinatura
     client = suggest_client_name(Path(pdf_path).parent)
-    destino = _destino_drive(pdf_path, pasta_raiz)
+    destino = _destino_drive(pdf_path)
     materiais = materiais_do_nome_do_arquivo(pdf_path)
 
     threading.Thread(
@@ -1113,7 +1123,7 @@ class PropostaHandler(FileSystemEventHandler):
             _, pdf_path = self._pending_drive.pop(key)
             try:
                 if Path(pdf_path).exists():
-                    _lancar_no_drive(pdf_path, self.capa_pdf, self.pasta_raiz)
+                    _lancar_no_drive(pdf_path, self.capa_pdf)
             except Exception as e:
                 log(f"ERRO ao enviar {Path(pdf_path).name} ao Drive: {e}")
 
