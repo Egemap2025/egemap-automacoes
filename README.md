@@ -16,6 +16,8 @@ Salva PVC (Sintegra) e/ou ALM/MAD (W-Vetro) na pasta do cliente
         Proposta Comercial [cliente] [DD-MM].pdf pronta
                        ↓
    Lança sozinho no CRM: valor + PDF anexado + card em "Orçamento Pronto"
+                       ↓
+        Sobe sozinho para o Google Drive (mesma pasta do cliente)
 ```
 
 ## Lançamento automático no CRM
@@ -91,6 +93,40 @@ negócio nunca dobra. PVC e Alumínio pedidos separados continuam sendo duas lin
 
 Nesses casos é só lançar na mão, como antes.
 
+## Envio automático para o Google Drive
+
+Assim que a proposta fica pronta, o monitor sobe o PDF sozinho para o Google
+Drive, na mesma estrutura de pastas que você já usa no computador (cidade,
+cliente, etc. — o que tiver dentro da pasta raiz de orçamentos vira a mesma
+pasta lá no Drive).
+
+- Vai só a proposta pronta (com Capa e Página Final) — orçamento cru fica de
+  fora, mesma regra do CRM.
+- Uma peça isolada esperando o `COMPLETO` (arquivo `MAD ALM`) não sobe
+  sozinha — sobe é a proposta final, quando ela ficar pronta.
+- Proposta refeita no mesmo dia substitui a anterior no Drive (PVC substitui
+  só PVC, Alumínio/Madeira substitui só Alumínio/Madeira, a proposta final
+  substitui só outra final) — não acumula versão velha.
+
+**Se você já usava o agente separado do Drive:** pode continuar — ele fica
+conectado sozinho, sem pedir login de novo (usa a mesma pasta de configuração
+de antes). O monitor também desliga a tarefa agendada do agente antigo na
+primeira vez que abre, para não subir cada proposta duas vezes.
+
+### Conectar ao Drive
+
+Se ainda não tiver conectado, o monitor pergunta na abertura, do mesmo jeito
+que pergunta do CRM: digite `1` e ENTER, e vai abrir o navegador para você
+fazer login no Google e clicar em "Permitir" — só precisa uma vez. Se
+ninguém responder em 20 segundos, ele segue monitorando normalmente.
+
+Para conectar (ou reconectar) sem esperar a pergunta na abertura:
+
+```bash
+python drive.py            # abre o navegador para conectar/reconectar
+python drive.py testar     # mostra se ja esta conectado
+```
+
 ### Conectar ao CRM
 
 Abra o `EGEMAP-Monitor.exe`. Enquanto o CRM não estiver conectado, ele pergunta
@@ -115,6 +151,7 @@ python crm.py testar "Lara Castilho"  # mostra com qual card esse nome casaria
    - Caminho do PDF de Capa (3 páginas: Capa / Resumo / Contra Capa)
    - Caminho da pasta raiz de orçamentos
    - Se quer conectar o CRM (digite `1` e ENTER)
+   - Se quer conectar o Google Drive (digite `1` e ENTER)
 3. A partir daí ele salva tudo e abre sozinho com o Windows.
 
 ## Desenvolvimento local
@@ -129,6 +166,7 @@ python monitorar.py
 ```
 monitorar.py              # Monitor principal (watchdog + PyMuPDF)
 crm.py                    # Lançamento automático no CRM (só biblioteca padrão)
+drive.py                  # Envio automático para o Google Drive (só biblioteca padrão)
 montar_orcamento.py       # Utilitário de montagem/testes
 .github/workflows/build-exe.yml  # Build automático do .exe (PyInstaller)
 ```

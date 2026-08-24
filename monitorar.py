@@ -34,6 +34,12 @@ try:
 except Exception:
     crm_egemap = None
 
+# Integracao com o Google Drive (opcional -- o monitor funciona sem ela)
+try:
+    import drive as drive_egemap
+except Exception:
+    drive_egemap = None
+
 # ── Config salva em arquivo texto simples ─────────────────────────────────────
 
 CONFIG_FILE = Path.home() / ".egemap_monitor_config.txt"
@@ -612,6 +618,9 @@ WAIT_SECONDS = 8  # espera 8s apos o ultimo evento para garantir que o PDF foi s
 # Espera maior antes de mandar a proposta ao CRM: da tempo de voce renomear o
 # arquivo pronto antes, e o nome do arquivo e que vira o nome da linha no CRM.
 CRM_WAIT_SECONDS = 10
+# Mesma espera antes de mandar a proposta para o Drive -- da tempo de voce
+# renomear o arquivo antes, e o nome vira o nome do arquivo la tambem.
+DRIVE_WAIT_SECONDS = 10
 
 def log(msg):
     hora = time.strftime("%H:%M:%S")
@@ -779,6 +788,8 @@ def materiais_da_proposta(pdf_path):
 
 # Proposta ja mandada ao CRM: caminho -> (mtime, tamanho)
 _JA_ENVIADO = {}
+# Proposta ja mandada ao Drive: caminho -> (mtime, tamanho)
+_JA_ENVIADO_DRIVE = {}
 
 
 def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
@@ -837,6 +848,56 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
                 "nome_linha": nome_da_linha(pdf_path, materiais),
                 "nome_antigo": nome_antigo,
                 "parcial": e_peca_de_completo(pdf_path)},
+        daemon=True,
+    ).start()
+
+
+# ── Google Drive ─────────────────────────────────────────────────────────────
+
+def _destino_drive(pdf_path, pasta_raiz):
+    """Caminho dentro da pasta da Egemap no Drive, espelhando a pasta local
+    onde a proposta foi salva (a mesma estrutura que voce ja usa)."""
+    try:
+        rel = Path(pdf_path).parent.resolve().relative_to(Path(pasta_raiz).resolve())
+        rel_str = rel.as_posix()
+        return "" if rel_str == "." else rel_str
+    except ValueError:
+        return Path(pdf_path).parent.name
+
+
+def _lancar_no_drive(pdf_path, capa_pdf, pasta_raiz):
+    """Manda a proposta pronta para o Drive, sem travar o monitor.
+
+    Mesmas regras de seguranca do CRM: nunca um orcamento cru, e uma peca
+    isolada esperando o COMPLETO (ex.: "MAD ALM") nao sobe sozinha -- sobe
+    a proposta final, quando ela ficar pronta.
+    """
+    if drive_egemap is None or not drive_egemap.configurado():
+        return
+    if e_peca_de_completo(pdf_path):
+        return
+
+    try:
+        st = Path(pdf_path).stat()
+        assinatura = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return
+    chave = _norm(pdf_path)
+    if _JA_ENVIADO_DRIVE.get(chave) == assinatura:
+        return
+
+    if not proposta_tem_capa(pdf_path, capa_pdf):
+        return  # mesma regra do CRM: so proposta pronta, nunca orcamento cru
+
+    _JA_ENVIADO_DRIVE[chave] = assinatura
+    client = suggest_client_name(Path(pdf_path).parent)
+    destino = _destino_drive(pdf_path, pasta_raiz)
+    materiais = materiais_do_nome_do_arquivo(pdf_path)
+
+    threading.Thread(
+        target=drive_egemap.enviar,
+        args=(pdf_path, destino, materiais),
+        kwargs={"client": client, "log": log},
         daemon=True,
     ).start()
 
@@ -937,11 +998,13 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path,
 
 
 class PropostaHandler(FileSystemEventHandler):
-    def __init__(self, capa_pdf):
+    def __init__(self, capa_pdf, pasta_raiz=""):
         self.capa_pdf = capa_pdf
+        self.pasta_raiz = pasta_raiz
         self._pending_single   = {}  # pdf_norm   -> (timestamp, caminho)
         self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
         self._pending_crm      = {}  # pdf_norm   -> (timestamp, caminho, nome_antigo)
+        self._pending_drive    = {}  # pdf_norm   -> (timestamp, caminho)
 
     def _fila_crm(self, path, origem_antiga=None):
         """Proposta pronta na pasta -- vai para o CRM.
@@ -957,12 +1020,16 @@ class PropostaHandler(FileSystemEventHandler):
             origem_antiga = anterior[2]
         self._pending_crm[chave] = (time.time(), str(path), origem_antiga)
 
+    def _fila_drive(self, path):
+        self._pending_drive[_norm(path)] = (time.time(), str(path))
+
     def _queue(self, path):
         p = Path(path)
         if p.suffix.lower() != ".pdf":
             return
         if _is_proposta_gerada(str(p)):
-            self._fila_crm(str(p))  # nao remonta, mas mantem o CRM em dia
+            self._fila_crm(str(p))    # nao remonta, mas mantem o CRM em dia
+            self._fila_drive(str(p))  # e o Drive tambem
             return
 
         stem_upper = p.stem.upper()
@@ -1000,6 +1067,7 @@ class PropostaHandler(FileSystemEventHandler):
                 and _norm(origem.parent) == _norm(destino.parent)
                 and origem.name != destino.name):
             self._fila_crm(str(destino), origem_antiga=str(origem))
+            self._fila_drive(str(destino))
             return
 
         self._queue(event.dest_path)
@@ -1038,6 +1106,16 @@ class PropostaHandler(FileSystemEventHandler):
                     _lancar_no_crm(pdf_path, self.capa_pdf, origem_antiga)
             except Exception as e:
                 log(f"ERRO ao enviar {Path(pdf_path).name} ao CRM: {e}")
+
+        # Propostas prontas na pasta: vao para o Drive (mesma espera do CRM)
+        prontos = [k for k, (t, _) in list(self._pending_drive.items()) if now - t >= DRIVE_WAIT_SECONDS]
+        for key in prontos:
+            _, pdf_path = self._pending_drive.pop(key)
+            try:
+                if Path(pdf_path).exists():
+                    _lancar_no_drive(pdf_path, self.capa_pdf, self.pasta_raiz)
+            except Exception as e:
+                log(f"ERRO ao enviar {Path(pdf_path).name} ao Drive: {e}")
 
         # COMPLETO: junta tudo (8s de espera)
         prontos = [k for k, (t, _, __) in list(self._pending_completo.items()) if now - t >= WAIT_SECONDS]
@@ -1277,6 +1355,40 @@ def oferecer_conexao_crm():
     input("  Pressione ENTER para comecar a monitorar.")
 
 
+def oferecer_conexao_drive():
+    """Pergunta uma vez, na abertura, se quer conectar o Google Drive.
+
+    Se voce ja usava o agente separado do Drive, ele fica conectado
+    sozinho (mesma pasta de configuracao) e esta pergunta nem aparece.
+    """
+    if drive_egemap is None or drive_egemap.configurado():
+        return
+
+    print()
+    print("  " + "-" * 51)
+    print("  O Google Drive ainda nao esta conectado.")
+    print()
+    print("  Conectando, cada proposta pronta sobe sozinha para o")
+    print("  Drive, na mesma estrutura de pastas do computador.")
+    print("  " + "-" * 51)
+    print()
+
+    resposta = _perguntar_com_tempo(
+        "  Digite 1 e ENTER para conectar agora (ou aguarde para pular): ", 20
+    )
+    if resposta != "1":
+        print("\n  Pulado. Da pra conectar depois: e so abrir este programa de novo.")
+        return
+
+    print()
+    try:
+        drive_egemap.configurar()
+    except Exception as e:
+        print(f"\n  Nao consegui conectar: {e}")
+    print()
+    input("  Pressione ENTER para comecar a monitorar.")
+
+
 def main():
     # "EGEMAP-Monitor.exe --crm" abre so a conexao com o CRM (CONECTAR_CRM.bat)
     if "--crm" in sys.argv[1:]:
@@ -1287,6 +1399,16 @@ def main():
         codigo = crm_egemap.configurar()
         input("\nPressione ENTER para fechar.")
         sys.exit(codigo)
+
+    # "EGEMAP-Monitor.exe --drive" abre so a conexao com o Google Drive
+    if "--drive" in sys.argv[1:]:
+        if drive_egemap is None:
+            print("Integracao com o Drive indisponivel nesta versao.")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        ok = drive_egemap.configurar()
+        input("\nPressione ENTER para fechar.")
+        sys.exit(0 if ok else 1)
 
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 55)
@@ -1334,6 +1456,16 @@ def main():
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
 
     oferecer_conexao_crm()
+    oferecer_conexao_drive()
+
+    if drive_egemap is not None:
+        # Se o agente separado do Drive ainda estiver instalado, desliga a
+        # tarefa antiga dele -- agora e este programa que cuida disso, e os
+        # dois rodando juntos duplicaria os envios.
+        try:
+            drive_egemap.desativar_agente_antigo(log=log)
+        except Exception:
+            pass
 
     print()
     print("=" * 55)
@@ -1342,6 +1474,8 @@ def main():
     if crm_egemap is not None:
         email_crm = crm_egemap.carregar_config()[0]
         print(f"  CRM: {email_crm}" if email_crm else "  CRM: nao conectado")
+    if drive_egemap is not None:
+        print("  Drive: conectado" if drive_egemap.configurado() else "  Drive: nao conectado")
     print()
     print("  Salve qualquer PDF com COMPLETO no nome para")
     print("  disparar a montagem automatica da proposta.")
@@ -1350,7 +1484,7 @@ def main():
     print("=" * 55)
     print()
 
-    handler  = PropostaHandler(capa_pdf)
+    handler  = PropostaHandler(capa_pdf, pasta_raiz)
     observer = Observer()
     observer.schedule(handler, str(pasta_raiz), recursive=True)
     observer.start()
