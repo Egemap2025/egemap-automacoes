@@ -25,14 +25,27 @@ exatamente o que era feito na mão:
 
 1. Acha o cliente pelo nome da pasta e confere se ele está na coluna **Orçamentos a Fazer**
 2. Lança o orçamento com o valor e anexa o PDF da proposta
-3. Atualiza o valor do negócio (soma dos orçamentos)
+3. Atualiza o valor do negócio (a **maior** das opções)
 4. Marca o orçamento como feito
 5. Move o card para **Orçamento Pronto**
 
-**O PDF mais novo sempre fica no orçamento, em qualquer etapa do funil.** É
-assim que o vendedor pega a proposta atual sozinho, sem precisar te pedir. Cada
-opção (PVC, Alumínio, Madeira) tem a sua linha, e cada uma guarda o seu último
-PDF — mandar um PVC novo não mexe na linha do Alumínio.
+**O nome do arquivo vira o nome da linha no CRM.** `Proposta Comercial Fulano
+24-08 BRANCO.pdf` vira a linha **Branco**. Então o fluxo é:
+
+1. O monitor monta a proposta com Capa e Página Final
+2. Você renomeia o arquivo pronto como quiser (`BRANCO`, `CINZA`, ...)
+3. Esse nome vira o nome da linha, e o card recebe o PDF
+
+Duas opções do mesmo material (BRANCO e CINZA) viram **duas linhas** e
+convivem. Renomear de novo **renomeia a linha**, não cria outra. Refazer a
+proposta troca o PDF da mesma linha.
+
+**Só proposta completa vai para o CRM.** Antes de enviar, o monitor confere se
+o PDF tem mesmo Capa e Página Final comparando com a Capa configurada —
+orçamento cru do Sintegra ou do W-Vetro é barrado e fica registrado no log.
+
+**O valor do negócio é o maior das opções, não a soma.** Quando o cliente
+recebe duas opções ele fecha uma só; somar inflaria a previsão de vendas.
 
 **Freios nas etapas mais adiantadas.** Trocar o PDF é sempre seguro; mexer no
 resto nem sempre:
@@ -40,7 +53,7 @@ resto nem sempre:
 | O que o monitor faz | Onde acontece |
 |---|---|
 | Troca o PDF e o valor da linha do orçamento | Em qualquer etapa |
-| Atualiza o **valor do negócio** | Até *Orçamento Pronto*. De *Orçamento Apresentado* em diante o número é do vendedor (pode ter negociado desconto) e não é tocado |
+| Atualiza o **valor do negócio** (o maior das opções) | Até *Orçamento Pronto*. De *Orçamento Apresentado* em diante o número é do vendedor (pode ter negociado desconto) e não é tocado |
 | Marca o orçamento como **feito** | Só nas filas de trabalho: *Orçamentos a Fazer* e *Atualizações* |
 | **Move o card** para *Orçamento Pronto* | Saindo das filas: *Orçamentos a Fazer* e *Atualizações* |
 
@@ -67,7 +80,8 @@ negócio nunca dobra. PVC e Alumínio pedidos separados continuam sendo duas lin
 - o cliente já passou de *Orçamentos a Fazer* (é alteração, não primeiro orçamento)
 - nenhum cliente parecido no CRM
 - o nome da pasta ficou parecido com dois cards ao mesmo tempo
-- não deu para ler o valor do PDF
+- o PDF não tem Capa e Página Final (orçamento cru)
+- não deu para ler o valor na Página Final
 - internet fora ou CRM inacessível
 
 Nesses casos é só lançar na mão, como antes.

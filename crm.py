@@ -7,14 +7,17 @@ que voce fazia na mao:
 
   1. Acha o cliente pelo nome da pasta
   2. Lanca o orcamento (nome + valor) e anexa o PDF da proposta
-  3. Atualiza o valor do negocio (soma dos orcamentos)
+  3. Atualiza o valor do negocio (a maior das opcoes)
   4. Marca o orcamento como feito
   5. Arrasta o cliente para "Orcamento Pronto"
 
 O PDF mais novo sempre fica no orcamento, em qualquer etapa do funil -- e
-assim que o vendedor pega a proposta atual sozinho, sem precisar pedir. Cada
-opcao (PVC, Aluminio, Madeira) tem a sua linha, e cada uma guarda o seu
-ultimo PDF.
+assim que o vendedor pega a proposta atual sozinho, sem precisar pedir.
+
+Quem da nome a linha e o nome do arquivo: "Proposta Comercial Fulano 24-08
+BRANCO.pdf" vira a linha "Branco". Entao duas opcoes do mesmo material
+(BRANCO e CINZA) sao duas linhas e convivem, e renomear a proposta renomeia
+a linha em vez de criar outra.
 
 Os passos 3, 4 e 5 tem freio:
 
@@ -395,31 +398,42 @@ class CRM:
         except CRMErro:
             pass  # arquivo orfao no storage nao quebra nada
 
-    def enviar_orcamento(self, negocio, pdf_path, materiais, valor):
-        """Sobe o PDF e cria a linha de orcamento do negocio.
+    def enviar_orcamento(self, negocio, pdf_path, nome_orcamento, materiais,
+                         valor, nome_antigo=None):
+        """Sobe o PDF e cria (ou atualiza) a linha de orcamento do negocio.
 
-        A proposta nova substitui as linhas que ela ja contem, em vez de somar
-        em cima. Isso cobre os dois casos que fariam o valor do negocio ficar
-        errado: o COMPLETO, que junta PVC + Aluminio e toma o lugar dos dois
-        arquivos individuais, e o orcamento refeito dias depois porque o
-        cliente mudou o projeto.
+        Quem identifica a linha e o NOME, que vem do nome do arquivo. Assim
+        duas opcoes do mesmo material -- "Pvc Branco" e "Pvc Cinza" -- viram
+        duas linhas e convivem, e renomear a proposta renomeia a linha em vez
+        de criar outra.
 
-        PVC e Aluminio pedidos separadamente continuam sendo duas linhas --
-        um nao contem o outro.
+        A linha e substituida quando:
+          - tem o mesmo nome (proposta refeita, ou reenviada);
+          - tem o nome antigo, no caso de um rename;
+          - a proposta nova contem tudo o que ela tinha e mais alguma coisa --
+            e o COMPLETO, que junta PVC + Aluminio e toma o lugar dos dois
+            arquivos individuais que sairam antes.
+
+        O terceiro caso exige conter ESTRITAMENTE mais: duas opcoes de PVC
+        cobrem o mesmo material e por isso nao se atropelam.
         """
         negocio_id = negocio["id"]
-        nome_orcamento = nome_do_orcamento(materiais)
 
         existentes = self._tabela(
             "deal_budgets",
-            f"select=id,name,value,file_url,created_at&deal_id=eq.{negocio_id}",
+            f"select=id,name,value,file_url,file_name,created_at&deal_id=eq.{negocio_id}",
         )
 
-        substituir = [
-            b for b in existentes
-            if materiais_do_nome(b.get("name"))
-            and materiais_do_nome(b.get("name")) <= materiais
-        ]
+        def substitui(linha):
+            nome = linha.get("name") or ""
+            if normalizar(nome) == normalizar(nome_orcamento):
+                return True
+            if nome_antigo and normalizar(nome) == normalizar(nome_antigo):
+                return True
+            do_linha = materiais_do_nome(linha.get("file_name") or nome)
+            return bool(do_linha) and do_linha < materiais
+
+        substituir = [b for b in existentes if substitui(b)]
 
         caminho = self._subir_pdf(negocio_id, pdf_path)
         registro = {
@@ -441,15 +455,21 @@ class CRM:
         else:
             self._tabela("deal_budgets", "", "POST", {**registro, "deal_id": negocio_id})
 
-        return nome_orcamento, len(substituir)
+        return len(substituir)
 
     def atualizar_valor(self, negocio_id):
-        """Valor do negocio = soma dos orcamentos lancados (igual ao que voce
-        digitava na mao)."""
+        """Valor do negocio = o MAIOR dos orcamentos lancados.
+
+        Quando o cliente recebe duas opcoes (ex.: PVC branco e PVC cinza), ele
+        vai fechar uma so -- somar as duas inflaria a previsao de vendas. O
+        maior mostra o teto do negocio, que e como isso vinha sendo preenchido
+        na mao.
+        """
         linhas = self._tabela("deal_budgets", f"select=value&deal_id=eq.{negocio_id}")
-        total = sum(float(b["value"]) for b in linhas if b.get("value") is not None)
-        self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {"value": total})
-        return total
+        valores = [float(b["value"]) for b in linhas if b.get("value") is not None]
+        maior = max(valores, default=0.0)
+        self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {"value": maior})
+        return maior
 
     def marcar_feito(self, negocio, materiais):
         """Marca como feitos os orcamentos que esta proposta cobre.
@@ -519,7 +539,14 @@ NOMES_ORCAMENTO = {
 }
 
 
-MATERIAIS_CONHECIDOS = ("pvc", "aluminio", "madeira")
+# Como cada material pode aparecer escrito: por extenso no nome da linha
+# ("Pvc + Aluminio") ou no codigo curto que a montagem usa no nome do arquivo
+# ("Proposta Comercial X 24-08 MAD ALM.pdf").
+CODIGOS_MATERIAL = {
+    "pvc": "pvc",
+    "aluminio": "aluminio", "alm": "aluminio",
+    "madeira": "madeira", "mad": "madeira",
+}
 
 
 def nome_do_orcamento(materiais):
@@ -527,24 +554,32 @@ def nome_do_orcamento(materiais):
 
 
 def materiais_do_nome(nome):
-    """Le de volta os materiais a partir do nome da linha no CRM
-    ('Pvc + Aluminio' -> {'pvc', 'aluminio'})."""
-    texto = normalizar(nome)
-    return {m for m in MATERIAIS_CONHECIDOS if m in texto}
+    """Le de volta os materiais a partir do nome da linha ou do arquivo.
+
+    'Pvc + Aluminio' e 'Proposta Comercial X 24-08 MAD ALM.pdf' dao o mesmo
+    resultado. Compara palavra inteira, senao um cliente chamado "Madalena"
+    viraria madeira.
+    """
+    palavras = set(normalizar(nome).split())
+    return {CODIGOS_MATERIAL[p] for p in palavras if p in CODIGOS_MATERIAL}
 
 
-def lancar_proposta(pdf_path, cliente, valor, materiais, log=print):
+def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
+                    nome_linha=None, nome_antigo=None):
     """Faz o fluxo inteiro no CRM. Nunca levanta excecao: registra no log.
 
-    pdf_path  -- proposta comercial ja pronta
-    cliente   -- nome da pasta do cliente
-    valor     -- total da proposta (float)
-    materiais -- conjunto tipo {"pvc"}, {"aluminio"}, {"pvc","aluminio"}
+    pdf_path    -- proposta comercial ja pronta (com Capa e Pagina Final)
+    cliente     -- nome da pasta do cliente
+    valor       -- total lido na Pagina Final (float)
+    materiais   -- conjunto tipo {"pvc"}, {"aluminio"}, {"pvc","aluminio"}
+    nome_linha  -- como a linha aparece no CRM; vem do nome do arquivo
+    nome_antigo -- nome anterior, quando a proposta acabou de ser renomeada
     """
     if not configurado():
         return False
 
     materiais = {normalizar(m) for m in materiais if m}
+    nome_linha = nome_linha or nome_do_orcamento(materiais)
 
     try:
         crm = CRM().entrar()
@@ -556,14 +591,18 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print):
 
         # 1. O PDF mais novo sempre fica no orcamento, em qualquer etapa --
         #    e assim que o vendedor pega a proposta atual sozinho.
-        nome_orcamento, substituidos = crm.enviar_orcamento(negocio, pdf_path, materiais, valor)
+        substituidos = crm.enviar_orcamento(negocio, pdf_path, nome_linha,
+                                            materiais, valor, nome_antigo)
         acao = "Atualizado" if substituidos else "Lancado"
-        log(f"[{cliente}] CRM: {acao} '{nome_orcamento}' em '{titulo}' "
+        log(f"[{cliente}] CRM: {acao} '{nome_linha}' em '{titulo}' "
             f"({_nome_etapa(negocio)}) — {_reais(valor)}")
 
         # 2. Valor do negocio: so enquanto ele ainda e do orcamento.
         if etapa in ETAPAS_VALOR_DO_ORCAMENTO:
             total = crm.atualizar_valor(negocio["id"])
+            if total > valor:
+                log(f"[{cliente}] CRM: valor do negocio ficou {_reais(total)} "
+                    f"(a maior das opcoes).")
         else:
             total = None
             log(f"[{cliente}] CRM: valor do negocio nao foi mexido — "
