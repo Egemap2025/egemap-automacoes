@@ -967,6 +967,15 @@ class PropostaHandler(FileSystemEventHandler):
 
         stem_upper = p.stem.upper()
 
+        # Ja processamos esse arquivo com sucesso e so estamos esperando o
+        # OneDrive soltar pra apagar (fila em segundo plano). Se ele disparar
+        # outro evento nesse meio tempo (o proprio OneDrive costuma tocar o
+        # arquivo de novo ao terminar de sincronizar), NAO remonta de novo --
+        # senao a mesma proposta e refeita repetidas vezes até o arquivo
+        # finalmente sumir.
+        if _norm(str(p)) in _PENDING_DELETE:
+            return
+
         if "COMPLETO" in stem_upper:
             folder_norm = _norm(p.parent)
             self._pending_completo[folder_norm] = (time.time(), str(p.parent), str(p))
