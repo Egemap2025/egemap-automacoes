@@ -609,6 +609,9 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="",
 # ── Watchdog handler ──────────────────────────────────────────────────────────
 
 WAIT_SECONDS = 8  # espera 8s apos o ultimo evento para garantir que o PDF foi salvo
+# Espera maior antes de mandar a proposta ao CRM: da tempo de voce renomear o
+# arquivo pronto antes, e o nome do arquivo e que vira o nome da linha no CRM.
+CRM_WAIT_SECONDS = 10
 
 def log(msg):
     hora = time.strftime("%H:%M:%S")
@@ -616,14 +619,6 @@ def log(msg):
 
 
 # ── CRM ───────────────────────────────────────────────────────────────────────
-
-# Materiais que cada tipo de orcamento representa no CRM
-MATERIAIS_ALM = {
-    "mad": {"madeira"},
-    "alm": {"aluminio"},
-    "alm_mad": {"aluminio", "madeira"},
-}
-
 
 def _valor(total_str):
     """Converte o total lido do PDF em numero. 0.0 se nao veio nada."""
@@ -633,22 +628,215 @@ def _valor(total_str):
         return 0.0
 
 
-def _lancar_no_crm(output_path, client, total_str, materiais):
-    """Lanca a proposta pronta no CRM sem travar o monitor.
+def _palavras(texto):
+    return set(re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]{4,}", (texto or "").upper()))
+
+
+def proposta_tem_capa(pdf_path, capa_pdf_path):
+    """Confere se o PDF e mesmo uma proposta montada, com Capa e Pagina Final.
+
+    So proposta completa pode ir para o CRM. Compara o texto da primeira e da
+    ultima pagina com o da Capa configurada -- orcamento cru do Sintegra ou do
+    W-Vetro nao tem esse texto e e barrado.
+    """
+    try:
+        proposta = fitz.open(pdf_path)
+        capa = fitz.open(capa_pdf_path)
+    except Exception:
+        return False
+
+    try:
+        if len(proposta) < 4 or len(capa) < 3:
+            return False
+
+        def parecido(pagina, referencia):
+            a, b = _palavras(pagina.get_text()), _palavras(referencia.get_text())
+            if len(b) < 3:
+                # Capa desenhada em imagem, quase sem texto legivel: da pra
+                # comparar so o formato da pagina. Melhor isso do que barrar
+                # todas as propostas por nao conseguir conferir o texto.
+                return (round(pagina.rect.width), round(pagina.rect.height)) == \
+                       (round(referencia.rect.width), round(referencia.rect.height))
+            # Ignora os campos que a montagem preenche (vendedor, cliente,
+            # pedido, valor): compara so o texto fixo da capa.
+            return len(a & b) >= max(3, int(len(b) * 0.5))
+
+        return (parecido(proposta[0], capa[0])
+                and parecido(proposta[len(proposta) - 1], capa[2]))
+    except Exception:
+        return False
+    finally:
+        proposta.close()
+        capa.close()
+
+
+# "Proposta Comercial Maria Teresa Silva 24-08 BRANCO" -> "BRANCO"
+_DATA_NO_NOME = re.compile(r"\b\d{2}-\d{2}\b")
+
+
+CODIGOS_DE_MATERIAL = {"PVC", "ALM", "MAD"}
+
+
+def nome_da_linha(pdf_path, materiais=None):
+    """Nome que a proposta vai ter na lista de orcamentos do CRM.
+
+    Vem do que estiver depois da data no nome do arquivo, entao renomear a
+    proposta renomeia a linha -- e assim que duas opcoes do mesmo material
+    (ex.: BRANCO e CINZA) viram duas linhas separadas.
+
+    Enquanto o nome so tiver os codigos que a montagem usa (PVC/ALM/MAD), ou
+    nem isso, vale o nome bonito do material ("Madeira + Aluminio").
+    """
+    stem = Path(pdf_path).stem
+    m = _DATA_NO_NOME.search(stem)
+    sufixo = stem[m.end():].strip(" -_") if m else ""
+    palavras = sufixo.split()
+
+    so_codigo = not palavras or all(p.upper() in CODIGOS_DE_MATERIAL for p in palavras)
+    if so_codigo and materiais and crm_egemap is not None:
+        return crm_egemap.nome_do_orcamento(materiais)
+
+    if not palavras:
+        return "Orcamento"
+    return " ".join(p.capitalize() for p in palavras)
+
+
+def valor_da_proposta(pdf_path):
+    """Le o total na Pagina Final da proposta ("R$ 162.717,22").
+
+    E o mesmo numero que a montagem escreveu ali, entao vale tanto para uma
+    proposta individual quanto para o COMPLETO (que ja soma PVC + ALM).
+    """
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception:
+        return 0.0
+    try:
+        if not len(doc):
+            return 0.0
+        texto = doc[len(doc) - 1].get_text()
+        valores = re.findall(r"R\$\s*([\d.]+,\d{2}|[\d.]+)", texto)
+        return max((_valor(v) for v in valores), default=0.0)
+    except Exception:
+        return 0.0
+    finally:
+        doc.close()
+
+
+def materiais_do_nome_do_arquivo(pdf_path):
+    """Materiais pelos codigos que a montagem usa no nome (PVC/ALM/MAD).
+
+    Vazio quando o arquivo foi renomeado para algo como "... 24-08 BRANCO".
+    """
+    nome = Path(pdf_path).name.upper()
+    materiais = set()
+    if "PVC" in nome:
+        materiais.add("pvc")
+    if "ALM" in nome:
+        materiais.add("aluminio")
+    if "MAD" in nome:
+        materiais.add("madeira")
+    return materiais
+
+
+def e_peca_de_completo(pdf_path):
+    """Diz se a proposta e so uma peca, esperando ser juntada num COMPLETO.
+
+    O sinal e ter mais de um material no nome. "MAD ALM" sai do W-Vetro para
+    ser juntado com o PVC; ja "ALM", "MAD" ou "PVC" sozinho e obra so daquele
+    material e a proposta esta pronta.
+
+    Peca nao move o card para "Orcamento Pronto" -- o orcamento ainda nao
+    acabou --, mas o PDF vai para o CRM do mesmo jeito.
+    """
+    return len(materiais_do_nome_do_arquivo(pdf_path)) >= 2
+
+
+def materiais_da_proposta(pdf_path):
+    """Quais materiais a proposta cobre.
+
+    So faz diferenca quando o negocio tem mais de um orcamento cadastrado no
+    CRM, pra saber qual deles acabou de sair. Numa proposta renomeada (ex.:
+    "... 24-08 BRANCO") o nome nao diz nada, entao olha o conteudo.
+    """
+    materiais = materiais_do_nome_do_arquivo(pdf_path)
+    if materiais:
+        return materiais
+
+    try:
+        doc = fitz.open(pdf_path)
+        texto = "".join(p.get_text() for p in doc)
+        doc.close()
+    except Exception:
+        return materiais
+
+    if "OAD-" in texto or "TOTAL GERAL (R$)" in texto or "Archicentro" in texto:
+        materiais.add("pvc")
+    if "w.vetro" in texto.lower() or "wvetro" in texto.lower():
+        materiais.add("aluminio")
+    return materiais
+
+
+# Proposta ja mandada ao CRM: caminho -> (mtime, tamanho)
+_JA_ENVIADO = {}
+
+
+def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
+    """Manda a proposta pronta para o CRM, sem travar o monitor.
 
     Roda em segundo plano: se a internet cair ou o CRM demorar, o monitor
     continua montando as proximas propostas normalmente.
+
+    origem_antiga vem preenchido quando a proposta acabou de ser renomeada --
+    ai a linha no CRM e renomeada junto, em vez de virar uma linha nova. O
+    nome antigo e calculado aqui, com os mesmos materiais, senao "MAD ALM"
+    viraria "Mad Alm" na busca e "Madeira + Aluminio" na criacao.
     """
     if crm_egemap is None or not crm_egemap.configurado():
         return
-    valor = _valor(total_str)
-    if valor <= 0:
-        log(f"[{client}] CRM: nao lancei — nao consegui ler o valor da proposta.")
+
+    arquivo = Path(pdf_path).name
+    client = suggest_client_name(Path(pdf_path).parent)
+
+    # O OneDrive mexe nos arquivos ao sincronizar e isso dispara evento sem
+    # nada ter mudado. Se e o mesmo arquivo de antes, nao reenvia.
+    try:
+        st = Path(pdf_path).stat()
+        assinatura = (st.st_mtime_ns, st.st_size)
+    except OSError:
         return
+    chave = _norm(pdf_path)
+    if origem_antiga is None and _JA_ENVIADO.get(chave) == assinatura:
+        return
+
+    # So proposta completa vai para o CRM: nunca um orcamento cru, sem capa.
+    if not proposta_tem_capa(pdf_path, capa_pdf):
+        log(f"[{client}] CRM: {arquivo} nao esta com Capa e Pagina Final — nao enviei.")
+        return
+
+    valor = valor_da_proposta(pdf_path)
+    if valor <= 0:
+        log(f"[{client}] CRM: nao lancei — nao achei o valor na Pagina Final de {arquivo}.")
+        return
+
+    _JA_ENVIADO[chave] = assinatura
+    materiais = materiais_da_proposta(pdf_path)
+
+    # O nome antigo tem que ser calculado como ele foi criado. Os codigos
+    # ficam no nome do arquivo antigo ("MAD ALM"), e nao no conteudo, entao
+    # e de la que eles saem -- senao a busca erraria a linha e duplicaria.
+    nome_antigo = None
+    if origem_antiga:
+        nome_antigo = nome_da_linha(
+            origem_antiga, materiais_do_nome_do_arquivo(origem_antiga) or materiais)
+
     threading.Thread(
         target=crm_egemap.lancar_proposta,
-        args=(output_path, client, valor, materiais),
-        kwargs={"log": log},
+        args=(pdf_path, client, valor, materiais),
+        kwargs={"log": log,
+                "nome_linha": nome_da_linha(pdf_path, materiais),
+                "nome_antigo": nome_antigo,
+                "parcial": e_peca_de_completo(pdf_path)},
         daemon=True,
     ).start()
 
@@ -753,13 +941,29 @@ class PropostaHandler(FileSystemEventHandler):
         self.capa_pdf = capa_pdf
         self._pending_single   = {}  # pdf_norm   -> (timestamp, caminho)
         self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
+        self._pending_crm      = {}  # pdf_norm   -> (timestamp, caminho, nome_antigo)
+
+    def _fila_crm(self, path, origem_antiga=None):
+        """Proposta pronta na pasta -- vai para o CRM.
+
+        Serve tanto para a que o monitor acabou de montar (que ja sai com o
+        nome certo) quanto para uma que voce renomeou depois. Renomear e
+        opcional: o que vale e o nome que o arquivo tiver na hora do envio.
+        """
+        chave = _norm(path)
+        anterior = self._pending_crm.get(chave)
+        # Se ja estava na fila por um rename, preserva de onde ela veio
+        if anterior and anterior[2] and not origem_antiga:
+            origem_antiga = anterior[2]
+        self._pending_crm[chave] = (time.time(), str(path), origem_antiga)
 
     def _queue(self, path):
         p = Path(path)
         if p.suffix.lower() != ".pdf":
             return
         if _is_proposta_gerada(str(p)):
-            return  # ignora PDFs ja gerados pelo programa
+            self._fila_crm(str(p))  # nao remonta, mas mantem o CRM em dia
+            return
 
         stem_upper = p.stem.upper()
 
@@ -776,8 +980,20 @@ class PropostaHandler(FileSystemEventHandler):
             self._queue(event.src_path)
 
     def on_moved(self, event):
-        if not event.is_directory:
-            self._queue(event.dest_path)
+        if event.is_directory:
+            return
+        origem, destino = Path(event.src_path), Path(event.dest_path)
+
+        # Renomeou a proposta pronta (ex.: "... 24-08 PVC" -> "... 24-08 BRANCO"):
+        # a linha no CRM muda de nome junto, em vez de duplicar.
+        if (origem.suffix.lower() == ".pdf" and destino.suffix.lower() == ".pdf"
+                and _is_proposta_gerada(str(origem)) and _is_proposta_gerada(str(destino))
+                and _norm(origem.parent) == _norm(destino.parent)
+                and origem.name != destino.name):
+            self._fila_crm(str(destino), origem_antiga=str(origem))
+            return
+
+        self._queue(event.dest_path)
 
     def on_modified(self, event):
         if not event.is_directory:
@@ -802,6 +1018,17 @@ class PropostaHandler(FileSystemEventHandler):
             except Exception as e:
                 log(f"ERRO ao envolver {src_path}: {e}")
                 log(traceback.format_exc())
+
+        # Propostas prontas na pasta: vao para o CRM (10s, tempo de voce
+        # terminar de renomear antes de sair lancando)
+        prontos = [k for k, (t, _, __) in list(self._pending_crm.items()) if now - t >= CRM_WAIT_SECONDS]
+        for key in prontos:
+            _, pdf_path, origem_antiga = self._pending_crm.pop(key)
+            try:
+                if Path(pdf_path).exists():
+                    _lancar_no_crm(pdf_path, self.capa_pdf, origem_antiga)
+            except Exception as e:
+                log(f"ERRO ao enviar {Path(pdf_path).name} ao CRM: {e}")
 
         # COMPLETO: junta tudo (8s de espera)
         prontos = [k for k, (t, _, __) in list(self._pending_completo.items()) if now - t >= WAIT_SECONDS]
@@ -831,13 +1058,11 @@ class PropostaHandler(FileSystemEventHandler):
             pedido = extrair_pedido_pvc(doc_tmp, start_tmp, len(doc_tmp) - 1)
             total_str = extract_total_pvc(src_path)
             sufixo = f"PVC {vendedor}" if vendedor else "PVC"
-            materiais = {"pvc"}
         else:
             # Preserva MAD/ALM do nome original no arquivo renomeado, senao a
             # informacao de madeira+aluminio se perde e o COMPLETO usa so "ALM"
             subtipo = detect_alm_subtipo(src_path)
             sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
-            materiais = MATERIAIS_ALM[subtipo]
             doc_tmp = fitz.open(src_path)
             start_tmp, _end_tmp = _alm_range(doc_tmp, src_path)
             vendedor = extrair_vendedor_alm(doc_tmp, start_tmp)
@@ -856,7 +1081,6 @@ class PropostaHandler(FileSystemEventHandler):
             return
         log(f"[{client}] SALVO: {Path(output_path).name}")
         _apagar(src_path, client)
-        _lancar_no_crm(output_path, client, total_str, materiais)
 
     def _process_completo(self, folder, trigger_path):
         """Junta PVC + ALM com Capa/Pagina Final, somando os totais."""
@@ -914,12 +1138,6 @@ class PropostaHandler(FileSystemEventHandler):
             if trigger_is_signal:
                 _apagar(trigger_path, client)
 
-            # A proposta final ja contem o PVC e o ALM, entao no CRM ela toma o
-            # lugar dos orcamentos individuais lancados antes (nao soma em cima)
-            total_final = format_brl(_valor(pvc_total) + _valor(alm_total))
-            materiais = {"pvc"} | MATERIAIS_ALM[detect_alm_subtipo(alm_path)]
-            _lancar_no_crm(output_path, client, total_final, materiais)
-
         elif has_alm:
             alm_path  = pdfs["alm"][0]
             alm_total = extract_total_alm(alm_path)
@@ -941,9 +1159,6 @@ class PropostaHandler(FileSystemEventHandler):
             _apagar(alm_path, client)
             if trigger_is_signal:
                 _apagar(trigger_path, client)
-
-            _lancar_no_crm(output_path, client, alm_total,
-                           MATERIAIS_ALM[detect_alm_subtipo(alm_path)])
 
         elif has_pvc:
             log(f"[{client}] So PVC encontrado — falta o ALM (portas internas).")
