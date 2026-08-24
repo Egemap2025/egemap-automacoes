@@ -723,12 +723,10 @@ def valor_da_proposta(pdf_path):
         doc.close()
 
 
-def materiais_da_proposta(pdf_path):
-    """Quais materiais a proposta cobre.
+def materiais_do_nome_do_arquivo(pdf_path):
+    """Materiais pelos codigos que a montagem usa no nome (PVC/ALM/MAD).
 
-    So faz diferenca quando o negocio tem mais de um orcamento cadastrado no
-    CRM, pra saber qual deles acabou de sair. Numa proposta renomeada (ex.:
-    "... 24-08 BRANCO") o nome nao diz nada, entao olha o conteudo.
+    Vazio quando o arquivo foi renomeado para algo como "... 24-08 BRANCO".
     """
     nome = Path(pdf_path).name.upper()
     materiais = set()
@@ -738,6 +736,17 @@ def materiais_da_proposta(pdf_path):
         materiais.add("aluminio")
     if "MAD" in nome:
         materiais.add("madeira")
+    return materiais
+
+
+def materiais_da_proposta(pdf_path):
+    """Quais materiais a proposta cobre.
+
+    So faz diferenca quando o negocio tem mais de um orcamento cadastrado no
+    CRM, pra saber qual deles acabou de sair. Numa proposta renomeada (ex.:
+    "... 24-08 BRANCO") o nome nao diz nada, entao olha o conteudo.
+    """
+    materiais = materiais_do_nome_do_arquivo(pdf_path)
     if materiais:
         return materiais
 
@@ -759,14 +768,16 @@ def materiais_da_proposta(pdf_path):
 _JA_ENVIADO = {}
 
 
-def _lancar_no_crm(pdf_path, capa_pdf, nome_antigo=None):
+def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
     """Manda a proposta pronta para o CRM, sem travar o monitor.
 
     Roda em segundo plano: se a internet cair ou o CRM demorar, o monitor
     continua montando as proximas propostas normalmente.
 
-    nome_antigo vem preenchido quando a proposta acabou de ser renomeada --
-    ai a linha no CRM e renomeada junto, em vez de virar uma linha nova.
+    origem_antiga vem preenchido quando a proposta acabou de ser renomeada --
+    ai a linha no CRM e renomeada junto, em vez de virar uma linha nova. O
+    nome antigo e calculado aqui, com os mesmos materiais, senao "MAD ALM"
+    viraria "Mad Alm" na busca e "Madeira + Aluminio" na criacao.
     """
     if crm_egemap is None or not crm_egemap.configurado():
         return
@@ -782,7 +793,7 @@ def _lancar_no_crm(pdf_path, capa_pdf, nome_antigo=None):
     except OSError:
         return
     chave = _norm(pdf_path)
-    if nome_antigo is None and _JA_ENVIADO.get(chave) == assinatura:
+    if origem_antiga is None and _JA_ENVIADO.get(chave) == assinatura:
         return
 
     # So proposta completa vai para o CRM: nunca um orcamento cru, sem capa.
@@ -797,6 +808,15 @@ def _lancar_no_crm(pdf_path, capa_pdf, nome_antigo=None):
 
     _JA_ENVIADO[chave] = assinatura
     materiais = materiais_da_proposta(pdf_path)
+
+    # O nome antigo tem que ser calculado como ele foi criado. Os codigos
+    # ficam no nome do arquivo antigo ("MAD ALM"), e nao no conteudo, entao
+    # e de la que eles saem -- senao a busca erraria a linha e duplicaria.
+    nome_antigo = None
+    if origem_antiga:
+        nome_antigo = nome_da_linha(
+            origem_antiga, materiais_do_nome_do_arquivo(origem_antiga) or materiais)
+
     threading.Thread(
         target=crm_egemap.lancar_proposta,
         args=(pdf_path, client, valor, materiais),
@@ -909,19 +929,19 @@ class PropostaHandler(FileSystemEventHandler):
         self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
         self._pending_crm      = {}  # pdf_norm   -> (timestamp, caminho, nome_antigo)
 
-    def _fila_crm(self, path, nome_antigo=None):
+    def _fila_crm(self, path, origem_antiga=None):
         """Proposta pronta na pasta -- vai para o CRM.
 
-        Serve tanto para a que o monitor acabou de montar quanto para uma que
-        voce renomeou depois: o nome do arquivo e que vira o nome da linha no
-        CRM, entao renomear atualiza a linha.
+        Serve tanto para a que o monitor acabou de montar (que ja sai com o
+        nome certo) quanto para uma que voce renomeou depois. Renomear e
+        opcional: o que vale e o nome que o arquivo tiver na hora do envio.
         """
         chave = _norm(path)
         anterior = self._pending_crm.get(chave)
-        # Se ja estava na fila por um rename, preserva o nome antigo
-        if anterior and anterior[2] and not nome_antigo:
-            nome_antigo = anterior[2]
-        self._pending_crm[chave] = (time.time(), str(path), nome_antigo)
+        # Se ja estava na fila por um rename, preserva de onde ela veio
+        if anterior and anterior[2] and not origem_antiga:
+            origem_antiga = anterior[2]
+        self._pending_crm[chave] = (time.time(), str(path), origem_antiga)
 
     def _queue(self, path):
         p = Path(path)
@@ -956,7 +976,7 @@ class PropostaHandler(FileSystemEventHandler):
                 and _is_proposta_gerada(str(origem)) and _is_proposta_gerada(str(destino))
                 and _norm(origem.parent) == _norm(destino.parent)
                 and origem.name != destino.name):
-            self._fila_crm(str(destino), nome_antigo=nome_da_linha(str(origem)))
+            self._fila_crm(str(destino), origem_antiga=str(origem))
             return
 
         self._queue(event.dest_path)
@@ -989,10 +1009,10 @@ class PropostaHandler(FileSystemEventHandler):
         # terminar de renomear antes de sair lancando)
         prontos = [k for k, (t, _, __) in list(self._pending_crm.items()) if now - t >= CRM_WAIT_SECONDS]
         for key in prontos:
-            _, pdf_path, nome_antigo = self._pending_crm.pop(key)
+            _, pdf_path, origem_antiga = self._pending_crm.pop(key)
             try:
                 if Path(pdf_path).exists():
-                    _lancar_no_crm(pdf_path, self.capa_pdf, nome_antigo)
+                    _lancar_no_crm(pdf_path, self.capa_pdf, origem_antiga)
             except Exception as e:
                 log(f"ERRO ao enviar {Path(pdf_path).name} ao CRM: {e}")
 
