@@ -27,6 +27,8 @@ Os passos 3, 4 e 5 tem freio:
   - marcar feito e mover so acontece com o card numa fila de trabalho
     ("Orcamentos a Fazer" ou "Atualizacoes"). Card ja adiantado no funil so
     recebe o PDF novo, e nao volta pra tras.
+  - proposta que e so uma peca ("MAD ALM", que ainda vai ser juntada com o PVC
+    num COMPLETO) entrega o PDF mas nao move o card.
   - mover para "Orcamento Pronto" so quando TODOS os orcamentos cadastrados
     no negocio estao feitos. Um orcamento cadastrado = uma proposta; quando o
     cliente pediu duas opcoes separadas (uma em PVC e outra em Aluminio), o
@@ -565,7 +567,7 @@ def materiais_do_nome(nome):
 
 
 def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
-                    nome_linha=None, nome_antigo=None):
+                    nome_linha=None, nome_antigo=None, parcial=False):
     """Faz o fluxo inteiro no CRM. Nunca levanta excecao: registra no log.
 
     pdf_path    -- proposta comercial ja pronta (com Capa e Pagina Final)
@@ -574,6 +576,9 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
     materiais   -- conjunto tipo {"pvc"}, {"aluminio"}, {"pvc","aluminio"}
     nome_linha  -- como a linha aparece no CRM; vem do nome do arquivo
     nome_antigo -- nome anterior, quando a proposta acabou de ser renomeada
+    parcial     -- proposta e so uma peca (ex.: "MAD ALM", que ainda vai ser
+                   juntada com o PVC num COMPLETO): o PDF entra, mas o card
+                   nao anda porque o orcamento nao acabou
     """
     if not configurado():
         return False
@@ -608,7 +613,12 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
             log(f"[{cliente}] CRM: valor do negocio nao foi mexido — "
                 f"'{_nome_etapa(negocio)}' e numero do vendedor.")
 
-        # 3. Marcar feito e mover: so quando o card esta numa fila de trabalho.
+        # 3. Marcar feito e mover: so quando o card esta numa fila de trabalho
+        #    e a proposta e a final, nao uma peca esperando o COMPLETO.
+        if parcial:
+            log(f"[{cliente}] CRM: e peca para juntar num COMPLETO — card "
+                f"continua em '{_nome_etapa(negocio)}'.")
+            return True
         if not na_fila:
             return True
 

@@ -739,6 +739,19 @@ def materiais_do_nome_do_arquivo(pdf_path):
     return materiais
 
 
+def e_peca_de_completo(pdf_path):
+    """Diz se a proposta e so uma peca, esperando ser juntada num COMPLETO.
+
+    O sinal e ter mais de um material no nome. "MAD ALM" sai do W-Vetro para
+    ser juntado com o PVC; ja "ALM", "MAD" ou "PVC" sozinho e obra so daquele
+    material e a proposta esta pronta.
+
+    Peca nao move o card para "Orcamento Pronto" -- o orcamento ainda nao
+    acabou --, mas o PDF vai para o CRM do mesmo jeito.
+    """
+    return len(materiais_do_nome_do_arquivo(pdf_path)) >= 2
+
+
 def materiais_da_proposta(pdf_path):
     """Quais materiais a proposta cobre.
 
@@ -822,7 +835,8 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
         args=(pdf_path, client, valor, materiais),
         kwargs={"log": log,
                 "nome_linha": nome_da_linha(pdf_path, materiais),
-                "nome_antigo": nome_antigo},
+                "nome_antigo": nome_antigo,
+                "parcial": e_peca_de_completo(pdf_path)},
         daemon=True,
     ).start()
 

@@ -40,6 +40,11 @@ Duas opções do mesmo material (BRANCO e CINZA) viram **duas linhas** e
 convivem. Renomear de novo **renomeia a linha**, não cria outra. Refazer a
 proposta troca o PDF da mesma linha.
 
+**`MAD ALM` é peça, não proposta.** Quando o arquivo tem os dois materiais no
+nome, ele saiu do W-Vetro para ser juntado com o PVC num `COMPLETO` — o PDF vai
+pro CRM, mas o card **não anda**, porque o orçamento ainda não acabou. Já `ALM`,
+`MAD` ou `PVC` sozinho é obra só daquele material: proposta final, card anda.
+
 **Só proposta completa vai para o CRM.** Antes de enviar, o monitor confere se
 o PDF tem mesmo Capa e Página Final comparando com a Capa configurada —
 orçamento cru do Sintegra ou do W-Vetro é barrado e fica registrado no log.
