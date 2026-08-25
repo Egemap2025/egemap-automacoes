@@ -864,18 +864,37 @@ def _nome_canonico_cliente(nome):
     return " ".join(p.capitalize() for p in nome.split()) or "Cliente"
 
 
-def _destino_drive(pdf_path):
-    """Pasta do cliente na raiz do Drive -- sempre a MESMA pasta, com o
-    mesmo nome, nao importa em qual computador ou em que estrutura de
-    pastas a proposta foi montada. Antes isso espelhava o caminho local
-    inteiro, e como cada vendedor organiza a pasta de orcamentos de um
-    jeito diferente (nomes diferentes, mais ou menos niveis de pasta), a
-    mesma proposta acabava indo para varias pastas diferentes no Drive.
+def _destino_drive(pdf_path, pasta_raiz=""):
+    """Ano/Cidade/Cliente na raiz do Drive.
+
+    O ano vem da data de hoje (nunca muda de fonte). Cidade e Cliente vem
+    da pasta local (pasta_raiz/Cidade/Cliente/arquivo.pdf) -- confiavel
+    porque so um computador roda o monitor, entao nao tem mais o
+    problema de cada vendedor organizar a pasta raiz de um jeito
+    diferente (o motivo de antes ter dado pasta duplicada).
+
+    Se o PDF estiver direto na pasta raiz (sem nivel de cidade), cai em
+    Ano/Cliente, sem inventar uma "cidade" errada.
     """
-    return _nome_canonico_cliente(suggest_client_name(Path(pdf_path).parent))
+    ano = str(date.today().year)
+    pasta_cliente = Path(pdf_path).parent
+    cliente = _nome_canonico_cliente(suggest_client_name(pasta_cliente))
+
+    pasta_cidade = pasta_cliente.parent
+    tem_cidade = bool(pasta_cidade.name)
+    if pasta_raiz:
+        try:
+            tem_cidade = pasta_cidade.resolve() != Path(pasta_raiz).resolve()
+        except OSError:
+            pass
+
+    if tem_cidade:
+        cidade = _nome_canonico_cliente(pasta_cidade.name)
+        return f"{ano}/{cidade}/{cliente}"
+    return f"{ano}/{cliente}"
 
 
-def _lancar_no_drive(pdf_path, capa_pdf):
+def _lancar_no_drive(pdf_path, capa_pdf, pasta_raiz=""):
     """Manda a proposta pronta para o Drive, sem travar o monitor.
 
     Mesmas regras de seguranca do CRM: nunca um orcamento cru, e uma peca
@@ -901,7 +920,7 @@ def _lancar_no_drive(pdf_path, capa_pdf):
 
     _JA_ENVIADO_DRIVE[chave] = assinatura
     client = suggest_client_name(Path(pdf_path).parent)
-    destino = _destino_drive(pdf_path)
+    destino = _destino_drive(pdf_path, pasta_raiz)
     materiais = materiais_do_nome_do_arquivo(pdf_path)
 
     threading.Thread(
@@ -1123,7 +1142,7 @@ class PropostaHandler(FileSystemEventHandler):
             _, pdf_path = self._pending_drive.pop(key)
             try:
                 if Path(pdf_path).exists():
-                    _lancar_no_drive(pdf_path, self.capa_pdf)
+                    _lancar_no_drive(pdf_path, self.capa_pdf, self.pasta_raiz)
             except Exception as e:
                 log(f"ERRO ao enviar {Path(pdf_path).name} ao Drive: {e}")
 
