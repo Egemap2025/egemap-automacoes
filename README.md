@@ -48,9 +48,24 @@ convivem. Renomear de novo **renomeia a linha**, não cria outra. Refazer a
 proposta troca o PDF da mesma linha.
 
 **`MAD ALM` é peça, não proposta.** Quando o arquivo tem os dois materiais no
-nome, ele saiu do W-Vetro para ser juntado com o PVC num `COMPLETO` — o PDF vai
-pro CRM, mas o card **não anda**, porque o orçamento ainda não acabou. Já `ALM`,
-`MAD` ou `PVC` sozinho é obra só daquele material: proposta final, card anda.
+nome, ele saiu do W-Vetro para ser juntado com o PVC num `COMPLETO`. Peça **não
+vai pro CRM nem pro Drive** — ela não é a proposta do cliente, e só ficava
+anexada no card sem servir pra nada. Quem vai é a proposta final, quando o
+`COMPLETO` ficar pronto. Já `ALM`, `MAD` ou `PVC` sozinho é obra só daquele
+material: proposta final, vai pro CRM e pro Drive, e o card anda.
+
+**Os códigos só valem como palavra inteira, e só depois da data.** `PVC`, `ALM`
+e `MAD` são lidos como palavras separadas no fim do nome — o nome do cliente
+fica de fora. Antes não era assim, e um cliente chamado **Almeida** (tem "ALM"
+dentro) ou **Madalena** (tem "MAD") tinha toda proposta lida como
+madeira + alumínio: virava peça, o card nunca andava e nada subia pro Drive.
+
+**O `COMPLETO` só junta arquivo do mesmo dia.** A pasta do cliente guarda as
+propostas dos dias anteriores, e elas ficam lá — mas não entram mais na
+montagem. Se sobrou mais de um do mesmo dia (você refez o orçamento), vale o
+mais novo. O monitor escreve no log qual arquivo usou como PVC e qual usou como
+alumínio, e qual deixou de fora por ser de outro dia — dá pra conferir na
+janela preta sem abrir a pasta.
 
 **Só proposta completa vai para o CRM.** Antes de enviar, o monitor confere se
 o PDF tem mesmo Capa e Página Final comparando com a Capa configurada —
@@ -89,6 +104,7 @@ individuais, e um orçamento refeito depois substitui o anterior — assim o val
 negócio nunca dobra. PVC e Alumínio pedidos separados continuam sendo duas linhas.
 
 **Quando o monitor não mexe no CRM** (e avisa no log, sem travar nada):
+- o arquivo é uma peça `MAD ALM`, esperando o `COMPLETO`
 - o cliente já passou de *Orçamentos a Fazer* (é alteração, não primeiro orçamento)
 - nenhum cliente parecido no CRM
 - o nome da pasta ficou parecido com dois cards ao mesmo tempo

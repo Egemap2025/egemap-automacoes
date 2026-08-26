@@ -7,6 +7,7 @@ on:
       - claude/budget-cover-automation-qjkemj
       - claude/egemap-proposal-monitor-zw7dzh
       - claude/automacao-adicional-lshf3u
+      - claude/egemap-proposal-monitor-dp611t
   workflow_dispatch:
 
 jobs:

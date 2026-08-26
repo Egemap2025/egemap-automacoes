@@ -54,18 +54,57 @@ def load_config():
 def save_config(capa, pasta):
     CONFIG_FILE.write_text(f"{capa}\n{pasta}\n", encoding="utf-8")
 
+# ── Codigos de material no nome do arquivo ────────────────────────────────────
+#
+# PVC, ALM e MAD so valem como PALAVRA INTEIRA, e so no pedaco do nome que vem
+# DEPOIS da data. Sem isso o nome do cliente entrava na conta: "Almeida" tem
+# "ALM" dentro e "Madalena" tem "MAD". A proposta de um cliente desses era
+# lida como madeira+aluminio, virava "peca esperando o COMPLETO" -- o card
+# nunca andava, o arquivo nao subia pro Drive, e o COMPLETO seguinte ainda
+# juntava o arquivo errado. O crm.py ja comparava por palavra inteira; aqui
+# faltava.
+
+CODIGOS_DE_MATERIAL = {"PVC", "ALM", "MAD"}
+
+# "Proposta Comercial Maria Teresa Silva 24-08 BRANCO" -> "BRANCO"
+_DATA_NO_NOME = re.compile(r"\b\d{2}-\d{2}\b")
+
+
+def _sufixo_do_nome(pdf_path):
+    """Pedaco do nome onde o codigo do material pode aparecer.
+
+    Depois da data, quando o arquivo ja passou pela montagem ("Proposta
+    Comercial <cliente> 26-08 MAD ALM") -- assim o nome do cliente fica de
+    fora. Num orcamento cru, que ainda nao tem data, vale o nome todo.
+    """
+    stem = Path(pdf_path).stem
+    m = _DATA_NO_NOME.search(stem)
+    return stem[m.end():] if m else stem
+
+
+def codigos_no_nome(pdf_path):
+    """Codigos de material no nome do arquivo, comparados por palavra inteira."""
+    palavras = re.split(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+", _sufixo_do_nome(pdf_path).upper())
+    return {p for p in palavras if p in CODIGOS_DE_MATERIAL}
+
+
 # ── Lógica de PDF ─────────────────────────────────────────────────────────────
 
 def detect_pdf_type(pdf_path):
-    try:
-        name = Path(pdf_path).name.upper()
-        if "PVC" in name:
-            return "pvc"
-        if "ALM" in name or "MAD" in name:
-            return "alm"
+    """PVC (Sintegra) ou ALM (W-Vetro).
 
+    Quem manda e o CONTEUDO; o nome do arquivo so decide quando o conteudo
+    nao diz nada (orcamento digitalizado, por exemplo). Antes era o
+    contrario, e numa pasta de cliente chamado "Almeida" TODO PDF era lido
+    como aluminio -- inclusive o PVC do Sintegra, que entrava no lugar
+    errado do COMPLETO.
+    """
+    try:
         doc = fitz.open(pdf_path)
-        text = "".join(p.get_text() for p in doc)
+        try:
+            text = "".join(p.get_text() for p in doc)
+        finally:
+            doc.close()
 
         if "OAD-" in text or "TOTAL GERAL (R$)" in text or "Archicentro" in text:
             return "pvc"
@@ -75,19 +114,51 @@ def detect_pdf_type(pdf_path):
             return "alm"
     except Exception:
         pass
+
+    codigos = codigos_no_nome(pdf_path)
+    if "PVC" in codigos:
+        return "pvc"
+    if codigos & {"ALM", "MAD"}:
+        return "alm"
     return None
 
 
+def _mtime(path):
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def dia_do_arquivo(pdf_path):
+    """A que dia de trabalho o PDF pertence.
+
+    A data escrita no nome (DD-MM) manda, porque ela nao muda quando o
+    OneDrive mexe no arquivo para sincronizar. So quando nao ha data no nome
+    (orcamento cru, recem-salvo) e que vale a data de gravacao.
+    """
+    m = _DATA_NO_NOME.search(Path(pdf_path).stem)
+    if m:
+        dia, mes = m.group(0).split("-")
+        try:
+            return date(date.today().year, int(mes), int(dia))
+        except ValueError:
+            return None
+    ts = _mtime(pdf_path)
+    return date.fromtimestamp(ts) if ts else None
+
+
 def find_pdfs_in_folder(folder):
+    """PDFs da pasta separados por tipo, do mais novo para o mais antigo.
+
+    A ordem importa: quem monta o COMPLETO pega o primeiro de cada tipo, e
+    antes vinha na ordem que o Windows entregava -- podia ser o de qualquer
+    dia.
+    """
     result = {"pvc": [], "alm": [], "other": []}
-    for p in Path(folder).glob("*.pdf"):
+    for p in sorted(Path(folder).glob("*.pdf"), key=_mtime, reverse=True):
         tipo = detect_pdf_type(str(p))
-        if tipo == "pvc":
-            result["pvc"].append(str(p))
-        elif tipo == "alm":
-            result["alm"].append(str(p))
-        else:
-            result["other"].append(str(p))
+        result[tipo if tipo in ("pvc", "alm") else "other"].append(str(p))
     return result
 
 
@@ -511,10 +582,26 @@ def extrair_vendedor_do_nome_arquivo(pdf_path):
 
 
 def detect_alm_subtipo(pdf_path):
-    """Detecta pelo nome do arquivo se é ALM, MAD ou ambos."""
-    name = Path(pdf_path).name.upper()
-    has_alm = "ALM" in name
-    has_mad = "MAD" in name
+    """Se o W-Vetro veio como aluminio, madeira, ou os dois.
+
+    Compara palavra inteira: "orcamento Almeida MAD.pdf" e madeira, e nao
+    madeira+aluminio -- antes o "ALM" de "Almeida" contava, o arquivo saia
+    marcado "MAD ALM" e virava peca esperando um COMPLETO que nunca vinha.
+
+    Quando o nome vem colado, sem separador nenhum ("orcamentoALM.pdf"),
+    ainda vale o codigo que estiver bem no FIM do nome -- e onde voce escreve.
+    Procurar em qualquer lugar da palavra e que nao da: "Palmeira" viraria
+    aluminio e "Amadeu" viraria madeira.
+    """
+    codigos = codigos_no_nome(pdf_path)
+    if not codigos:
+        fim = re.sub(r"[^A-Z]", "", _sufixo_do_nome(pdf_path).upper())
+        if fim.endswith("MADALM") or fim.endswith("ALMMAD"):
+            codigos = {"MAD", "ALM"}
+        else:
+            codigos = {c for c in CODIGOS_DE_MATERIAL if fim.endswith(c)}
+    has_alm = "ALM" in codigos
+    has_mad = "MAD" in codigos
     if has_alm and has_mad:
         return "alm_mad"
     if has_alm:
@@ -615,6 +702,8 @@ def merge_alm(capa_pdf_path, alm_pdf_path, output_path, vendedor="", cliente="",
 # ── Watchdog handler ──────────────────────────────────────────────────────────
 
 WAIT_SECONDS = 8  # espera 8s apos o ultimo evento para garantir que o PDF foi salvo
+# Teto para o COMPLETO esperar um orcamento cru da mesma pasta ser envolvido.
+ESPERA_MAXIMA_COMPLETO = 120
 # Espera maior antes de mandar a proposta ao CRM: da tempo de voce renomear o
 # arquivo pronto antes, e o nome do arquivo e que vira o nome da linha no CRM.
 CRM_WAIT_SECONDS = 10
@@ -679,13 +768,6 @@ def proposta_tem_capa(pdf_path, capa_pdf_path):
         capa.close()
 
 
-# "Proposta Comercial Maria Teresa Silva 24-08 BRANCO" -> "BRANCO"
-_DATA_NO_NOME = re.compile(r"\b\d{2}-\d{2}\b")
-
-
-CODIGOS_DE_MATERIAL = {"PVC", "ALM", "MAD"}
-
-
 def nome_da_linha(pdf_path, materiais=None):
     """Nome que a proposta vai ter na lista de orcamentos do CRM.
 
@@ -737,15 +819,9 @@ def materiais_do_nome_do_arquivo(pdf_path):
 
     Vazio quando o arquivo foi renomeado para algo como "... 24-08 BRANCO".
     """
-    nome = Path(pdf_path).name.upper()
-    materiais = set()
-    if "PVC" in nome:
-        materiais.add("pvc")
-    if "ALM" in nome:
-        materiais.add("aluminio")
-    if "MAD" in nome:
-        materiais.add("madeira")
-    return materiais
+    codigos = codigos_no_nome(pdf_path)
+    return {m for c, m in (("PVC", "pvc"), ("ALM", "aluminio"), ("MAD", "madeira"))
+            if c in codigos}
 
 
 def e_peca_de_completo(pdf_path):
@@ -755,8 +831,9 @@ def e_peca_de_completo(pdf_path):
     ser juntado com o PVC; ja "ALM", "MAD" ou "PVC" sozinho e obra so daquele
     material e a proposta esta pronta.
 
-    Peca nao move o card para "Orcamento Pronto" -- o orcamento ainda nao
-    acabou --, mas o PDF vai para o CRM do mesmo jeito.
+    Peca nao vai para o CRM nem para o Drive: ela nao e a proposta do
+    cliente, e so ficava guardada no card sem servir pra nada. Quem vai e a
+    proposta final, quando o COMPLETO ficar pronto.
     """
     return len(materiais_do_nome_do_arquivo(pdf_path)) >= 2
 
@@ -818,6 +895,16 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
         return
     chave = _norm(pdf_path)
     if origem_antiga is None and _JA_ENVIADO.get(chave) == assinatura:
+        return
+
+    # Peca esperando o COMPLETO (ex.: "MAD ALM") nao entra no CRM. Ela nao e
+    # a proposta do cliente: ficava anexada no card atoa e depois tinha que
+    # ser limpa na mao. Quem entra e a proposta final, quando o COMPLETO
+    # ficar pronto. Marca como "ja visto" so pra nao repetir o aviso a cada
+    # vez que o OneDrive toca no arquivo.
+    if e_peca_de_completo(pdf_path):
+        _JA_ENVIADO[chave] = assinatura
+        log(f"[{client}] CRM: {arquivo} e peca para juntar no COMPLETO — nao enviei.")
         return
 
     # So proposta completa vai para o CRM: nunca um orcamento cru, sem capa.
@@ -1149,12 +1236,29 @@ class PropostaHandler(FileSystemEventHandler):
         # COMPLETO: junta tudo (8s de espera)
         prontos = [k for k, (t, _, __) in list(self._pending_completo.items()) if now - t >= WAIT_SECONDS]
         for key in prontos:
-            _, folder, trigger_path = self._pending_completo.pop(key)
+            t0, folder, trigger_path = self._pending_completo[key]
+            # Ainda tem orcamento cru dessa mesma pasta na fila de envolver:
+            # espera ele virar proposta antes de juntar. Senao o COMPLETO
+            # pega um arquivo que ainda esta sendo gravado, ou o envolve
+            # depois e sobra uma proposta solta na pasta. Desiste de esperar
+            # em 2 minutos, para nunca ficar preso.
+            if (now - t0 < ESPERA_MAXIMA_COMPLETO
+                    and any(_norm(Path(p).parent) == key
+                            for _, p in self._pending_single.values())):
+                continue
+            del self._pending_completo[key]
             try:
                 self._process_completo(folder, trigger_path)
             except Exception as e:
                 log(f"ERRO COMPLETO em {folder}: {e}")
                 log(traceback.format_exc())
+
+    def _descartar_single(self, *caminhos):
+        """Tira da fila de "envolver individualmente" os orcamentos que o
+        COMPLETO acabou de consumir -- senao o monitor montaria depois uma
+        proposta individual de um arquivo que ja virou proposta final."""
+        for caminho in caminhos:
+            self._pending_single.pop(_norm(caminho), None)
 
     def _wrap_individual(self, src_path):
         """Envolve PVC ou ALM com Capa 1 + Capa 2 + Pagina Final."""
@@ -1202,10 +1306,33 @@ class PropostaHandler(FileSystemEventHandler):
         """Junta PVC + ALM com Capa/Pagina Final, somando os totais."""
         pdfs = find_pdfs_in_folder(folder)
         trigger_norm = _norm(trigger_path)
+        client = suggest_client_name(folder)
+        hoje = date.today()
 
-        # Permite propostas wrap individuais (PVC/ALM) como fontes; exclui propostas finais
-        for key in pdfs:
-            pdfs[key] = [p for p in pdfs[key] if not _is_proposta_final(p)]
+        def elegivel(caminho):
+            """Diz se esse PDF pode entrar no COMPLETO.
+
+            Fica de fora a proposta final (ja montada) e, principalmente,
+            tudo que e de OUTRO DIA. A pasta do cliente guarda as propostas
+            dos dias anteriores, e o COMPLETO pegava qualquer uma delas --
+            juntava o PVC de hoje com o aluminio da semana passada. No mesmo
+            dia pode ter mais de um (proposta refeita): find_pdfs_in_folder
+            entrega do mais novo para o mais antigo, entao vale o mais novo.
+            """
+            if _norm(caminho) == trigger_norm:
+                return True
+            if _is_proposta_final(caminho):
+                return False
+            dia = dia_do_arquivo(caminho)
+            if dia != hoje:
+                quando = f" ({dia.strftime('%d-%m')})" if dia else ""
+                log(f"[{client}] COMPLETO: deixei de fora {Path(caminho).name}"
+                    f" — e de outro dia{quando}.")
+                return False
+            return True
+
+        for key in ("pvc", "alm"):
+            pdfs[key] = [p for p in pdfs[key] if elegivel(p)]
 
         # Se o trigger nao aparece como PVC/ALM (nenhum conteudo reconhecivel), remove-o
         trigger_in_pvc = any(_norm(p) == trigger_norm for p in pdfs["pvc"])
@@ -1218,10 +1345,15 @@ class PropostaHandler(FileSystemEventHandler):
 
         has_pvc = bool(pdfs["pvc"])
         has_alm = bool(pdfs["alm"])
-        client  = suggest_client_name(folder)
-        today   = date.today().strftime("%d-%m")
+        today   = hoje.strftime("%d-%m")
 
         log(f"[{client}] COMPLETO detectado — PVC={has_pvc} ALM={has_alm} — montando proposta final...")
+        for rotulo in ("pvc", "alm"):
+            if pdfs[rotulo]:
+                log(f"[{client}] COMPLETO: usando como {rotulo.upper()} -> {Path(pdfs[rotulo][0]).name}")
+                for descartado in pdfs[rotulo][1:]:
+                    log(f"[{client}] COMPLETO: tinha outro {rotulo.upper()} de hoje "
+                        f"({Path(descartado).name}) — usei o mais novo.")
 
         if has_pvc and has_alm:
             pvc_path  = pdfs["pvc"][0]
@@ -1249,6 +1381,7 @@ class PropostaHandler(FileSystemEventHandler):
                 log(f"[{client}] ATENCAO: proposta final saiu com poucas paginas — mantendo os arquivos originais por seguranca.")
                 return
             log(f"[{client}] SALVO: {Path(output_path).name}")
+            self._descartar_single(pvc_path, alm_path)
             _apagar(pvc_path, client)
             _apagar(alm_path, client)
             if trigger_is_signal:
@@ -1272,6 +1405,7 @@ class PropostaHandler(FileSystemEventHandler):
                 log(f"[{client}] ATENCAO: proposta final saiu com poucas paginas — mantendo os arquivos originais por seguranca.")
                 return
             log(f"[{client}] SALVO: {Path(output_path).name}")
+            self._descartar_single(alm_path)
             _apagar(alm_path, client)
             if trigger_is_signal:
                 _apagar(trigger_path, client)

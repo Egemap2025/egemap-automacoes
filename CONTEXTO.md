@@ -147,10 +147,70 @@ previsão de vendas. Na mão, o Natanael preenchia com a maior.
 Sobrescrever seria apagar o desconto fechado sem ninguém perceber. Dessas
 etapas em diante o monitor **só troca o PDF**.
 
-### "MAD ALM" não move o card
+### "MAD ALM" não vai pro CRM nem pro Drive
 
-**Por quê:** é peça esperando o `COMPLETO`; o orçamento ainda não acabou. O
-PDF vai pro CRM (o vendedor já vê alguma coisa), mas o card fica parado.
+**Por quê:** é peça esperando o `COMPLETO`; o orçamento ainda não acabou.
+
+A primeira versão mandava o PDF da peça pro CRM (só não movia o card), com a
+ideia de que o vendedor já visse alguma coisa. Na prática atrapalhou: a peça
+ficava anexada no card sem servir pra nada e depois tinha que ser limpa na
+mão. Hoje peça não sai da pasta — quem vai é a proposta final, quando o
+`COMPLETO` ficar pronto. O `parcial=True` do `crm.py` continua existindo, mas
+o monitor não usa mais.
+
+### Os códigos PVC/ALM/MAD só valem como palavra inteira, depois da data
+
+**Por quê:** o nome do cliente entrava na conta. `"ALM" in nome` casa com
+**Almeida**, **Palmeira**, **Salma**; `"MAD"` casa com **Madalena**,
+**Amadeu**. A proposta de um cliente desses era lida como madeira + alumínio,
+virava peça, o card nunca andava e nada subia pro Drive. Pior: o
+`detect_pdf_type` decidia PVC/ALM **pelo nome antes de abrir o PDF**, então
+numa pasta "Ricardo Almeida" até o PVC do Sintegra era classificado como
+alumínio e entrava no lugar errado do `COMPLETO`.
+
+Duas correções: o código de material só conta como palavra inteira e só no
+pedaço do nome **depois da data** (`codigos_no_nome`), e o `detect_pdf_type`
+passou a olhar o **conteúdo primeiro**, usando o nome só quando o conteúdo não
+diz nada.
+
+O `crm.py` já fazia essa comparação por palavra inteira desde o começo — o
+`materiais_do_nome` de lá tem até o comentário sobre a "Madalena". A correção
+tinha sido feita num arquivo e não no outro.
+
+### O COMPLETO só junta arquivo do mesmo dia, e o mais novo
+
+**Por quê:** a pasta do cliente guarda as propostas dos dias anteriores. O
+`_process_completo` pegava `pdfs["pvc"][0]` e `pdfs["alm"][0]` — o primeiro
+que o Windows entregasse, de qualquer dia. Reproduzido: pasta com um
+`MAD ALM` de seis dias atrás (R$ 999.999) e um PVC novo de hoje; o monitor
+juntou os dois calado, apagou a peça velha e gerou uma proposta de
+R$ 1.099.999.
+
+Hoje `find_pdfs_in_folder` devolve do mais novo para o mais antigo, e só entra
+no `COMPLETO` o arquivo cujo dia é hoje. O dia vem da data escrita no nome
+(`DD-MM`) e não da data de gravação — a data no nome não muda quando o
+OneDrive mexe no arquivo pra sincronizar. Arquivo cru, que ainda não tem data
+no nome, aí sim vale a gravação.
+
+O que ficou de fora aparece no log com o motivo, e o que foi escolhido também
+("usando como PVC -> ...").
+
+**Efeito colateral conhecido:** virar o dia no meio de um orçamento (peça
+salva 23h55, `COMPLETO` 00h05) deixa a peça de fora. O log avisa; é só salvar
+a peça de novo. Preferiu-se isso a abrir uma janela de horas que traria de
+volta o risco de juntar arquivo velho.
+
+### O COMPLETO espera o orçamento cru da mesma pasta ser envolvido
+
+**Por quê:** as duas filas tinham tempos diferentes (6s pra envolver, 8s pro
+`COMPLETO`) contados a partir de eventos diferentes. Salvando o `COMPLETO`
+logo antes do W-Vetro terminar de chegar, o `COMPLETO` disparava primeiro e
+lia um arquivo ainda sendo gravado — ou envolvia depois um arquivo que já
+tinha virado proposta final, deixando uma proposta solta na pasta.
+
+Hoje o `COMPLETO` só roda quando não há nada da mesma pasta na fila de
+envolver (com teto de 2 minutos, pra nunca ficar preso), e o que ele consome
+sai da fila (`_descartar_single`).
 
 ### Um orçamento cadastrado = uma proposta
 
