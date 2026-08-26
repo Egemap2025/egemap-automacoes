@@ -64,8 +64,9 @@ monitorar.py    Programa principal. Vigia a pasta, monta a proposta com
                 Capa/Página Final, e chama crm.py e drive.py.
 crm.py          Lança no CRM. Só biblioteca padrão.
 drive.py        Sobe pro Google Drive (via rclone). Só biblioteca padrão.
-limpar_drive.py Faxina as pastas repetidas do Drive. Roda sob demanda
-                (`EGEMAP-Monitor.exe --limpar-drive`, ou LIMPAR_DRIVE.bat).
+limpar_drive.py Faxina as pastas repetidas do Drive. O monitor oferece na
+                abertura (uma vez so); tambem roda por
+                `EGEMAP-Monitor.exe --limpar-drive` ou LIMPAR_DRIVE.bat.
 montar_orcamento.py   Utilitário de teste, fora do fluxo automático.
 ```
 
@@ -339,6 +340,18 @@ guarda o que já enviou (caminho, data e tamanho) e não reenvia igual.
 
 O `getpass` do Python não mostra nada ao digitar — nem asterisco — e a pessoa
 acha que o teclado travou. Hoje cada tecla vira `*`.
+
+### A faxina foi parar na abertura do monitor
+
+**Por quê:** o `.bat` obrigava a baixar um segundo arquivo e deixar na mesma
+pasta do `.exe`. Pedido dele: *"manda o link direto, simplifica mais pra mim"*.
+Hoje o monitor oferece a faxina na abertura, no mesmo formato das outras
+perguntas (20 segundos e segue), e um arquivo `~/.egemap_faxina_drive_ok`
+marca que ja foi feita para nao perguntar de novo.
+
+A marca **só é gravada se ele realmente aplicou**. Ver a prévia e desistir
+devolve `2` do `limpar_drive.main`, e aí a pergunta volta na próxima abertura
+— senão, quem quisesse pensar melhor perdia o atalho.
 
 ### Nunca travar esperando resposta
 

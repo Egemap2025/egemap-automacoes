@@ -1572,6 +1572,60 @@ def oferecer_conexao_drive():
     input("  Pressione ENTER para comecar a monitorar.")
 
 
+# Marca que a faxina das pastas do Drive ja foi oferecida nesta maquina, pra
+# nao ficar perguntando toda vez que o monitor abre.
+FAXINA_JA_OFERECIDA = Path.home() / ".egemap_faxina_drive_ok"
+
+
+def oferecer_faxina_drive():
+    """Pergunta uma vez so, na abertura, se quer arrumar as pastas repetidas.
+
+    Enquanto o monitor criava pasta nova por causa de maiuscula ("Passo De
+    Torres" ao lado de "Passo de Torres"), o Drive juntou pastas repetidas.
+    Isso ja foi corrigido; esta pergunta existe pra limpar o que ficou pra
+    tras, e some depois de respondida.
+
+    Como toda pergunta da abertura, desiste sozinha em 20 segundos -- o
+    monitor abre junto com o Windows e nao pode ficar parado esperando.
+    """
+    if drive_egemap is None or not drive_egemap.configurado():
+        return
+    if FAXINA_JA_OFERECIDA.exists():
+        return
+
+    print()
+    print("  " + "-" * 51)
+    print("  Arrumar as pastas do Google Drive?")
+    print()
+    print("  Ate a versao passada o monitor criava pasta nova quando o")
+    print("  nome so mudava de maiuscula, entao pode ter ficado uma")
+    print("  'Passo De Torres' ao lado da 'Passo de Torres' que voce usa.")
+    print()
+    print("  Ele mostra tudo o que vai fazer ANTES e so mexe se voce")
+    print("  confirmar. O que sair vai pra Lixeira do Drive.")
+    print("  " + "-" * 51)
+    print()
+
+    resposta = _perguntar_com_tempo(
+        "  Digite 1 e ENTER para arrumar agora (ou aguarde para pular): ", 20
+    )
+    if resposta != "1":
+        print("\n  Pulado. Vou perguntar de novo na proxima vez que abrir.")
+        return
+
+    print()
+    try:
+        import limpar_drive
+        # 2 = viu a previa e preferiu nao aplicar agora. Nesse caso nao marca
+        # como feita, pra ele poder decidir na proxima vez que abrir.
+        if limpar_drive.main([]) != 2:
+            FAXINA_JA_OFERECIDA.write_text("feita\n", encoding="utf-8")
+    except Exception as e:
+        print(f"\n  Nao consegui arrumar: {e}")
+    print()
+    input("  Pressione ENTER para comecar a monitorar.")
+
+
 def main():
     # "EGEMAP-Monitor.exe --limpar-drive" faz a faxina nas pastas do Drive
     # (LIMPAR_DRIVE.bat). Mostra tudo antes e so mexe se voce confirmar.
@@ -1653,6 +1707,7 @@ def main():
 
     oferecer_conexao_crm()
     oferecer_conexao_drive()
+    oferecer_faxina_drive()
 
     if drive_egemap is not None:
         # Se o agente separado do Drive ainda estiver instalado, desliga a

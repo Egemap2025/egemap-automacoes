@@ -356,7 +356,7 @@ def main(argv=None):
 
     if resposta != "1":
         log("Saindo sem mexer em nada.")
-        return 0
+        return 2   # nao quis agora: quem chamou pode oferecer de novo depois
 
     log()
     APLICAR = True

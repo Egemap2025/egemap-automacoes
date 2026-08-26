@@ -159,8 +159,15 @@ python drive.py testar     # mostra se ja esta conectado
 
 Enquanto o monitor criava pasta nova por causa de maiúscula, o Drive ficou com
 pastas repetidas: uma `Passo De Torres` ao lado da `Passo de Torres` que você
-usa, por exemplo. O monitor já não faz mais isso, e para arrumar o que ficou
-para trás existe o **`LIMPAR_DRIVE.bat`** — clique nele.
+usa, por exemplo. O monitor já não faz mais isso.
+
+Para arrumar o que ficou para trás, **é só abrir o `EGEMAP-Monitor.exe`**: na
+primeira vez ele pergunta se você quer arrumar, do mesmo jeito que pergunta do
+CRM e do Drive. Digite `1` e ENTER. A pergunta some depois de feita, e se
+ninguém responder em 20 segundos ele segue monitorando normalmente.
+
+(Se preferir rodar fora da abertura, o `LIMPAR_DRIVE.bat` faz a mesma coisa, ou
+`EGEMAP-Monitor.exe --limpar-drive` no Prompt de Comando.)
 
 Ele junta as repetidas numa só, leva os clientes que estavam na pasta errada
 para a certa, e tira as cópias iguais. Antes de mexer em qualquer coisa ele
