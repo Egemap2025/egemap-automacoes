@@ -388,6 +388,29 @@ procura arquivo idêntico na árvore inteira e apagaria o PDF de um cliente só
 porque outro cliente tem um igual. Sem ele, só considera mesmo nome na mesma
 pasta — que é exatamente o caso das duplicatas do Drive.
 
+### As duas contas se bloqueiam: nenhuma consegue limpar tudo sozinha
+
+As pastas do Drive têm **dois donos misturados**:
+
+| Conta | O que ela criou | O que ela NÃO consegue mexer |
+|---|---|---|
+| `orcamentosegemap` (o rclone do monitor) | quase tudo | o que o Natanael subiu pelo navegador |
+| `egemapesquadrias` (o navegador dele) | o que ele subiu na mão | o que o rclone criou |
+
+No Google Drive, ser dono da **pasta** não dá direito de apagar **arquivo dos
+outros** dentro dela. Por isso a faxina de 26/08 fez tudo, menos apagar duas
+cópias na pasta do Felipe Dos Santos Coelho: `Error 403
+insufficientFilePermissions`.
+
+E pelo lado de cá é o espelho: o connector do Drive (que entra como
+`egemapesquadrias`) **renomeia e move**, mas **não apaga** — `trash_file`
+devolve "The caller does not have permission" mesmo em arquivo dele.
+
+Conclusão prática: resto de duplicata com dono trocado tem que ser apagado
+**pelo Natanael, no navegador**. O jeito de ajudar é renomear com um prefixo
+`APAGAR - ...`, porque as cópias têm nome idêntico e ele não conseguiria
+distinguir uma da outra na tela.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

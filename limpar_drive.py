@@ -237,7 +237,16 @@ def juntar_nomes_identicos(ano):
             saida += rclone(*args, drive._remote(ano), *extra,
                             timeout=600, com_relatorio=True)
         except Exception as e:
-            log(f"   ! nao consegui ({o_que}): {e}")
+            if "insufficientFilePermissions" in str(e) or "Error 403" in str(e):
+                # O rclone entra como orcamentosegemap. Arquivo que voce subiu
+                # pelo navegador pertence a SUA conta, e o rclone nao pode
+                # apagar arquivo dos outros -- nem sendo dono da pasta.
+                log(f"   ! {o_que}: sobrou coisa que nao e da conta do monitor")
+                log( "     (arquivo que voce subiu pelo navegador pertence a voce,")
+                log( "      e o monitor nao pode apagar arquivo dos outros).")
+                log( "      Esses precisam ser apagados por voce, no Drive.")
+            else:
+                log(f"   ! nao consegui ({o_que}): {e}")
     linhas = [l for l in saida.splitlines() if l.strip()]
     if linhas:
         for l in linhas[:40]:
