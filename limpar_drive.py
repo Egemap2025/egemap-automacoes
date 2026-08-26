@@ -42,7 +42,15 @@ def log(msg=""):
     print(msg, flush=True)
 
 
-def rclone(*args, timeout=120):
+def rclone(*args, timeout=120, com_relatorio=False):
+    """Roda o rclone. Devolve a saida normal, ou saida+relatorio quando
+    com_relatorio=True.
+
+    O rclone escreve o RESULTADO (json de listagem) na saida normal, mas o
+    RELATORIO do que ele fez ("Merging N duplicate directories") na saida de
+    erro -- mesmo quando deu tudo certo. Sem pedir as duas, o passo do dedupe
+    dizia "nada a fazer" mesmo tendo o que fazer.
+    """
     r = subprocess.run(
         [str(drive.RCLONE_EXE), *args, "--config", str(drive.RCLONE_CONF)],
         capture_output=True, timeout=timeout,
@@ -54,6 +62,8 @@ def rclone(*args, timeout=120):
     if r.returncode != 0:
         detalhe = ((r.stderr or "") + (r.stdout or "")).strip().splitlines()
         raise RuntimeError(detalhe[-1] if detalhe else f"rclone falhou: {args}")
+    if com_relatorio:
+        return (r.stdout or "") + (r.stderr or "")
     return r.stdout or ""
 
 
@@ -224,7 +234,8 @@ def juntar_nomes_identicos(ano):
     ]
     for args, o_que in passos:
         try:
-            saida += rclone(*args, drive._remote(ano), *extra, timeout=600)
+            saida += rclone(*args, drive._remote(ano), *extra,
+                            timeout=600, com_relatorio=True)
         except Exception as e:
             log(f"   ! nao consegui ({o_que}): {e}")
     linhas = [l for l in saida.splitlines() if l.strip()]
