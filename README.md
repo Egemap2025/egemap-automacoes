@@ -1,5 +1,10 @@
 # Egemap Automações
 
+> **Trabalhando nisso com o Claude?** Comece pedindo *"leia o CONTEXTO.md"* —
+> lá está o porquê de cada regra, as armadilhas já descobertas e o que está
+> pausado. Este README conta o **que** o programa faz; o `CONTEXTO.md` conta
+> **por quê**.
+
 Monitor de Propostas Comerciais — roda em segundo plano no Windows observando a pasta de orçamentos e monta a proposta comercial final automaticamente.
 
 ## Fluxo
@@ -164,6 +169,7 @@ python monitorar.py
 ## Estrutura do projeto
 
 ```
+CONTEXTO.md               # Passagem de bastão: decisões, armadilhas, o que está pausado
 monitorar.py              # Monitor principal (watchdog + PyMuPDF)
 crm.py                    # Lançamento automático no CRM (só biblioteca padrão)
 drive.py                  # Envio automático para o Google Drive (só biblioteca padrão)
