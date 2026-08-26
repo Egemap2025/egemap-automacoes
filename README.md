@@ -155,6 +155,21 @@ python drive.py            # abre o navegador para conectar/reconectar
 python drive.py testar     # mostra se ja esta conectado
 ```
 
+### Arrumar as pastas do Drive (uma vez só)
+
+Enquanto o monitor criava pasta nova por causa de maiúscula, o Drive ficou com
+pastas repetidas: uma `Passo De Torres` ao lado da `Passo de Torres` que você
+usa, por exemplo. O monitor já não faz mais isso, e para arrumar o que ficou
+para trás existe o **`LIMPAR_DRIVE.bat`** — clique nele.
+
+Ele junta as repetidas numa só, leva os clientes que estavam na pasta errada
+para a certa, e tira as cópias iguais. Antes de mexer em qualquer coisa ele
+**mostra a lista inteira do que vai fazer** e espera você digitar `1` e ENTER.
+Se você só apertar ENTER, ele sai sem tocar em nada.
+
+O que for apagado vai para a **Lixeira do Drive** e dá para recuperar por 30
+dias. Arquivo que ele não souber de quem é fica onde está, com um aviso.
+
 ### Conectar ao CRM
 
 Abra o `EGEMAP-Monitor.exe`. Enquanto o CRM não estiver conectado, ele pergunta
@@ -196,6 +211,7 @@ CONTEXTO.md               # Passagem de bastão: decisões, armadilhas, o que es
 monitorar.py              # Monitor principal (watchdog + PyMuPDF)
 crm.py                    # Lançamento automático no CRM (só biblioteca padrão)
 drive.py                  # Envio automático para o Google Drive (só biblioteca padrão)
+limpar_drive.py           # Faxina nas pastas repetidas do Drive (LIMPAR_DRIVE.bat)
 montar_orcamento.py       # Utilitário de montagem/testes
 .github/workflows/build-exe.yml  # Build automático do .exe (PyInstaller)
 ```

@@ -1573,6 +1573,19 @@ def oferecer_conexao_drive():
 
 
 def main():
+    # "EGEMAP-Monitor.exe --limpar-drive" faz a faxina nas pastas do Drive
+    # (LIMPAR_DRIVE.bat). Mostra tudo antes e so mexe se voce confirmar.
+    if "--limpar-drive" in sys.argv[1:]:
+        try:
+            import limpar_drive
+        except Exception as e:
+            print(f"Faxina do Drive indisponivel nesta versao: {e}")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        codigo = limpar_drive.main([a for a in sys.argv[1:] if a != "--limpar-drive"])
+        input("\nPressione ENTER para fechar.")
+        sys.exit(codigo)
+
     # "EGEMAP-Monitor.exe --crm" abre so a conexao com o CRM (CONECTAR_CRM.bat)
     if "--crm" in sys.argv[1:]:
         if crm_egemap is None:

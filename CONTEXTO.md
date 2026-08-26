@@ -64,8 +64,23 @@ monitorar.py    Programa principal. Vigia a pasta, monta a proposta com
                 Capa/Página Final, e chama crm.py e drive.py.
 crm.py          Lança no CRM. Só biblioteca padrão.
 drive.py        Sobe pro Google Drive (via rclone). Só biblioteca padrão.
+limpar_drive.py Faxina as pastas repetidas do Drive. Roda sob demanda
+                (`EGEMAP-Monitor.exe --limpar-drive`, ou LIMPAR_DRIVE.bat).
 montar_orcamento.py   Utilitário de teste, fora do fluxo automático.
 ```
+
+### A faxina tem que rodar pelo rclone, não por fora
+
+O Drive do Natanael (`egemapesquadrias@gmail.com`) **enxerga** as pastas mas
+não consegue mexer nelas: quem criou, e portanto quem é dona, é a conta do
+rclone (`orcamentosegemap@gmail.com`). Tentar mover pela API com a conta dele
+devolve `The caller does not have permission`. Por isso a faxina roda pelo
+mesmo rclone que o monitor já usa — é a única credencial que tem o direito.
+
+O `limpar_drive.py` mostra tudo antes e só aplica com um `1` digitado.
+Nunca usa `purge`: só `rmdir` em pasta já vazia, e apagar é sempre para a
+Lixeira. Duas pastas com o nome **idêntico** (o Drive permite) não dá para
+tratar por caminho — quem resolve é `rclone dedupe --dedupe-mode merge`.
 
 `crm.py` e `drive.py` são **independentes**: o monitor os importa dentro de
 `try/except` e funciona sem eles. Eles não sabem nada do monitor. Mantenha
