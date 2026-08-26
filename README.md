@@ -125,9 +125,11 @@ pasta lá no Drive).
   fora, mesma regra do CRM.
 - Uma peça isolada esperando o `COMPLETO` (arquivo `MAD ALM`) não sobe
   sozinha — sobe é a proposta final, quando ela ficar pronta.
-- Proposta refeita no mesmo dia substitui a anterior no Drive (PVC substitui
-  só PVC, Alumínio/Madeira substitui só Alumínio/Madeira, a proposta final
-  substitui só outra final) — não acumula versão velha.
+- Proposta refeita no mesmo dia substitui a anterior no Drive, e **só a
+  mesma**: uma proposta de PVC substitui a de PVC, uma de alumínio substitui a
+  de alumínio. `ALM` e `MAD` são obras diferentes e **convivem** na pasta.
+  Proposta que você renomeou (`BRANCO`, `CINZA`) nunca é apagada — as duas
+  ficam, igual às duas linhas no CRM.
 - **Usa a pasta que já existe.** Antes de gravar, o monitor procura a pasta
   no Drive ignorando maiúscula e acento, então `Passo de Torres` continua
   sendo `Passo de Torres` — ele não cria mais uma `Passo De Torres` ao lado.

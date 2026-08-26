@@ -411,6 +411,27 @@ Conclusão prática: resto de duplicata com dono trocado tem que ser apagado
 `APAGAR - ...`, porque as cópias têm nome idêntico e ele não conseguiria
 distinguir uma da outra na tela.
 
+### No Drive, só a MESMA proposta substitui a anterior
+
+**Por quê:** o `drive.py` agrupava os materiais em três "categorias" — PVC,
+Alumínio/Madeira, e final. Alumínio e madeira na mesma categoria significa que
+uma proposta só de `ALM` e uma só de `MAD`, do mesmo cliente no mesmo dia, se
+apagavam: a segunda a subir levava a primeira embora.
+
+Pego pelo Natanael num teste real (Luciano Pereira de Oliveira, 26/08): o
+monitor subiu o `MAD` às 18:44:44 e apagou o `ALM`; ele repôs o `ALM` na mão
+às 18:45:25. No log aparecia `removi versao anterior de hoje`.
+
+Hoje a regra é: substitui só quando os materiais são **exatamente os mesmos**
+(`_mesma_opcao`). E nome **sem** código de material nunca conta como igual —
+proposta renomeada para `BRANCO`/`CINZA`, ou a final do `COMPLETO`. É o mesmo
+espírito do CRM, onde duas opções viram duas linhas que convivem. Se for mesmo
+a mesma proposta refeita, o nome do arquivo é o mesmo e o envio passa por cima
+dela, sem precisar apagar nada antes.
+
+Regra geral que vale a pena manter: **na dúvida, não apague.** Acumular um PDF
+a mais é barato; perder a proposta do cliente não.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

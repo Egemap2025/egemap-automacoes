@@ -236,23 +236,33 @@ def _materiais_do_nome(nome_arquivo):
             if c in palavras}
 
 
-def _categoria(materiais):
-    """PVC substitui so PVC, Aluminio/Madeira substitui so Aluminio/Madeira,
-    e a proposta final (sem sufixo de material) substitui outra final."""
-    if materiais == {"pvc"}:
-        return "pvc"
-    if materiais and "pvc" not in materiais:
-        return "alm"
-    return "completo"
+def _mesma_opcao(materiais_novos, materiais_antigos):
+    """As duas propostas do mesmo dia sao a MESMA coisa refeita?
+
+    So quando cobrem exatamente os mesmos materiais. Antes, aluminio e
+    madeira caiam numa "categoria" so, entao uma proposta so de ALM e uma so
+    de MAD do mesmo cliente no mesmo dia se apagavam -- a segunda a subir
+    levava a primeira embora. Sao obras diferentes e tem que conviver.
+
+    Nome sem codigo de material (proposta que voce renomeou pra BRANCO ou
+    CINZA, ou a final que sai do COMPLETO) nunca conta como igual: nao da
+    pra saber se e a mesma coisa, e no CRM essas duas viram duas linhas que
+    convivem -- aqui tem que ser igual. Se for mesmo a mesma proposta
+    refeita, o nome do arquivo e o mesmo e o envio ja passa por cima dela,
+    sem precisar apagar nada antes.
+    """
+    return bool(materiais_novos) and materiais_novos == materiais_antigos
 
 
 def enviar(pdf_path, destino, materiais, client="", log=None):
     """Sobe a proposta pronta para o Drive, dentro de 'destino' (caminho
     relativo a pasta raiz da Egemap no Drive, espelhando a pasta local).
 
-    Antes de enviar, apaga qualquer PDF do mesmo tipo enviado hoje na
-    mesma pasta -- assim uma proposta refeita no mesmo dia substitui a
-    anterior em vez de acumular.
+    Antes de enviar, apaga a versao de hoje da MESMA proposta (mesmos
+    materiais) que ja esteja na pasta -- assim refazer uma proposta no mesmo
+    dia substitui a anterior em vez de acumular. Proposta de outro material,
+    ou renomeada por voce, nunca e apagada: ALM e MAD sao obras diferentes e
+    convivem.
     """
     def _log(msg):
         if log:
@@ -260,7 +270,6 @@ def enviar(pdf_path, destino, materiais, client="", log=None):
 
     nome = Path(pdf_path).name
     hoje = date.today().isoformat()
-    categoria = _categoria(materiais)
 
     # Um envio de cada vez, e a pasta criada de uma vez so antes de copiar:
     # dois rclone em paralelo criavam a mesma pasta duas vezes.
@@ -281,7 +290,7 @@ def enviar(pdf_path, destino, materiais, client="", log=None):
                     continue
                 if (f.get("ModTime") or "")[:10] != hoje:
                     continue
-                if _categoria(_materiais_do_nome(fname)) != categoria:
+                if not _mesma_opcao(materiais, _materiais_do_nome(fname)):
                     continue
                 _rclone("deletefile", _remote(destino, fname))
                 _log(f"removi versao anterior de hoje ({fname})")
