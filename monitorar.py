@@ -941,14 +941,28 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
 
 # ── Google Drive ─────────────────────────────────────────────────────────────
 
-def _nome_canonico_cliente(nome):
-    """Normaliza maiusculas/minusculas do nome do cliente ("Felipe dos
-    Santos Coelho" e "Felipe Dos Santos Coelho" viram o mesmo nome).
+# "de", "da", "dos"... ficam minusculos, como se escreve em portugues.
+# Sem isso "Passo de Torres" virava "Passo De Torres" -- e como pro Google
+# Drive isso e outra pasta, o monitor criava uma nova ao lado da que voce ja
+# usava ha meses, e a proposta sumia da vista. Quem garante mesmo que a pasta
+# certa vai ser reaproveitada e o drive.py, que procura antes de criar; isto
+# aqui so serve pra pasta nova nascer com o nome escrito direito.
+LIGACOES_MINUSCULAS = {"de", "da", "do", "das", "dos", "e", "di", "du", "del", "y"}
 
-    Cada vendedor digita/organiza a pasta do jeito que da na maquina dele --
-    sem isso, a mesma pessoa virava duas pastas diferentes no Drive.
-    """
-    return " ".join(p.capitalize() for p in nome.split()) or "Cliente"
+
+_E_UF = re.compile(r"[A-Za-z]{2}")
+
+
+def _nome_canonico_cliente(nome):
+    """Arruma maiusculas/minusculas do nome ("felipe DOS santos coelho" vira
+    "Felipe dos Santos Coelho")."""
+    palavras = nome.split()
+    if not palavras:
+        return "Cliente"
+    return " ".join(
+        p.capitalize() if i == 0 or p.lower() not in LIGACOES_MINUSCULAS else p.lower()
+        for i, p in enumerate(palavras)
+    )
 
 
 def _destino_drive(pdf_path, pasta_raiz=""):
@@ -974,6 +988,12 @@ def _destino_drive(pdf_path, pasta_raiz=""):
             tem_cidade = pasta_cidade.resolve() != Path(pasta_raiz).resolve()
         except OSError:
             pass
+
+    # Proposta salva direto na pasta da cidade, sem pasta de cliente: a pasta
+    # "de cima" e o estado (SC, RS), nao uma cidade. Mandar assim criava uma
+    # cidade fantasma chamada "SC" no Drive. Manda pra propria cidade.
+    if tem_cidade and _E_UF.fullmatch(pasta_cidade.name.strip()):
+        return f"{ano}/{cliente}"
 
     if tem_cidade:
         cidade = _nome_canonico_cliente(pasta_cidade.name)

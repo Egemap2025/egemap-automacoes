@@ -247,6 +247,55 @@ para comparar texto, cai para o formato da página em vez de barrar tudo.
 
 ---
 
+### O Drive procura a pasta que já existe antes de criar uma nova
+
+**Por quê:** o monitor montava o nome da pasta e mandava o rclone gravar
+nela. Para o Google Drive `Passo De Torres` e `Passo de Torres` são **pastas
+diferentes**, então ele criava uma nova ao lado da que o Natanael usava desde
+janeiro — a proposta ia embora certinha, mas para um lugar que ninguém olha.
+Achado no Drive de verdade, três pares:
+
+| Criada pelo monitor | Já existia |
+|---|---|
+| `Passo De Torres` (1 cliente) | `Passo de Torres` (22 clientes) |
+| `Morro Da Fumaça` | `Morro da Fumaça` |
+| `Morrinhos Do Sul` | `Morrinhos do Sul` |
+
+A culpa era do `_nome_canonico_cliente`, que punha inicial maiúscula em toda
+palavra e transformava "de" em "De".
+
+Hoje o `drive.py` percorre `Ano/Cidade/Cliente` nível por nível e, em cada
+um, **reaproveita a pasta que já está lá** quando ela só difere por
+maiúscula, acento ou pontuação (`_pasta_equivalente`). Quando as duas
+grafias existem, fica com a que tem mais coisa dentro — a que está em uso de
+verdade — e sempre com a mesma, para não alternar. O
+`_nome_canonico_cliente` também deixou de subir "de/da/dos", mas isso é só
+cosmético: quem garante o acerto é a busca antes de criar.
+
+### Dois envios ao mesmo tempo criavam a pasta duas vezes
+
+**Por quê:** cada proposta sobe numa thread própria. Duas saindo juntas
+(PVC e alumínio, por exemplo) rodavam dois `rclone` em paralelo, e cada um
+criava a pasta do cliente por conta — o Google Drive aceita duas pastas com
+o **nome idêntico** no mesmo lugar. Foi assim que apareceram três
+`Felipe Dos Santos Coelho` dentro de `Balneario Gaivota`.
+
+Hoje o `enviar` inteiro roda sob um lock (`_ENVIO_LOCK`), e a pasta é criada
+de uma vez só com `rclone mkdir` antes de copiar o arquivo.
+
+### Proposta salva direto na pasta da cidade não vira cidade "SC"
+
+**Por quê:** a pasta local é `ORÇAMENTOS/<ano>/<UF>/<cidade>/<cliente>`, e o
+destino no Drive sai de `pasta do PDF` = cliente, `pasta de cima` = cidade.
+Quando o PDF era salvo direto na pasta da cidade (sem pasta de cliente), a
+"pasta de cima" virava o **estado**, e nascia uma cidade chamada `SC` no
+Drive. Hoje, se a pasta de cima tem duas letras, o monitor entende que é o
+UF e manda para a própria cidade (`2026/Balneario Gaivota`).
+
+Vale lembrar: a árvore do Drive é `Ano/Cidade/Cliente` — **não tem o nível do
+UF**, diferente do computador. É assim desde o agente antigo e foi
+confirmado com o Natanael.
+
 ## Armadilhas conhecidas (todas já custaram caro uma vez)
 
 ### OneDrive travando arquivo

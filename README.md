@@ -128,6 +128,13 @@ pasta lá no Drive).
 - Proposta refeita no mesmo dia substitui a anterior no Drive (PVC substitui
   só PVC, Alumínio/Madeira substitui só Alumínio/Madeira, a proposta final
   substitui só outra final) — não acumula versão velha.
+- **Usa a pasta que já existe.** Antes de gravar, o monitor procura a pasta
+  no Drive ignorando maiúscula e acento, então `Passo de Torres` continua
+  sendo `Passo de Torres` — ele não cria mais uma `Passo De Torres` ao lado.
+  Só cria pasta quando ela realmente não existe.
+- A estrutura no Drive é **Ano / Cidade / Cliente** (sem o nível do estado,
+  diferente do computador). Proposta salva direto na pasta da cidade, sem
+  pasta de cliente, vai para a própria cidade.
 
 **Se você já usava o agente separado do Drive:** pode continuar — ele fica
 conectado sozinho, sem pedir login de novo (usa a mesma pasta de configuração
