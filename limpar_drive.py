@@ -45,12 +45,16 @@ def log(msg=""):
 def rclone(*args, timeout=120):
     r = subprocess.run(
         [str(drive.RCLONE_EXE), *args, "--config", str(drive.RCLONE_CONF)],
-        capture_output=True, text=True, timeout=timeout,
+        capture_output=True, timeout=timeout,
+        # UTF-8 na marra: no Windows o padrao e cp1252, que nao sabe ler "Á"
+        # (Alvaro) nem "Í". A leitura morria numa thread interna e a saida
+        # voltava None.
+        encoding="utf-8", errors="replace",
     )
     if r.returncode != 0:
-        detalhe = (r.stderr or r.stdout or "").strip().splitlines()
+        detalhe = ((r.stderr or "") + (r.stdout or "")).strip().splitlines()
         raise RuntimeError(detalhe[-1] if detalhe else f"rclone falhou: {args}")
-    return r.stdout
+    return r.stdout or ""
 
 
 def listar(caminho):
@@ -201,17 +205,28 @@ def juntar_nomes_identicos(ano):
     caminho e o mesmo para as duas; quem resolve e o proprio rclone.
     """
     extra = [] if APLICAR else ["--dry-run"]
-    try:
-        # junta as pastas de nome igual numa so
-        saida = rclone("dedupe", "--dedupe-mode", "merge",
-                       drive._remote(ano), *extra, timeout=600)
-        # e tira arquivo repetido que seja byte a byte o mesmo (--by-hash),
-        # ficando com o mais novo
-        saida += rclone("dedupe", "--by-hash", "--dedupe-mode", "newest",
-                        drive._remote(ano), *extra, timeout=600)
-    except Exception as e:
-        log(f"   ! o rclone nao conseguiu: {e}")
-        return
+    saida = ""
+    # O "dedupe" junta as pastas de nome igual sozinho, sempre -- nao existe
+    # (e nao precisa de) um modo "merge". O modo diz o que fazer com ARQUIVO
+    # repetido: "skip" e nao mexer em nenhum.
+    passos = [
+        # 1a passada: so juntar as pastas de nome igual, sem tocar em arquivo
+        (["dedupe", "--dedupe-mode", "skip"], "juntando pastas de nome igual"),
+        # 2a passada: dois arquivos com o MESMO NOME na MESMA pasta (o Drive
+        # permite; foi o envio em paralelo que criou) -- fica o mais novo.
+        #
+        # De proposito sem --by-hash: por hash o rclone procura arquivo igual
+        # na arvore inteira, e apagaria o PDF de um cliente so porque outro
+        # cliente tem um identico. Arquivo repetido em pastas diferentes quem
+        # trata e a funcao juntar(), que compara nome e tamanho dentro da
+        # pasta de destino.
+        (["dedupe", "--dedupe-mode", "newest"], "tirando arquivo repetido na mesma pasta"),
+    ]
+    for args, o_que in passos:
+        try:
+            saida += rclone(*args, drive._remote(ano), *extra, timeout=600)
+        except Exception as e:
+            log(f"   ! nao consegui ({o_que}): {e}")
     linhas = [l for l in saida.splitlines() if l.strip()]
     if linhas:
         for l in linhas[:40]:

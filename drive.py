@@ -154,7 +154,13 @@ def _normalizar(texto):
 def _rclone(*args, **kw):
     return subprocess.run(
         [str(RCLONE_EXE), *args, "--config", str(RCLONE_CONF)],
-        capture_output=True, text=True, timeout=kw.get("timeout", 30),
+        capture_output=True, timeout=kw.get("timeout", 30),
+        # O rclone responde em UTF-8. Sem dizer isso, o Python no Windows tenta
+        # ler como cp1252 e engasga em nome com "Á" (Alvaro), "Í", "Ó"...: a
+        # leitura morre numa thread interna, r.stdout vem None e o monitor
+        # acaba criando pasta nova em vez de achar a que ja existe -- ou seja,
+        # o problema que essa funcao veio resolver voltava calado.
+        encoding="utf-8", errors="replace",
     )
 
 
@@ -165,11 +171,8 @@ def _listar(caminho, so_pastas=False):
         args.append("--dirs-only")
     try:
         r = _rclone(*args)
-    except Exception:
-        return []
-    if r.returncode != 0 or not r.stdout.strip().startswith("["):
-        return []
-    try:
+        if r.returncode != 0 or not (r.stdout or "").strip().startswith("["):
+            return []
         return json.loads(r.stdout)
     except Exception:
         return []

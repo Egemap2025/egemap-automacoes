@@ -353,6 +353,41 @@ A marca **só é gravada se ele realmente aplicou**. Ver a prévia e desistir
 devolve `2` do `limpar_drive.main`, e aí a pergunta volta na próxima abertura
 — senão, quem quisesse pensar melhor perdia o atalho.
 
+### Toda leitura de saída de programa tem que dizer UTF-8 na marra
+
+`subprocess.run(..., text=True)` no Windows decodifica com **cp1252**, não
+com UTF-8. O rclone responde em UTF-8, então basta um cliente chamado
+**Álvaro** (`Á` = `0xC3 0x81`) para estourar:
+
+```
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x81
+```
+
+E o pior: o erro acontece numa **thread interna** do `subprocess`, então
+`subprocess.run` **não levanta exceção** — ele volta com `stdout = None`. Quem
+não esperava isso quebra depois, longe da causa (`'NoneType' object has no
+attribute 'strip'`).
+
+Isso derrubou a faxina e, calado, também o `drive.py`: o `_listar` voltava
+vazio, o `_pasta_equivalente` não achava a pasta existente e o monitor criava
+`Passo De Torres` de novo — justamente o problema que ele tinha acabado de
+corrigir. Não apareceu nos meus testes porque aqui o padrão é UTF-8; só
+aparece no Windows dele.
+
+Sempre `encoding="utf-8", errors="replace"`, nunca `text=True` sozinho.
+
+### O "dedupe" do rclone não tem modo "merge"
+
+Os modos são `interactive|skip|first|newest|oldest|largest|smallest|rename`.
+Juntar pastas de nome igual o `dedupe` faz **sozinho, sempre** — o modo só
+decide o que fazer com arquivo repetido. Por isso a 1ª passada usa `skip`
+(junta as pastas, não toca em arquivo).
+
+A 2ª passada usa `newest` **sem `--by-hash`**. Com `--by-hash` o rclone
+procura arquivo idêntico na árvore inteira e apagaria o PDF de um cliente só
+porque outro cliente tem um igual. Sem ele, só considera mesmo nome na mesma
+pasta — que é exatamente o caso das duplicatas do Drive.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
