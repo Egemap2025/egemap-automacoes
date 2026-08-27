@@ -432,6 +432,40 @@ dela, sem precisar apagar nada antes.
 Regra geral que vale a pena manter: **na dúvida, não apague.** Acumular um PDF
 a mais é barato; perder a proposta do cliente não.
 
+### O `\w` do Python aceita acento — e isso derrubava o CRM
+
+O `_sanitizar_arquivo` do `crm.py` usava `re.sub(r"[^\w.\-]+", "_", nome)`,
+com o comentário "mesma regra que o CRM usa na tela". **Não é a mesma.** No
+JavaScript do CRM, `\w` é só `[A-Za-z0-9_]`; no Python 3 ele aceita letra
+acentuada. Então o "ç" passava batido.
+
+Esse nome vai dentro da **URL** do envio, e o Python monta a linha do pedido
+HTTP em ASCII. Resultado:
+
+```
+CRM: erro inesperado — 'ascii' codec can't encode characters in position 184-185
+```
+
+Pego pelo Natanael em 27/08 com "Ricardo da Conceição Rezende" (o `çã` de
+"Conceição" são dois caracteres seguidos, daí as duas posições).
+
+**Está assim desde o primeiro commit do CRM (`00d875d`).** Ou seja: todo
+cliente com acento no nome da pasta — Conceição, João, Assunção, Álvaro,
+Roldão — nunca conseguiu ter a proposta lançada. O log avisava, mas com uma
+mensagem que não dizia nada.
+
+Duas correções:
+
+1. O nome do arquivo no storage agora sai só com ASCII, trocando acento pela
+   letra sem acento (`Conceição` → `Conceicao`), não por `_`. O nome bonito
+   continua no `file_name`, que é o que aparece na tela do CRM.
+2. Trava geral no `_chamar`: qualquer caractere fora do ASCII na URL vira
+   `%XX` antes de sair. Só o que está fora do ASCII — `?`, `&` e `=`
+   continuam valendo como sintaxe.
+
+Lição que vale para o projeto todo: **`\w`, `\d` e `\s` em Python são
+Unicode.** Onde o resultado precisa ser ASCII, escreva o conjunto na mão.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

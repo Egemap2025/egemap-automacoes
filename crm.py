@@ -45,6 +45,7 @@ import ssl
 import sys
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
@@ -208,8 +209,23 @@ def _semelhanca(a, b):
 
 
 def _sanitizar_arquivo(nome):
-    """Mesma regra que o CRM usa na tela ao subir arquivo."""
-    return re.sub(r"[^\w.\-]+", "_", nome)[-120:]
+    """Nome do arquivo dentro do storage do CRM. Sai SO com ASCII.
+
+    Esse nome entra na URL do envio, e o Python monta a linha do pedido HTTP
+    em ASCII -- um "ç" derruba o envio inteiro com
+    "'ascii' codec can't encode characters". Foi o que aconteceu com o
+    cliente "Ricardo da Conceição Rezende" ("çã" em "Conceição").
+
+    O `\\w` do Python engana: diferente do JavaScript do CRM, ele aceita
+    letra com acento, entao o "ç" passava batido por este filtro.
+
+    Acento vira a letra sem acento ("Conceição" -> "Conceicao") em vez de
+    virar "_", pra continuar dando pra ler. O nome bonito, com acento, e
+    guardado a parte (file_name) e e esse que aparece na tela do CRM.
+    """
+    sem_acento = unicodedata.normalize("NFKD", nome)
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", sem_acento)[-120:]
 
 
 def _reais(valor):
@@ -243,7 +259,14 @@ class CRM:
     # -- transporte --
 
     def _chamar(self, metodo, caminho, corpo=None, headers=None, binario=None, tipo=None):
-        url = f"{SUPABASE_URL}{caminho}"
+        # Trava geral: a URL tem que sair em ASCII puro, senao o Python
+        # levanta "'ascii' codec can't encode characters" ao montar a linha do
+        # pedido -- um erro que nao diz o que aconteceu e derruba o
+        # lancamento inteiro. Aqui so o que esta fora do ASCII vira %XX; tudo
+        # que ja e ASCII fica intocado, entao ?, & e = continuam valendo como
+        # sintaxe da consulta.
+        url = "".join(c if ord(c) < 128 else urllib.parse.quote(c)
+                      for c in f"{SUPABASE_URL}{caminho}")
         cabecalho = {"apikey": ANON_KEY, "Accept": "application/json"}
         if self.token:
             cabecalho["Authorization"] = f"Bearer {self.token}"
