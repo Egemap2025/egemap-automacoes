@@ -25,6 +25,16 @@ Salva PVC (Sintegra) e/ou ALM/MAD (W-Vetro) na pasta do cliente
         Sobe sozinho para o Google Drive (mesma pasta do cliente)
 ```
 
+Depois, quando o contrato fecha:
+
+```
+     Salva o PDF do pedido na pasta dos pedidos (com o nome do cliente)
+                       ↓
+   Entra no card daquele cliente, em "Contrato", como a linha "Pedido"
+                       ↓
+        Junto da proposta que ja estava la — nada e removido
+```
+
 ## Lançamento automático no CRM
 
 Assim que a proposta fica pronta, o monitor faz no [CRM EGEMAP](https://crm.egemapesquadrias.com.br)
@@ -98,6 +108,79 @@ negócio nunca dobra. PVC e Alumínio pedidos separados continuam sendo duas lin
 
 Nesses casos é só lançar na mão, como antes.
 
+## Pedido automático no CRM (etapa Contrato)
+
+É o passo final, depois que o contrato fecha. Você salva o PDF do pedido numa
+pasta só dele (ex.: `Pedidos 2026`), edita como precisar e salva de novo com o
+mesmo nome. O monitor faz o resto:
+
+1. Lê o **nome do cliente no nome do arquivo**
+2. Lê o **valor do pedido** (do nome do arquivo, ou de dentro do PDF)
+3. Acha o cliente no CRM — **só entre os que estão em `Contrato`**
+4. Anexa o PDF como a linha **`Pedido`**, ao lado do que já está lá
+
+**Nada é removido.** A proposta anexada quando o orçamento saiu continua no
+lugar dela; o pedido entra junto, como mais uma linha. A única linha que o
+pedido substitui é a **dele mesmo** — quando você salva o mesmo arquivo de
+novo depois de editar, ou quando só renomeia. Editar quantas vezes precisar
+não duplica nada.
+
+**Só pedidos novos.** Os PDFs que já estavam na pasta quando o monitor abriu
+ficam como estão — o monitor só age no que chegar depois. (Isso também evita
+que uma sincronização do OneDrive despeje a pasta inteira no CRM de uma vez.)
+Se precisar mandar um antigo, renomeie o arquivo: ele passa a valer como novo.
+
+**Um contrato pode receber vários pedidos.** O segundo vira `Pedido 2`, o
+terceiro `Pedido 3` — nenhum toma o lugar do outro.
+
+**O valor do negócio não é tocado.** Em `Contrato` o número já é do vendedor
+(pode ter negociado desconto). O pedido só acrescenta a linha dele.
+
+### O nome do arquivo
+
+O nome do cliente sai do nome do arquivo. Tudo que é número (número do pedido,
+data, valor) e as palavras do dia a dia (`PEDIDO`, `PVC`, `ASSINADO`...) são
+ignoradas — o que sobra é o nome:
+
+```
+PEDIDO 1234 - Ivan Candiotto 15-08.pdf          -> Ivan Candiotto
+Pedido Calebe Silva 15-08 R$ 98.052,29.pdf      -> Calebe Silva
+```
+
+O valor é procurado em três lugares, nesta ordem: **escrito no nome do
+arquivo** (`... R$ 98.052,29.pdf`), num rótulo dentro do PDF (`VALOR TOTAL:`,
+`TOTAL GERAL (R$)`, `VALOR DO PEDIDO:`...), ou no maior valor em reais do
+documento. Se não achar nenhum, o PDF é anexado assim mesmo e o log avisa —
+escrever o valor no nome do arquivo resolve.
+
+**Quando o pedido NÃO é lançado** (e o log diz o porquê):
+- o cliente não está em `Contrato` — o log mostra em que etapa ele está
+- nenhum cliente parecido no CRM
+- o nome ficou parecido com dois cards ao mesmo tempo
+- não deu para ler o nome do cliente no nome do arquivo
+
+### Escolher a pasta dos pedidos
+
+O monitor pergunta na abertura, do mesmo jeito que pergunta do CRM e do Drive:
+digite `1` e ENTER e cole o caminho da pasta. Se ninguém responder em 20
+segundos ele segue normalmente. Depois de configurada, a pergunta some.
+
+Para escolher (ou trocar) sem esperar a pergunta, use o
+`CONFIGURAR_PEDIDOS.bat` — ou:
+
+```bash
+python monitorar.py --pedidos
+```
+
+Para conferir, sem escrever nada no CRM:
+
+```bash
+python pedidos.py testar "C:\Users\T-GAMER\OneDrive\Desktop\Pedidos 2026"
+python pedidos.py testar "C:\...\Pedidos 2026\PEDIDO 1234 Fulano.pdf"
+python crm.py contratos                    # lista quem está em "Contrato"
+python crm.py contratos "Ivan Candiotto"   # mostra para onde o pedido iria
+```
+
 ## Envio automático para o Google Drive
 
 Assim que a proposta fica pronta, o monitor sobe o PDF sozinho para o Google
@@ -157,6 +240,7 @@ python crm.py testar "Lara Castilho"  # mostra com qual card esse nome casaria
    - Caminho da pasta raiz de orçamentos
    - Se quer conectar o CRM (digite `1` e ENTER)
    - Se quer conectar o Google Drive (digite `1` e ENTER)
+   - Caminho da pasta dos pedidos (digite `1` e ENTER, ou pule)
 3. A partir daí ele salva tudo e abre sozinho com o Windows.
 
 ## Desenvolvimento local
@@ -173,6 +257,7 @@ CONTEXTO.md               # Passagem de bastão: decisões, armadilhas, o que es
 monitorar.py              # Monitor principal (watchdog + PyMuPDF)
 crm.py                    # Lançamento automático no CRM (só biblioteca padrão)
 drive.py                  # Envio automático para o Google Drive (só biblioteca padrão)
+pedidos.py                # PDF de pedido -> card do cliente em "Contrato"
 montar_orcamento.py       # Utilitário de montagem/testes
 .github/workflows/build-exe.yml  # Build automático do .exe (PyInstaller)
 ```

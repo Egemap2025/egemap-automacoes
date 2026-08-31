@@ -40,19 +40,31 @@ try:
 except Exception:
     drive_egemap = None
 
+# Pedidos: PDF de pedido -> card do cliente em "Contrato" (opcional tambem)
+try:
+    import pedidos as pedidos_egemap
+except Exception:
+    pedidos_egemap = None
+
 # ── Config salva em arquivo texto simples ─────────────────────────────────────
 
 CONFIG_FILE = Path.home() / ".egemap_monitor_config.txt"
 
 def load_config():
+    """Retorna (capa, pasta de orcamentos, pasta de pedidos).
+
+    A terceira linha so existe depois que a pasta de pedidos foi escolhida --
+    quem ja tinha a config antiga, de duas linhas, continua funcionando.
+    """
     if CONFIG_FILE.exists():
         lines = CONFIG_FILE.read_text(encoding="utf-8").splitlines()
         if len(lines) >= 2:
-            return lines[0].strip(), lines[1].strip()
-    return "", ""
+            pedidos = lines[2].strip() if len(lines) >= 3 else ""
+            return lines[0].strip(), lines[1].strip(), pedidos
+    return "", "", ""
 
-def save_config(capa, pasta):
-    CONFIG_FILE.write_text(f"{capa}\n{pasta}\n", encoding="utf-8")
+def save_config(capa, pasta, pasta_pedidos=""):
+    CONFIG_FILE.write_text(f"{capa}\n{pasta}\n{pasta_pedidos}\n", encoding="utf-8")
 
 # ── Lógica de PDF ─────────────────────────────────────────────────────────────
 
@@ -982,6 +994,20 @@ def _norm(path):
     return str(Path(path).resolve()).upper()
 
 
+def _dentro_de(path, pasta):
+    """Diz se o arquivo esta dentro dessa pasta (ou de uma subpasta dela).
+
+    Serve pra separar as duas pastas: o que esta na dos pedidos nunca pode
+    entrar na montagem da proposta, que apagaria o original.
+    """
+    if not pasta:
+        return False
+    try:
+        return _norm(path).startswith(_norm(pasta) + os.sep)
+    except Exception:
+        return False
+
+
 def _is_proposta_gerada(path):
     """Ignora PDFs que já foram gerados por este programa."""
     return Path(path).stem.startswith("Proposta Comercial")
@@ -1027,9 +1053,11 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path,
 
 
 class PropostaHandler(FileSystemEventHandler):
-    def __init__(self, capa_pdf, pasta_raiz=""):
+    def __init__(self, capa_pdf, pasta_raiz="", pasta_pedidos=""):
         self.capa_pdf = capa_pdf
         self.pasta_raiz = pasta_raiz
+        # Pedido nao e orcamento: nada da pasta de pedidos passa por aqui
+        self.pasta_pedidos = pasta_pedidos
         self._pending_single   = {}  # pdf_norm   -> (timestamp, caminho)
         self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
         self._pending_crm      = {}  # pdf_norm   -> (timestamp, caminho, nome_antigo)
@@ -1056,6 +1084,8 @@ class PropostaHandler(FileSystemEventHandler):
         p = Path(path)
         if p.suffix.lower() != ".pdf":
             return
+        if _dentro_de(path, self.pasta_pedidos):
+            return  # pedido tem dono proprio (PedidoHandler) e nunca e montado
         if _is_proposta_gerada(str(p)):
             self._fila_crm(str(p))    # nao remonta, mas mantem o CRM em dia
             self._fila_drive(str(p))  # e o Drive tambem
@@ -1088,6 +1118,8 @@ class PropostaHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         origem, destino = Path(event.src_path), Path(event.dest_path)
+        if _dentro_de(destino, self.pasta_pedidos):
+            return
 
         # Renomeou a proposta pronta (ex.: "... 24-08 PVC" -> "... 24-08 BRANCO"):
         # a linha no CRM muda de nome junto, em vez de duplicar.
@@ -1281,6 +1313,123 @@ class PropostaHandler(FileSystemEventHandler):
         else:
             log(f"[{client}] Nenhum PDF de orcamento encontrado na pasta.")
 
+# ── Pedidos (a pasta dos pedidos, separada da dos orcamentos) ────────────────
+
+# Espera antes de mandar o pedido: da tempo do arquivo terminar de ser salvo
+# (e de ser renomeado, se for o caso) antes de sair lancando.
+PEDIDO_WAIT_SECONDS = 12
+
+# Pedido ja mandado ao CRM: caminho -> (mtime, tamanho)
+_JA_ENVIADO_PEDIDO = {}
+
+
+def _lancar_pedido_no_crm(pdf_path, arquivo_antigo=None):
+    """Manda o PDF do pedido para o card do cliente, sem travar o monitor.
+
+    Roda em segundo plano, como o resto: se a internet cair ou o CRM demorar,
+    o monitor continua montando as propostas normalmente.
+    """
+    if pedidos_egemap is None or crm_egemap is None or not crm_egemap.configurado():
+        return
+
+    # O OneDrive mexe nos arquivos ao sincronizar e isso dispara evento sem
+    # nada ter mudado. Se e o mesmo arquivo de antes, nao reenvia.
+    try:
+        st = Path(pdf_path).stat()
+        assinatura = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return
+    chave = _norm(pdf_path)
+    if arquivo_antigo is None and _JA_ENVIADO_PEDIDO.get(chave) == assinatura:
+        return
+    _JA_ENVIADO_PEDIDO[chave] = assinatura
+
+    threading.Thread(
+        target=pedidos_egemap.enviar,
+        args=(pdf_path,),
+        kwargs={"log": log, "arquivo_antigo": arquivo_antigo},
+        daemon=True,
+    ).start()
+
+
+class PedidoHandler(FileSystemEventHandler):
+    """Vigia a pasta dos pedidos.
+
+    Aqui nao se monta nem se apaga nada: o PDF fica na pasta exatamente do
+    jeito que voce salvou, e so vai parar no CRM. Salvar de novo depois de
+    editar cai na MESMA linha la, entao editar quantas vezes precisar nao
+    duplica nada.
+    """
+
+    def __init__(self, pasta=""):
+        self.pasta = pasta
+        self._pending = {}   # pdf_norm -> (timestamp, caminho, nome_antigo)
+
+        # Os pedidos que JA ESTAVAM na pasta quando o monitor abriu ficam de
+        # fora: sao pedidos antigos, ja resolvidos. Isso nao e so uma
+        # comodidade -- o OneDrive toca nos arquivos ao sincronizar e dispara
+        # evento sem nada ter mudado, e sem essa lista uma sincronizacao
+        # despejaria a pasta inteira no CRM de uma vez.
+        self._ja_estavam = set()
+        if pasta:
+            try:
+                self._ja_estavam = {_norm(x) for x in Path(pasta).rglob("*.pdf")}
+            except Exception:
+                pass
+
+    def quantos_ja_estavam(self):
+        return len(self._ja_estavam)
+
+    def _fila(self, path, arquivo_antigo=None):
+        chave = _norm(path)
+        anterior = self._pending.get(chave)
+        # Se ja estava na fila por um rename, preserva de onde ele veio
+        if anterior and anterior[2] and not arquivo_antigo:
+            arquivo_antigo = anterior[2]
+        self._pending[chave] = (time.time(), str(path), arquivo_antigo)
+
+    def _queue(self, path, arquivo_antigo=None):
+        p = Path(path)
+        if p.suffix.lower() != ".pdf" or p.name.startswith("~$"):
+            return
+        if _norm(p) in self._ja_estavam:
+            return  # ja estava na pasta antes do monitor abrir: nao e pedido novo
+        if self.pasta and not _dentro_de(p, self.pasta):
+            return  # tirar o pedido da pasta nao e o mesmo que salvar um
+        self._fila(p, arquivo_antigo)
+
+    def on_created(self, event):
+        if not event.is_directory:
+            self._queue(event.src_path)
+
+    def on_modified(self, event):
+        if not event.is_directory:
+            self._queue(event.src_path)
+
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        origem, destino = Path(event.src_path), Path(event.dest_path)
+        # Renomeou o pedido dentro da mesma pasta: e o mesmo pedido, entao a
+        # linha do CRM so troca de arquivo em vez de virar uma linha nova.
+        renomeado = (origem.suffix.lower() == ".pdf"
+                     and _norm(origem.parent) == _norm(destino.parent)
+                     and origem.name != destino.name)
+        self._queue(destino, str(origem) if renomeado else None)
+
+    def tick(self):
+        now = time.time()
+        prontos = [k for k, (t, _, __) in list(self._pending.items())
+                   if now - t >= PEDIDO_WAIT_SECONDS]
+        for chave in prontos:
+            _, pdf_path, arquivo_antigo = self._pending.pop(chave)
+            try:
+                if Path(pdf_path).exists():
+                    _lancar_pedido_no_crm(pdf_path, arquivo_antigo)
+            except Exception as e:
+                log(f"ERRO ao enviar o pedido {Path(pdf_path).name} ao CRM: {e}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def validar_capa(capa_pdf):
@@ -1418,6 +1567,60 @@ def oferecer_conexao_drive():
     input("  Pressione ENTER para comecar a monitorar.")
 
 
+def _pedir_pasta(mensagem, proibida=""):
+    """Le um caminho de pasta digitado/colado. Vazio quando nao serve."""
+    caminho = input(mensagem).strip().strip('"').strip("'")
+    if not caminho:
+        return ""
+    if not Path(caminho).is_dir():
+        print(f"\n  Pasta nao encontrada: {caminho}")
+        return ""
+    if proibida and _norm(caminho) == _norm(proibida):
+        print("\n  Essa e a pasta dos orcamentos. A dos pedidos precisa ser outra.")
+        return ""
+    return caminho
+
+
+def oferecer_pasta_pedidos(capa_pdf, pasta_raiz, atual):
+    """Pergunta uma vez, na abertura, qual e a pasta dos pedidos.
+
+    Some sozinha depois de configurada. Se ninguem responder, o monitor segue
+    normalmente so com as propostas.
+    """
+    if atual and Path(atual).is_dir():
+        return atual
+    if pedidos_egemap is None:
+        return ""
+
+    print()
+    print("  " + "-" * 51)
+    print("  A pasta dos PEDIDOS ainda nao esta configurada.")
+    print()
+    print("  Configurando, todo PDF de pedido salvo nessa pasta vai")
+    print("  sozinho para o card do cliente no CRM, na etapa Contrato,")
+    print("  junto da proposta que ja esta la (sem tirar nada de la).")
+    print("  " + "-" * 51)
+    print()
+
+    resposta = _perguntar_com_tempo(
+        "  Digite 1 e ENTER para escolher a pasta agora (ou aguarde para pular): ", 20
+    )
+    if resposta != "1":
+        print("\n  Pulado. Da pra configurar depois: e so abrir este programa de novo.")
+        return ""
+
+    pasta = _pedir_pasta("\n  Cole o caminho da pasta dos pedidos e aperte Enter:\n  > ",
+                         proibida=pasta_raiz)
+    if not pasta:
+        print("\n  Deixa pra la por enquanto — o monitor funciona sem isso.")
+        return ""
+
+    save_config(capa_pdf, pasta_raiz, pasta)
+    print(f"\n  Pronto! Vou vigiar tambem: {pasta}")
+    input("\n  Pressione ENTER para comecar a monitorar.")
+    return pasta
+
+
 def main():
     # "EGEMAP-Monitor.exe --crm" abre so a conexao com o CRM (CONECTAR_CRM.bat)
     if "--crm" in sys.argv[1:]:
@@ -1439,13 +1642,36 @@ def main():
         input("\nPressione ENTER para fechar.")
         sys.exit(0 if ok else 1)
 
+    # "EGEMAP-Monitor.exe --pedidos" so escolhe a pasta dos pedidos
+    if "--pedidos" in sys.argv[1:]:
+        capa_atual, pasta_atual, _ = load_config()
+        if not (capa_atual and pasta_atual):
+            print("Configure primeiro a Capa e a pasta de orcamentos:")
+            print("abra o EGEMAP-Monitor uma vez e responda as duas perguntas.")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        print("=" * 55)
+        print("   EGEMAP - Pasta dos pedidos")
+        print("=" * 55)
+        print()
+        print("Todo PDF de pedido salvo nessa pasta vai sozinho para o card do")
+        print("cliente no CRM, na etapa Contrato, junto do que ja esta anexado.")
+        print()
+        nova = _pedir_pasta("Cole o caminho da pasta dos pedidos e aperte Enter:\n> ",
+                            proibida=pasta_atual)
+        if nova:
+            save_config(capa_atual, pasta_atual, nova)
+            print(f"\nPronto! Pasta dos pedidos: {nova}")
+        input("\nPressione ENTER para fechar.")
+        sys.exit(0 if nova else 1)
+
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 55)
     print("   EGEMAP - Monitor de Propostas Comerciais")
     print("=" * 55)
     print()
 
-    saved_capa, saved_pasta = load_config()
+    saved_capa, saved_pasta, saved_pedidos = load_config()
     config_ok = (
         saved_capa and saved_pasta
         and Path(saved_capa).exists()
@@ -1480,12 +1706,13 @@ def main():
             input("\nPressione ENTER para fechar.")
             sys.exit(1)
 
-        save_config(capa_pdf, pasta_raiz)
+        save_config(capa_pdf, pasta_raiz, saved_pedidos)
         registrar_inicio_automatico()
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
 
     oferecer_conexao_crm()
     oferecer_conexao_drive()
+    pasta_pedidos = oferecer_pasta_pedidos(capa_pdf, pasta_raiz, saved_pedidos)
 
     if drive_egemap is not None:
         # Se o agente separado do Drive ainda estiver instalado, desliga a
@@ -1505,24 +1732,42 @@ def main():
         print(f"  CRM: {email_crm}" if email_crm else "  CRM: nao conectado")
     if drive_egemap is not None:
         print("  Drive: conectado" if drive_egemap.configurado() else "  Drive: nao conectado")
+    if pasta_pedidos:
+        print(f"  Pedidos: {pasta_pedidos}")
     print()
     print("  Salve qualquer PDF com COMPLETO no nome para")
     print("  disparar a montagem automatica da proposta.")
+    if pasta_pedidos:
+        print()
+        print("  Pedido salvo na pasta dos pedidos vai para o card do")
+        print("  cliente em Contrato, junto do que ja esta anexado la.")
     print()
     print("  Pressione Ctrl+C para parar.")
     print("=" * 55)
     print()
 
-    handler  = PropostaHandler(capa_pdf, pasta_raiz)
+    handler  = PropostaHandler(capa_pdf, pasta_raiz, pasta_pedidos)
     observer = Observer()
     observer.schedule(handler, str(pasta_raiz), recursive=True)
+
+    handler_pedidos = None
+    if pasta_pedidos and Path(pasta_pedidos).is_dir() and pedidos_egemap is not None:
+        handler_pedidos = PedidoHandler(pasta_pedidos)
+        observer.schedule(handler_pedidos, str(pasta_pedidos), recursive=True)
+
     observer.start()
 
     log("Monitor iniciado. Aguardando arquivos COMPLETO...")
+    if handler_pedidos is not None:
+        quantos = handler_pedidos.quantos_ja_estavam()
+        log(f"Vigiando tambem a pasta dos pedidos. Os {quantos} pedido(s) que ja "
+            f"estavam la ficam como estao — so os novos vao pro CRM.")
 
     try:
         while True:
             handler.tick()
+            if handler_pedidos is not None:
+                handler_pedidos.tick()
             time.sleep(1)
     except KeyboardInterrupt:
         log("Parando monitor...")
