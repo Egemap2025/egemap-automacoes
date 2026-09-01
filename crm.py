@@ -225,8 +225,23 @@ def _semelhanca(a, b):
 
 
 def _sanitizar_arquivo(nome):
-    """Mesma regra que o CRM usa na tela ao subir arquivo."""
-    return re.sub(r"[^\w.\-]+", "_", nome)[-120:]
+    """Nome do arquivo do jeito que ele pode entrar no endereco do storage.
+
+    O endereco viaja no cabecalho do HTTP, que so aceita ASCII: um "José" ali
+    derruba o envio inteiro com "'ascii' codec can't encode character". Entao
+    acento vira letra simples (José -> Jose) e o que sobra fora do ASCII vira
+    "_" -- a mesma forma dos arquivos que o CRM ja tem guardados.
+
+    O nome bonito, com acento, continua inteiro em `file_name`: e ele que
+    aparece na tela do CRM. Isto aqui e so o endereco do arquivo.
+
+    O `re.ASCII` nao e detalhe: sem ele o `\w` do Python aceita letra com
+    acento (o do navegador, onde esta regra nasceu, nao aceita) -- e era
+    justamente por isso que o acento passava batido ate o envio quebrar.
+    """
+    sem_acento = unicodedata.normalize("NFKD", nome)
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return re.sub(r"[^\w.\-]+", "_", sem_acento, flags=re.ASCII)[-120:]
 
 
 def _reais(valor):
@@ -414,7 +429,7 @@ class CRM:
     def _apagar_pdf(self, caminho):
         try:
             self._chamar("DELETE", f"/storage/v1/object/{BUCKET}/{caminho}")
-        except CRMErro:
+        except Exception:
             pass  # arquivo orfao no storage nao quebra nada
 
     def enviar_orcamento(self, negocio, pdf_path, nome_orcamento, materiais,
