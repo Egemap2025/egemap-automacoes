@@ -300,6 +300,30 @@ sem erro nenhum no log. Hoje não se apaga nada antes; a troca cuida disso.
 O OneDrive toca nos arquivos ao sincronizar e dispara evento à toa. O monitor
 guarda o que já enviou (caminho, data e tamanho) e não reenvia igual.
 
+### Acento no nome do arquivo derrubava o envio inteiro
+
+```
+CRM: erro inesperado — 'ascii' codec can't encode character '\xe9'
+```
+
+O endereço do arquivo no storage viaja no cabeçalho do HTTP, que **só aceita
+ASCII**. Um `é` ali derruba o envio antes de qualquer coisa chegar no CRM.
+
+A causa era sutil: o `_sanitizar_arquivo` nasceu como tradução da regra do
+navegador (`[^\w.\-]+` → `_`), mas **o `\w` do Python aceita letra com acento e
+o do JavaScript não**. O acento atravessava a limpeza intacto e ia parar na
+URL. Hoje o acento vira letra simples antes, e a limpeza roda com `re.ASCII`.
+
+Isso valia para a **proposta também** — não era coisa do pedido. Todo cliente
+com acento no nome vinha falhando calado desde o começo, e dá para ver no
+banco: o `file_url` desses arquivos tem a marca da limpeza do navegador
+(`Valdir_Jos_Coppini`, com o "é" sumido), e não a do monitor — ou seja, foram
+anexados na mão. São 31 clientes com acento no nome espalhados pelo funil,
+8 deles em `Contrato`.
+
+**Lição:** ao traduzir uma regra do front para o Python, `\w` não é a mesma
+coisa nos dois lugares.
+
 ### As duas pastas não podem se misturar
 
 Se a pasta dos pedidos ficar dentro da pasta de orçamentos, o mesmo PDF cairia
