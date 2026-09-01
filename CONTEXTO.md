@@ -44,9 +44,15 @@ Fluxo típico:
 Depois que o contrato fecha vem o **pedido**, que é outro fluxo e outra pasta:
 
 `C:\Users\T-GAMER\OneDrive\Desktop\Pedidos 2026\` — plana, sem subpastas,
-um PDF por pedido. Ele salva o PDF ali, **edita com as informações necessárias
-e salva de novo com o mesmo nome**. Aí o pedido vai para o card do cliente no
-CRM, na etapa `Contrato`, como mais uma linha ao lado da proposta.
+um PDF por pedido, todos no formato **`Pedido - Nome do Cliente.pdf`** (foi ele
+quem confirmou: *"os pdf dos pedido são todos nesse formato"*). Ele salva o PDF
+ali, **edita com as informações necessárias e salva de novo com o mesmo nome**.
+Aí o pedido vai para o card do cliente no CRM, na etapa `Contrato`, como mais
+uma linha ao lado da proposta.
+
+**Um cliente pode ter mais de um pedido** — *"às vezes o cliente vai ter mais de
+um pdf de pedido por ser uma adição"*. O segundo arquivo vira a linha `Pedido
+2`, sem encostar no primeiro.
 
 ### O que cada sufixo significa (regra do negócio, não invenção)
 
@@ -238,6 +244,16 @@ Isso também protege de algo pior: o OneDrive toca nos arquivos ao sincronizar
 e dispara evento sem nada ter mudado — sem essa lista, uma sincronização
 despejaria a pasta inteira no CRM de uma vez. Para mandar um antigo de
 propósito, é só renomear o arquivo.
+
+### Só arquivo que começa com "Pedido" é pedido
+
+**Por quê:** a pasta guarda outros PDFs além dos pedidos —
+`EGEMAP_Solene_Material_Comercial.pdf` está lá no meio dos 113. Sem essa regra
+o nome dele viraria o "cliente Solene Material", e se existisse uma Solene em
+`Contrato` o material comercial cairia no card dela. Rodando os nomes reais da
+pasta contra os contratos reais, esse arquivo foi o **único** caso de risco: os
+`Pedido - ...` casaram todos entre 0.91 e 1.00, e quem não é de `Contrato` ficou
+abaixo de 0.65.
 
 ### O nome do cliente vem do nome do arquivo, não da pasta
 

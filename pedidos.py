@@ -6,7 +6,7 @@ O passo depois da proposta. Quando o contrato fecha, o pedido de fabrica e
 salvo em PDF numa pasta so dele (ex.: "Pedidos 2026"). Este modulo pega esse
 PDF e poe no card do cliente no CRM, na mesma lista em que a proposta ja esta:
 
-  1. Le o nome do cliente no NOME DO ARQUIVO
+  1. Le o nome do cliente no NOME DO ARQUIVO ("Pedido - Fulano de Tal.pdf")
   2. Le o valor do pedido (do nome do arquivo ou de dentro do PDF)
   3. Acha o cliente no CRM -- so entre os que estao em "Contrato"
   4. Anexa o PDF como a linha "Pedido", ao lado do que ja estava la
@@ -40,7 +40,14 @@ PALAVRAS_DE_SISTEMA = {
     "COMERCIAL", "CONTRATO", "EGEMAP", "COMPLETO", "FINAL", "ASSINADO",
     "COPIA", "REV", "REVISAO", "OS", "NF", "NUM", "NUMERO",
     "PVC", "ALM", "MAD", "ALUMINIO", "MADEIRA", "OBRA", "CLIENTE",
+    # um segundo pedido do mesmo cliente costuma ganhar uma dessas
+    "ADICAO", "ADICIONAL", "COMPLEMENTO", "COMPLEMENTAR", "EXTRA", "PARTE",
 }
+
+# So arquivo que comeca com "Pedido" e pedido. A pasta tambem guarda outros
+# PDFs (ex.: "EGEMAP_Solene_Material_Comercial.pdf") -- sem esta regra, o
+# nome de um deles seria lido como se fosse o nome de um cliente.
+PRIMEIRA_PALAVRA_DE_PEDIDO = {"PEDIDO", "PEDIDOS", "PED"}
 
 # "12.345,67", "1234,56", "R$ 12.345,67" -- exige os centavos com virgula pra
 # nao confundir numero de pedido ou data com dinheiro.
@@ -50,6 +57,17 @@ VALOR_ESCRITO = re.compile(r"R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
 def _sem_acento(texto):
     texto = unicodedata.normalize("NFKD", str(texto))
     return "".join(c for c in texto if not unicodedata.combining(c))
+
+
+def _palavras_do_nome(pdf_path):
+    return [p for p in re.split(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+",
+                                _sem_acento(Path(pdf_path).stem)) if p]
+
+
+def e_pedido(pdf_path):
+    """Diz se o arquivo e mesmo um pedido: "Pedido - Nome do Cliente.pdf"."""
+    palavras = _palavras_do_nome(pdf_path)
+    return bool(palavras) and palavras[0].upper() in PRIMEIRA_PALAVRA_DE_PEDIDO
 
 
 def nome_do_cliente(pdf_path):
@@ -201,6 +219,12 @@ def enviar(pdf_path, log=print, arquivo_antigo=None):
     Nunca levanta excecao: o que der errado vira uma linha no log.
     """
     arquivo = Path(pdf_path).name
+
+    if not e_pedido(pdf_path):
+        log(f"[pedido] {arquivo}: nao comeca com \"Pedido\" — deixei quieto. "
+            f"So os arquivos \"Pedido - Nome do Cliente.pdf\" vao pro CRM.")
+        return False
+
     cliente = nome_do_cliente(pdf_path)
 
     if not esperar_arquivo(pdf_path):
@@ -264,6 +288,10 @@ def testar(alvo=None):
     print(f"{len(pdfs)} arquivo(s):\n")
     iriam = 0
     for pdf in pdfs:
+        if not e_pedido(pdf):
+            print(f"  {pdf.name}")
+            print(f"    nao e pedido : nao comeca com \"Pedido\" — fica de fora\n")
+            continue
         cliente = nome_do_cliente(pdf)
         valor, de_onde = valor_do_pedido(pdf)
         print(f"  {pdf.name}")

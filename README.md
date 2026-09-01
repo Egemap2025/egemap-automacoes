@@ -138,14 +138,24 @@ terceiro `Pedido 3` — nenhum toma o lugar do outro.
 
 ### O nome do arquivo
 
-O nome do cliente sai do nome do arquivo. Tudo que é número (número do pedido,
-data, valor) e as palavras do dia a dia (`PEDIDO`, `PVC`, `ASSINADO`...) são
-ignoradas — o que sobra é o nome:
+O padrão da pasta é **`Pedido - Nome do Cliente.pdf`**, e é dele que sai o
+cliente. Tudo que é número (número do pedido, data, valor) e as palavras do dia
+a dia (`Pedido`, `PVC`, `adição`...) são ignoradas — o que sobra é o nome:
 
 ```
-PEDIDO 1234 - Ivan Candiotto 15-08.pdf          -> Ivan Candiotto
-Pedido Calebe Silva 15-08 R$ 98.052,29.pdf      -> Calebe Silva
+Pedido - Adriano Antonio Stuart.pdf       -> card "Adriano Stuart"
+Pedido - Alexandre Fernandes Pereira.pdf  -> card "Alexandre Pereira"
+Pedido - Altrix LTDA.pdf                  -> card "Altris Ltda"
 ```
+
+**Só entra arquivo que começa com `Pedido`.** A pasta guarda outros PDFs
+(material comercial, por exemplo) e eles ficam de fora — sem essa regra, o nome
+de um deles seria lido como se fosse um cliente. O log avisa quando pula um.
+
+**Mais de um pedido pro mesmo cliente** (uma adição, por exemplo): é só salvar
+o segundo PDF com um nome um pouco diferente (`Pedido - Fulano de Tal 2.pdf`,
+`... adição.pdf`) — o Windows já obriga isso. Ele cai no mesmo cliente e vira a
+linha `Pedido 2`, sem encostar no primeiro.
 
 O valor é procurado em três lugares, nesta ordem: **escrito no nome do
 arquivo** (`... R$ 98.052,29.pdf`), num rótulo dentro do PDF (`VALOR TOTAL:`,
@@ -154,6 +164,7 @@ documento. Se não achar nenhum, o PDF é anexado assim mesmo e o log avisa —
 escrever o valor no nome do arquivo resolve.
 
 **Quando o pedido NÃO é lançado** (e o log diz o porquê):
+- o arquivo não começa com `Pedido` (não é um pedido)
 - o cliente não está em `Contrato` — o log mostra em que etapa ele está
 - nenhum cliente parecido no CRM
 - o nome ficou parecido com dois cards ao mesmo tempo
