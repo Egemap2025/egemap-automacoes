@@ -1919,11 +1919,11 @@ def oferecer_conexao_drive():
 # Marca que a faxina das pastas do Drive ja foi oferecida nesta maquina, pra
 # nao ficar perguntando toda vez que o monitor abre.
 #
-# O nome muda de numero quando aparece um motivo novo pra oferecer de novo.
-# Foi o caso da copia velha do monitor: ela ficou rodando junto ate 02/09 e
-# criou pasta repetida (a "Silvana Pires Da Silva"), entao quem ja tinha
-# respondido a faxina antes precisa ser perguntado mais uma vez.
-FAXINA_JA_OFERECIDA = Path.home() / ".egemap_faxina_drive_ok2"
+# Quem ja respondeu nao e perguntado de novo, mesmo tendo aparecido pasta
+# repetida depois (a copia velha do monitor criou a "Silvana Pires Da Silva"
+# em 01/09). O Natanael pediu pra nao insistir: perguntar de novo so mudando
+# o numero do nome deste arquivo, e so quando ele pedir.
+FAXINA_JA_OFERECIDA = Path.home() / ".egemap_faxina_drive_ok"
 
 
 def oferecer_faxina_drive():

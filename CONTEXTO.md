@@ -688,9 +688,14 @@ Três coisas mudaram:
    navegador renomeou (`EGEMAP-Monitor (1).exe`).
 3. O cabeçalho mostra o caminho do `.exe` que está rodando, para essa
    confusão ser visível de cara.
-4. A marca da faxina virou `.egemap_faxina_drive_ok2`, para a pergunta da
-   limpeza voltar uma vez e juntar as pastas que a cópia velha criou. Sempre
-   que houver um motivo novo para reoferecer, é só mudar esse número.
+Cheguei a reativar a pergunta da faxina para juntar as duas pastas da
+Silvana, e ele respondeu que **não quer** — só queria entender o motivo da
+duplicação. Voltei a marca para `.egemap_faxina_drive_ok`. Lição: ele pergunta
+para entender, não para pedir serviço. Responder a pergunta e parar.
+
+As duas pastas continuam lá, e tudo bem: o `_resolver_destino` escolhe a
+equivalente com mais conteúdo, então proposta nova da Silvana cai na certa
+(4 arquivos contra 1).
 
 **Cuidado com o exe de arquivo único:** o PyInstaller `--onefile` roda em
 **dois processos com o mesmo nome** (o de fora, que descompacta, e o de
