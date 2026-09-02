@@ -9,6 +9,7 @@ import time
 import re
 import os
 import threading
+import subprocess
 import unicodedata
 from pathlib import Path
 from datetime import date
@@ -1723,22 +1724,95 @@ def validar_capa(capa_pdf):
     return None
 
 
+def _caminho_do_programa():
+    """O arquivo do programa que esta rodando agora."""
+    return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+
+
 def registrar_inicio_automatico():
-    """Registra o proprio exe para abrir com o Windows (so no Windows)."""
+    """Deixa ESTA copia abrindo junto com o Windows (so no Windows).
+
+    Roda em toda abertura, nao so na primeira configuracao. Antes so era
+    registrado na primeira vez: quem baixava uma versao nova continuava com a
+    copia velha abrindo sozinha no boot, e as duas ficavam vigiando a mesma
+    pasta ao mesmo tempo.
+
+    Devolve o caminho que estava registrado antes (ou None).
+    """
     if os.name != "nt":
-        return
+        return None
+    anterior = None
     try:
-        exe = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+        exe = str(_caminho_do_programa())
         import winreg
         chave = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
-            0, winreg.KEY_SET_VALUE
+            0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE
         )
-        winreg.SetValueEx(chave, "EGEMAP-Monitor", 0, winreg.REG_SZ, str(exe))
+        try:
+            anterior = winreg.QueryValueEx(chave, "EGEMAP-Monitor")[0]
+        except OSError:
+            anterior = None
+        if anterior != exe:
+            winreg.SetValueEx(chave, "EGEMAP-Monitor", 0, winreg.REG_SZ, exe)
         winreg.CloseKey(chave)
     except Exception:
         pass  # nao critico se falhar
+    return anterior
+
+
+def _copias_abertas():
+    """(pid, caminho) de cada copia do monitor aberta agora, no Windows.
+
+    O LIKE pega tambem copias renomeadas pelo navegador, tipo
+    'EGEMAP-Monitor (1).exe'.
+    """
+    comando = ("Get-CimInstance Win32_Process -Filter \"Name LIKE 'EGEMAP-Monitor%'\" | "
+               "ForEach-Object { \"$($_.ProcessId)|$($_.ExecutablePath)\" }")
+    saida = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", comando],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=30,
+    ).stdout or ""
+    achados = []
+    for linha in saida.splitlines():
+        pid, _, caminho = linha.strip().partition("|")
+        if pid.isdigit():
+            achados.append((int(pid), caminho.strip()))
+    return achados
+
+
+def fechar_copias_antigas():
+    """Fecha qualquer outra copia do monitor que ja esteja aberta.
+
+    Duas copias vigiando a mesma pasta mandam o mesmo PDF duas vezes e o Drive
+    acaba com pasta repetida do mesmo cliente (foi o caso das duas pastas da
+    'Silvana Pires da Silva'). Devolve a lista de caminhos que foram fechados.
+    """
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return []
+    # O exe de arquivo unico roda em dois processos (o de fora e o de dentro):
+    # fechar o de fora fecharia a copia que esta abrindo agora.
+    meus = {os.getpid(), os.getppid()}
+    try:
+        abertas = _copias_abertas()
+    except Exception:
+        return []
+    fechadas = []
+    for pid, caminho in abertas:
+        if pid in meus:
+            continue
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=30)
+        except Exception:
+            continue
+        nome = caminho or f"PID {pid}"
+        if nome not in fechadas:
+            fechadas.append(nome)
+    return fechadas
 
 
 def _perguntar_com_tempo(pergunta, segundos=20):
@@ -2013,6 +2087,11 @@ def main():
     print("=" * 55)
     print()
 
+    for caminho in fechar_copias_antigas():
+        print("  Fechei outra copia do monitor que estava aberta:")
+        print(f"    {caminho}")
+        print()
+
     saved_capa, saved_pasta, saved_pedidos = load_config()
     config_ok = (
         saved_capa and saved_pasta
@@ -2049,8 +2128,13 @@ def main():
             sys.exit(1)
 
         save_config(capa_pdf, pasta_raiz, saved_pedidos)
-        registrar_inicio_automatico()
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
+
+    antes = registrar_inicio_automatico()
+    if antes and antes != str(_caminho_do_programa()):
+        print("  Agora e esta copia que abre junto com o Windows.")
+        print(f"  (antes abria: {antes})")
+        print()
 
     oferecer_conexao_crm()
     oferecer_conexao_drive()
@@ -2068,6 +2152,7 @@ def main():
 
     print()
     print("=" * 55)
+    print(f"  Programa: {_caminho_do_programa()}")
     print(f"  Monitorando: {pasta_raiz}")
     print(f"  Capa: {Path(capa_pdf).name}")
     if crm_egemap is not None:

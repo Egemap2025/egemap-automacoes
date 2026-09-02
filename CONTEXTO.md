@@ -654,6 +654,47 @@ empacotada antes de reescrever a linha inteira.
 
 Quando a Capa não tem mês nenhum, não faz nada e **não avisa** — não é erro.
 
+### Duas cópias do monitor rodando ao mesmo tempo
+
+Descoberto em 02/09, investigando por que existiam duas pastas
+`Silvana Pires Da Silva` / `Silvana Pires da Silva` no Drive. A pasta com
+`Da` maiúsculo foi criada em 01/09 17:06 — e o código de hoje escreve `da`
+minúsculo. Rodei as duas versões lado a lado para confirmar:
+
+    b2f5cb8 (versão antiga) -> Silvana Pires Da Silva
+    e0cea19 (versão de hoje) -> Silvana Pires da Silva
+
+Ou seja: quem criou aquela pasta foi uma **cópia velha do monitor**, rodando
+ao mesmo tempo que a nova.
+
+A causa: o `registrar_inicio_automatico()` só era chamado dentro do
+`if not config_ok:` — a primeira configuração. Depois disso, a chave do
+Windows (`...\CurrentVersion\Run`) continuava apontando para o **primeiro
+`.exe`** que ele configurou, para sempre. Toda vez que ele baixava uma versão
+nova e abria pelo Downloads, o Windows continuava abrindo a velha no boot.
+Duas cópias vigiando a mesma pasta, cada uma mandando o mesmo PDF pro Drive.
+
+Isso provavelmente também explica duplicações antigas que foram atribuídas
+só à corrida entre threads (as três pastas iguais do `Felipe Dos Santos
+Coelho`, por exemplo).
+
+Três coisas mudaram:
+
+1. `registrar_inicio_automatico()` roda em **toda abertura**, não só na
+   primeira. A cópia que ele abriu por último é a que passa a abrir no boot.
+   Se o caminho mudou, o monitor avisa na tela qual era o antigo.
+2. `fechar_copias_antigas()` procura, na abertura, qualquer outro
+   `EGEMAP-Monitor*.exe` rodando e fecha. O `LIKE` no filtro pega cópias que o
+   navegador renomeou (`EGEMAP-Monitor (1).exe`).
+3. O cabeçalho mostra o caminho do `.exe` que está rodando, para essa
+   confusão ser visível de cara.
+
+**Cuidado com o exe de arquivo único:** o PyInstaller `--onefile` roda em
+**dois processos com o mesmo nome** (o de fora, que descompacta, e o de
+dentro, que é o Python). Por isso o `fechar_copias_antigas()` pula
+`os.getpid()` **e** `os.getppid()` — sem isso, o monitor fecharia a si mesmo
+na abertura.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
