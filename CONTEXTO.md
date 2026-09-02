@@ -688,6 +688,9 @@ Três coisas mudaram:
    navegador renomeou (`EGEMAP-Monitor (1).exe`).
 3. O cabeçalho mostra o caminho do `.exe` que está rodando, para essa
    confusão ser visível de cara.
+4. A marca da faxina virou `.egemap_faxina_drive_ok2`, para a pergunta da
+   limpeza voltar uma vez e juntar as pastas que a cópia velha criou. Sempre
+   que houver um motivo novo para reoferecer, é só mudar esse número.
 
 **Cuidado com o exe de arquivo único:** o PyInstaller `--onefile` roda em
 **dois processos com o mesmo nome** (o de fora, que descompacta, e o de

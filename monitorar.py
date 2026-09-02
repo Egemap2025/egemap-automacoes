@@ -1918,7 +1918,12 @@ def oferecer_conexao_drive():
 
 # Marca que a faxina das pastas do Drive ja foi oferecida nesta maquina, pra
 # nao ficar perguntando toda vez que o monitor abre.
-FAXINA_JA_OFERECIDA = Path.home() / ".egemap_faxina_drive_ok"
+#
+# O nome muda de numero quando aparece um motivo novo pra oferecer de novo.
+# Foi o caso da copia velha do monitor: ela ficou rodando junto ate 02/09 e
+# criou pasta repetida (a "Silvana Pires Da Silva"), entao quem ja tinha
+# respondido a faxina antes precisa ser perguntado mais uma vez.
+FAXINA_JA_OFERECIDA = Path.home() / ".egemap_faxina_drive_ok2"
 
 
 def oferecer_faxina_drive():
@@ -1941,9 +1946,11 @@ def oferecer_faxina_drive():
     print("  " + "-" * 51)
     print("  Arrumar as pastas do Google Drive?")
     print()
-    print("  Ate a versao passada o monitor criava pasta nova quando o")
-    print("  nome so mudava de maiuscula, entao pode ter ficado uma")
-    print("  'Passo De Torres' ao lado da 'Passo de Torres' que voce usa.")
+    print("  Uma copia antiga do monitor ficou abrindo junto com o Windows")
+    print("  e criava pasta nova quando o nome so mudava de maiuscula --")
+    print("  uma 'Silvana Pires Da Silva' ao lado da 'Silvana Pires da")
+    print("  Silva' que voce usa. Isso ja foi resolvido; falta juntar o")
+    print("  que ficou separado.")
     print()
     print("  Ele mostra tudo o que vai fazer ANTES e so mexe se voce")
     print("  confirmar. O que sair vai pra Lixeira do Drive.")
