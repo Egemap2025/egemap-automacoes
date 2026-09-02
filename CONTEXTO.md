@@ -635,6 +635,25 @@ problema, falhar calado numa coisa que vai para o cliente.
 Exige os colchetes de propósito: sem eles, o rótulo "Vendedor" impresso na
 Capa seria confundido com o campo a preencher.
 
+### O mês da Capa é escrito na hora de montar, não fica guardado
+
+A Capa tem `EGEMAP · PROPOSTA COMERCIAL · <MÊS> <ANO>` num canto da primeira
+página. Isso envelhece sozinho: vira o mês e toda proposta sai com o mês
+passado, porque ninguém lembra de reabrir a Capa no LibreOffice só para
+trocar uma palavra. Quando o Natanael pediu (02/09), a Capa dele ainda dizia
+`AGOSTO 2026`.
+
+Hoje o `atualizar_mes_da_capa` reescreve essa linha na montagem, com o mês de
+hoje. Aceita as formas usuais (`AGOSTO 2026`, `Agosto de 2026`,
+`agosto/2026`), respeita como estava escrito (caixa alta continua caixa alta)
+e troca o ano junto.
+
+Usa a **DM Sans** porque é a fonte dessa linha — a Capa 1 usa News Cycle nos
+campos grandes, mas o rodapé é DM Sans. Conferido que o `·` existe na fonte
+empacotada antes de reescrever a linha inteira.
+
+Quando a Capa não tem mês nenhum, não faz nada e **não avisa** — não é erro.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

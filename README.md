@@ -64,6 +64,13 @@ anexada no card sem servir pra nada. Quem vai é a proposta final, quando o
 `COMPLETO` ficar pronto. Já `ALM`, `MAD` ou `PVC` sozinho é obra só daquele
 material: proposta final, vai pro CRM e pro Drive, e o card anda.
 
+**O mês da Capa se atualiza sozinho.** A Capa traz num canto algo como
+`EGEMAP · PROPOSTA COMERCIAL · AGOSTO 2026`. Esse texto envelhece sozinho, e é
+fácil esquecer de trocar. O monitor põe o mês de hoje ali na hora de montar —
+você não precisa mexer na Capa quando virar o mês. Funciona escrito de
+qualquer jeito (`AGOSTO 2026`, `Agosto de 2026`, `agosto/2026`), e o ano vira
+junto.
+
 **Os códigos só valem como palavra inteira, e só depois da data.** `PVC`, `ALM`
 e `MAD` são lidos como palavras separadas no fim do nome — o nome do cliente
 fica de fora. Antes não era assim, e um cliente chamado **Almeida** (tem "ALM"

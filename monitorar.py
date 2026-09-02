@@ -535,6 +535,54 @@ def _substituir_dentro_da_linha(page, chaves, texto_novo, fontfile):
     return False
 
 
+# ── O mes escrito na Capa ─────────────────────────────────────────────────────
+#
+# A Capa traz, num canto da primeira pagina, algo como
+# "EGEMAP · PROPOSTA COMERCIAL · AGOSTO 2026". Isso envelhece sozinho: vira o
+# mes e a proposta continua saindo com o mes passado, porque quem desenhou a
+# Capa nao lembra de trocar. Entao o monitor troca na hora de montar.
+
+MESES_PT = ("janeiro", "fevereiro", "março", "abril", "maio", "junho",
+            "julho", "agosto", "setembro", "outubro", "novembro", "dezembro")
+
+# Aceita "AGOSTO 2026", "Agosto de 2026", "agosto/2026"...
+_MES_NA_CAPA = re.compile(
+    r"(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|"
+    r"outubro|novembro|dezembro)(\s*(?:de\s*)?/?\s*)(\d{4})", re.IGNORECASE)
+
+
+def _no_estilo_de(modelo, texto):
+    """Escreve do jeito que estava: TUDO EM CAIXA, Capitalizado ou minusculo."""
+    if modelo.isupper():
+        return texto.upper()
+    if modelo[:1].isupper():
+        return texto.capitalize()
+    return texto.lower()
+
+
+def atualizar_mes_da_capa(page, fontfile, hoje=None):
+    """Poe o mes/ano de hoje no lugar do que estiver escrito na Capa.
+
+    Devolve o texto novo quando trocou; None quando ja estava certo ou quando
+    a Capa nao tem mes nenhum escrito. Nao avisa quando nao acha: nem toda
+    Capa tem mes, e isso nao e erro.
+    """
+    hoje = hoje or date.today()
+    mes_agora = MESES_PT[hoje.month - 1]
+    for line, bruto in _linhas(page):
+        m = _MES_NA_CAPA.search(bruto)
+        if not m:
+            continue
+        novo_mes = _no_estilo_de(m.group(1), mes_agora)
+        if m.group(1) == novo_mes and m.group(3) == str(hoje.year):
+            return None
+        trocado = (bruto[:m.start()] + novo_mes + m.group(2)
+                   + str(hoje.year) + bruto[m.end():])
+        _trocar_linha(page, line, trocado, fontfile)
+        return trocado.strip()
+    return None
+
+
 def montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, total_str):
     """Monta a Capa completa (3 paginas) com os dados do cliente:
     Capa 1 (vendedor/cliente/pedido) e a pagina final (cliente + valor do
@@ -568,6 +616,12 @@ def montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, total_str):
             log(f"AVISO: nao achei onde escrever o {o_que} — a Capa "
                 f"'{Path(capa_pdf_path).name}' deve ter mudado o nome do campo. "
                 f"A proposta sai com o campo em branco.")
+
+    # O mes do rodape da Capa fica sempre no mes de hoje, sem depender de
+    # ninguem lembrar de trocar. Usa a DM Sans porque e a fonte dessa linha.
+    novo_mes = atualizar_mes_da_capa(p1, fonte_final)
+    if novo_mes:
+        log(f"Capa: atualizei o mes para '{novo_mes}'.")
 
     return doc
 
