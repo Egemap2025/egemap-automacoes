@@ -9,6 +9,7 @@ import time
 import re
 import os
 import threading
+import unicodedata
 from pathlib import Path
 from datetime import date
 
@@ -423,50 +424,102 @@ def _inserir_texto(page, origem, texto, fontfile, size, color):
         page.insert_text(origem, texto, fontname="helv", fontsize=size, color=color)
 
 
-def _substituir_linha_inteira(page, texto_antigo, texto_novo, fontfile):
-    """Troca uma linha cujo texto e EXATAMENTE texto_antigo por texto_novo,
-    mantendo posicao, tamanho e cor originais. Usado para os placeholders
-    que ocupam a linha toda (ex: "[nome do vendedor]", "R$ 000.000")."""
+# ── Onde escrever na Capa ─────────────────────────────────────────────────────
+#
+# Os campos da Capa sao marcados entre colchetes. O jeito de escrever muda
+# quando o layout e refeito: ja foi "[nome do vendedor]" e virou
+# "[NOME DO VENDEDOR]", e o pedido virou so "[N°]". Como a busca era por texto
+# exato, a Capa de setembro/2026 saiu com os tres campos em branco e ninguem
+# ficou sabendo -- a proposta ia pro cliente com "[NOME DO CLIENTE]" escrito.
+#
+# Entao a comparacao ignora maiuscula, acento e pontuacao, e cada campo aceita
+# varias grafias. Se um dia mudar de novo pra algo fora desta lista, o log
+# avisa em vez de deixar passar em branco.
+
+_MARCA = re.compile(r"^\[([^\]]+)\]$")
+_MARCA_NA_LINHA = re.compile(r"\[[^\]]+\]")
+
+MARCAS_VENDEDOR = {"nome do vendedor", "vendedor"}
+MARCAS_CLIENTE = {"nome do cliente", "cliente"}
+MARCAS_PEDIDO = {"numero do pedido", "n do pedido", "no do pedido",
+                 "numero", "pedido", "n", "no"}
+
+
+def _chave_marca(texto):
+    """Chave de comparacao de um campo da Capa. None se nao for um campo.
+
+    "[Número do Pedido]", "[NUMERO DO PEDIDO]" e "[numero do pedido]" dao a
+    mesma chave. Exige os colchetes de proposito: sem eles, o rotulo
+    "Vendedor" impresso na Capa seria confundido com o campo a preencher.
+    """
+    m = _MARCA.match((texto or "").strip())
+    if not m:
+        return None
+    t = unicodedata.normalize("NFKD", m.group(1))
+    t = "".join(c for c in t if not unicodedata.combining(c)).lower()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split())
+
+
+def _no_estilo_da_marca(marca, valor):
+    """Escreve o valor do jeito que o campo estava escrito: se o campo esta
+    todo em maiuscula ("[NOME DO CLIENTE]"), o nome tambem sai em maiuscula."""
+    letras = [c for c in marca if c.isalpha()]
+    return valor.upper() if letras and all(c.isupper() for c in letras) else valor
+
+
+def _trocar_linha(page, line, texto_novo, fontfile):
+    """Reescreve a linha inteira mantendo posicao, tamanho e cor originais."""
+    span = line["spans"][0]
+    ox, oy = span["origin"]
+    size = span["size"]
+    color = _color_tuple(span["color"])
+    page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
+    page.apply_redactions()
+    _inserir_texto(page, (ox, oy), texto_novo, fontfile, size, color)
+
+
+def _linhas(page):
     for b in page.get_text("dict")["blocks"]:
         if b["type"] != 0:
             continue
         for line in b["lines"]:
-            t = "".join(s["text"] for s in line["spans"]).strip()
-            if t == texto_antigo:
-                span = line["spans"][0]
-                ox, oy = span["origin"]
-                size = span["size"]
-                color = _color_tuple(span["color"])
-                page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
-                page.apply_redactions()
-                _inserir_texto(page, (ox, oy), texto_novo, fontfile, size, color)
-                return True
+            yield line, "".join(s["text"] for s in line["spans"])
+
+
+def _substituir_linha_inteira(page, texto_antigo, texto_novo, fontfile):
+    """Troca uma linha que e SO o campo (ex.: "[NOME DO VENDEDOR]",
+    "R$ 000.000") pelo valor.
+
+    texto_antigo pode ser o texto exato (usado no "R$ 000.000") ou um
+    conjunto de chaves de campo aceitas (MARCAS_VENDEDOR e companhia).
+    """
+    for line, bruto in _linhas(page):
+        t = bruto.strip()
+        if isinstance(texto_antigo, (set, frozenset)):
+            if _chave_marca(t) not in texto_antigo:
+                continue
+            valor = _no_estilo_da_marca(t, texto_novo)
+        else:
+            if t != texto_antigo:
+                continue
+            valor = texto_novo
+        _trocar_linha(page, line, valor, fontfile)
+        return True
     return False
 
 
-def _substituir_dentro_da_linha(page, marcador, texto_novo, fontfile):
-    """Troca so a parte "marcador" de uma linha maior (ex: "[NOME DO CLIENTE],
-    é uma honra fazer parte do seu projeto."), preservando o resto da frase
-    que vem depois do marcador."""
-    for b in page.get_text("dict")["blocks"]:
-        if b["type"] != 0:
-            continue
-        for line in b["lines"]:
-            t = "".join(s["text"] for s in line["spans"])
-            if marcador in t:
-                idx = t.find(marcador)
-                resto = t[idx + len(marcador):]
-                span = line["spans"][0]
-                ox, oy = span["origin"]
-                size = span["size"]
-                color = _color_tuple(span["color"])
-                page.add_redact_annot(fitz.Rect(line["bbox"]), fill=(1, 1, 1))
-                page.apply_redactions()
-                _inserir_texto(page, (ox, oy), texto_novo, fontfile, size, color)
-                if resto:
-                    largura = _medir_texto(texto_novo, fontfile, size)
-                    _inserir_texto(page, (ox + largura, oy), resto, fontfile, size, color)
-                return True
+def _substituir_dentro_da_linha(page, chaves, texto_novo, fontfile):
+    """Troca so o campo dentro de uma linha maior (ex.: "[NOME DO CLIENTE], é
+    uma honra fazer parte do seu projeto."), mantendo o resto da frase."""
+    for line, bruto in _linhas(page):
+        for achado in _MARCA_NA_LINHA.finditer(bruto):
+            if _chave_marca(achado.group(0)) not in chaves:
+                continue
+            valor = _no_estilo_da_marca(achado.group(0), texto_novo)
+            _trocar_linha(page, line,
+                          bruto[:achado.start()] + valor + bruto[achado.end():],
+                          fontfile)
+            return True
     return False
 
 
@@ -482,13 +535,27 @@ def montar_paginas_capa(capa_pdf_path, vendedor, cliente, pedido, total_str):
     doc.insert_pdf(fitz.open(capa_pdf_path))
 
     p1 = doc[0]
-    _substituir_linha_inteira(p1, "[nome do vendedor]", vendedor or "[nome do vendedor]", fonte_capa1)
-    _substituir_linha_inteira(p1, "[nome do cliente]", cliente or "[nome do cliente]", fonte_capa1)
-    _substituir_linha_inteira(p1, "[número do pedido]", pedido or "[número do pedido]", fonte_capa1)
-
     pf = doc[len(doc) - 1]
-    _substituir_dentro_da_linha(pf, "[NOME DO CLIENTE]", (cliente or "[NOME DO CLIENTE]").upper(), fonte_final)
-    _substituir_linha_inteira(pf, "R$ 000.000", f"R$ {total_str}", fonte_final)
+
+    # (o que e, onde procurar, como procurar, valor). Campo sem valor fica
+    # como esta na Capa -- escrever por cima com o proprio placeholder so
+    # trocaria o estilo dele.
+    campos = [
+        ("vendedor na Capa", p1, MARCAS_VENDEDOR, vendedor, _substituir_linha_inteira),
+        ("cliente na Capa", p1, MARCAS_CLIENTE, cliente, _substituir_linha_inteira),
+        ("numero do pedido na Capa", p1, MARCAS_PEDIDO, pedido, _substituir_linha_inteira),
+        ("cliente na Pagina Final", pf, MARCAS_CLIENTE, cliente, _substituir_dentro_da_linha),
+        ("valor na Pagina Final", pf, "R$ 000.000", total_str and f"R$ {total_str}",
+         _substituir_linha_inteira),
+    ]
+    for o_que, pagina, marca, valor, substituir in campos:
+        if not valor:
+            log(f"AVISO: sem {o_que} para preencher (o orcamento nao trouxe esse dado).")
+            continue
+        if not substituir(pagina, marca, valor, fonte_capa1 if pagina is p1 else fonte_final):
+            log(f"AVISO: nao achei onde escrever o {o_que} — a Capa "
+                f"'{Path(capa_pdf_path).name}' deve ter mudado o nome do campo. "
+                f"A proposta sai com o campo em branco.")
 
     return doc
 

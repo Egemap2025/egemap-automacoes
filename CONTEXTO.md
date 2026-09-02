@@ -466,6 +466,30 @@ Duas correções:
 Lição que vale para o projeto todo: **`\w`, `\d` e `\s` em Python são
 Unicode.** Onde o resultado precisa ser ASCII, escreva o conjunto na mão.
 
+### Os campos da Capa mudam de nome quando o layout é refeito
+
+A montagem escreve vendedor, cliente e nº do pedido por cima de placeholders
+entre colchetes na Capa. A busca era por **texto exato e minúsculo**
+(`[nome do vendedor]`).
+
+Em 02/09 o Natanael passou a usar uma Capa nova ("PROPOSTA COMERCIAL ·
+SETEMBRO 2026"), e nela os campos viraram `[NOME DO VENDEDOR]`,
+`[NOME DO CLIENTE]` e `[N°]`. Nenhum casou. Resultado: a proposta saiu para o
+cliente com **`[NOME DO CLIENTE]` escrito na capa**, e ninguém foi avisado —
+a Página Final continuou certa porque lá o marcador já era maiúsculo.
+
+O monitor **lia** tudo direito (`ALIEL FERNANDES`, `NATANAEL VIEIRA
+MARCELINO`, pedido `2346`); só não achava onde escrever.
+
+Hoje a comparação ignora maiúscula, acento e pontuação, e cada campo aceita
+várias grafias (`MARCAS_VENDEDOR` e companhia). O valor sai no estilo do
+campo: placeholder em maiúscula → nome em maiúscula. E **quando um campo não
+é encontrado, o log avisa** com o nome do arquivo da Capa — era o pior do
+problema, falhar calado numa coisa que vai para o cliente.
+
+Exige os colchetes de propósito: sem eles, o rótulo "Vendedor" impresso na
+Capa seria confundido com o campo a preencher.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
