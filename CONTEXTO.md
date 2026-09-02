@@ -41,6 +41,19 @@ Fluxo típico:
    boa parte já sai com o nome certo
 4. A proposta vai para o CRM e para o Drive
 
+Depois que o contrato fecha vem o **pedido**, que é outro fluxo e outra pasta:
+
+`C:\Users\T-GAMER\OneDrive\Desktop\Pedidos 2026\` — plana, sem subpastas,
+um PDF por pedido, todos no formato **`Pedido - Nome do Cliente.pdf`** (foi ele
+quem confirmou: *"os pdf dos pedido são todos nesse formato"*). Ele salva o PDF
+ali, **edita com as informações necessárias e salva de novo com o mesmo nome**.
+Aí o pedido vai para o card do cliente no CRM, na etapa `Contrato`, como mais
+uma linha ao lado da proposta.
+
+**Um cliente pode ter mais de um pedido** — *"às vezes o cliente vai ter mais de
+um pdf de pedido por ser uma adição"*. O segundo arquivo vira a linha `Pedido
+2`, sem encostar no primeiro.
+
 ### O que cada sufixo significa (regra do negócio, não invenção)
 
 | Sufixo | Significado |
@@ -60,10 +73,12 @@ veio direto do Natanael: *"quando dá MAD ALM é para juntar com outro"*.
 ## Arquitetura
 
 ```
-monitorar.py    Programa principal. Vigia a pasta, monta a proposta com
-                Capa/Página Final, e chama crm.py e drive.py.
+monitorar.py    Programa principal. Vigia as pastas, monta a proposta com
+                Capa/Página Final, e chama crm.py, drive.py e pedidos.py.
 crm.py          Lança no CRM. Só biblioteca padrão.
 drive.py        Sobe pro Google Drive (via rclone). Só biblioteca padrão.
+pedidos.py      Lê o nome do cliente e o valor no PDF do pedido e manda pro
+                CRM (etapa Contrato). Usa o PyMuPDF que já está lá.
 limpar_drive.py Faxina as pastas repetidas do Drive. O monitor oferece na
                 abertura (uma vez so); tambem roda por
                 `EGEMAP-Monitor.exe --limpar-drive` ou LIMPAR_DRIVE.bat.
@@ -83,9 +98,10 @@ Nunca usa `purge`: só `rmdir` em pasta já vazia, e apagar é sempre para a
 Lixeira. Duas pastas com o nome **idêntico** (o Drive permite) não dá para
 tratar por caminho — quem resolve é `rclone dedupe --dedupe-mode merge`.
 
-`crm.py` e `drive.py` são **independentes**: o monitor os importa dentro de
-`try/except` e funciona sem eles. Eles não sabem nada do monitor. Mantenha
-assim — foi o que permitiu acrescentar cada um sem quebrar o que já rodava.
+`crm.py`, `drive.py`, `pedidos.py` e `limpar_drive.py` são **independentes**: o
+monitor os importa dentro de `try/except` e funciona sem eles. Eles não sabem
+nada do monitor. Mantenha assim — foi o que permitiu acrescentar cada um sem
+quebrar o que já rodava.
 
 O `.exe` sai por GitHub Actions a cada push e é publicado numa release. O link
 fixo é sempre a versão mais nova:
@@ -127,6 +143,8 @@ do Windows.
 `Novo Lead` → `Contato Realizado` → `Orçamento a Definir` →
 **`Orçamentos a Fazer`** → **`Atualizações`** → **`Orçamento Pronto`** →
 `Orçamento Apresentado` → `Em Negociação` → `Contrato`
+
+`Contrato` é a última: é lá que o pedido entra.
 
 As duas primeiras em negrito são **filas de trabalho**: card parado ali é
 orçamento esperando ser feito. `Atualizações` é onde entra quem pediu
@@ -261,6 +279,77 @@ com capa e contra capa"*. Antes de enviar, compara a primeira e a última
 página com a Capa configurada. Se a Capa for desenhada em imagem e não der
 para comparar texto, cai para o formato da página em vez de barrar tudo.
 
+### O pedido só acrescenta, nunca substitui
+
+**Por quê:** pedido explícito — *"nunca tirando o pdf que já vai estar lá, no
+caso seria só para adicionar junto"*. A proposta anexada quando o orçamento
+saiu continua onde está. A única linha que o pedido substitui é a **dele
+mesmo**, achada pelo `file_name`: o mesmo arquivo salvo de novo depois de
+editado cai na mesma linha em vez de virar um `Pedido 2`. Contrato com mais de
+um pedido vira `Pedido 2`, `Pedido 3` — nenhum toma o lugar do outro.
+
+O `enviar_orcamento` (proposta) apaga linhas; o `enviar_pedido` **não apaga
+nenhuma**. São métodos separados de propósito. Não junte os dois.
+
+### Contrato também procura entre os negócios GANHOS
+
+**Por quê:** dos 52 cards em `Contrato`, só **7** estão `open` — os outros 45
+estão `won`. O `negocios_abertos()` da proposta (`status=eq.open`) deixaria 45
+contratos de fora e o pedido quase nunca acharia o cliente. Por isso o pedido
+usa `negocios_que_valem()`, que é `status=in.(open,won)`.
+
+### O pedido ranqueia fora do Contrato também, e só age dentro
+
+**Por quê:** é o mesmo caso do "Samuel x Samuel Neotti", e ele existe de
+verdade aqui: **"ivan Candiotto"** está em `Contrato` e **"Ivan Candioto casa
+Noeli"** está em `Orçamento Apresentado` (também **"Maria Teresinha silveira"**
+x **"Maria Teresa Silva"**). Procurando só dentro da coluna, um pedido do
+segundo cairia no contrato do primeiro — outra pessoa, outro contrato.
+
+Então ranqueia entre todos os que valem e **exige que o vencedor esteja em
+`Contrato`**. Se o vencedor está em outra etapa, não mexe em nada e o log diz
+onde ele está.
+
+### Só pedido novo é lançado
+
+**Por quê:** pedido explícito — *"só quero que comece a fazer isso nos pdf
+novos, não os que já estão lá"* (a pasta já tinha 109). Ao abrir, o monitor
+anota os PDFs que já estavam na pasta e os ignora enquanto estiver rodando.
+
+Isso também protege de algo pior: o OneDrive toca nos arquivos ao sincronizar
+e dispara evento sem nada ter mudado — sem essa lista, uma sincronização
+despejaria a pasta inteira no CRM de uma vez. Para mandar um antigo de
+propósito, é só renomear o arquivo.
+
+### Só arquivo que começa com "Pedido" é pedido
+
+**Por quê:** a pasta guarda outros PDFs além dos pedidos —
+`EGEMAP_Solene_Material_Comercial.pdf` está lá no meio dos 113. Sem essa regra
+o nome dele viraria o "cliente Solene Material", e se existisse uma Solene em
+`Contrato` o material comercial cairia no card dela. Rodando os nomes reais da
+pasta contra os contratos reais, esse arquivo foi o **único** caso de risco: os
+`Pedido - ...` casaram todos entre 0.91 e 1.00, e quem não é de `Contrato` ficou
+abaixo de 0.65.
+
+### O nome do cliente vem do nome do arquivo, não da pasta
+
+**Por quê:** a pasta dos pedidos é plana — todos os clientes juntos. Então o
+nome sai do próprio arquivo: tira tudo que tem número (número do pedido, data,
+valor) e as palavras do dia a dia (`PEDIDO`, `PVC`, `ASSINADO`...), e o que
+sobra é o nome. As letras soltas também saem (o `J.` de "Ezequiel J. de
+Biasi") — a comparação do CRM casa o nome sem elas, e sozinhas só atrapalham.
+
+### O valor do pedido tem três fontes, nessa ordem
+
+**Por quê:** o layout do PDF do pedido não é fixo (ele edita o arquivo antes de
+salvar). Então: **1.** valor escrito no nome do arquivo (é escolha dele, então
+manda em tudo); **2.** rótulo dentro do PDF (`VALOR TOTAL:`, `TOTAL GERAL
+(R$)`...), inclusive o que foi digitado em campo de formulário, que não aparece
+no texto normal da página; **3.** o maior valor em reais do documento, que num
+pedido é o total. Não achando nada, **anexa o PDF assim mesmo** e avisa no log
+— o PDF no card é o que mais importa; o valor dá pra escrever no nome do
+arquivo depois.
+
 ---
 
 ### O Drive procura a pasta que já existe antes de criar uma nova
@@ -312,6 +401,30 @@ Vale lembrar: a árvore do Drive é `Ano/Cidade/Cliente` — **não tem o nível
 UF**, diferente do computador. É assim desde o agente antigo e foi
 confirmado com o Natanael.
 
+### Houve duas linhas de trabalho em paralelo — hoje são uma só
+
+Entre 26/08 e 02/09 o projeto correu em **duas branches ao mesmo tempo**, cada
+uma numa conversa diferente, e as duas mexendo em `monitorar.py` e `crm.py`:
+
+| Branch | O que tinha de único |
+|---|---|
+| `egemap-proposal-monitor-dp611t` | correções do `MAD ALM`/`COMPLETO`, do Drive (pasta duplicada, UTF-8, `ALM`×`MAD`), da Capa, e a faxina |
+| `automate-pdf-orders-crm-vgkgkb` | o `pedidos.py` — PDF de pedido vai pro card em *Contrato* |
+
+Deu para notar o desperdício: **as duas acharam e corrigiram o mesmo bug do
+acento** (`'ascii' codec can't encode`), separadamente, com um dia de
+diferença. Uma delas fez `re.sub(..., flags=re.ASCII)`, a outra escreveu o
+conjunto ASCII na mão — mesma coisa, trabalho dobrado.
+
+Foram unidas em 02/09 num merge de verdade (as duas histórias preservadas).
+A resolução foi: partir da branch das correções e enxertar as peças dos
+pedidos inteiras, em vez de emendar marcador de conflito — o git tinha
+embaralhado duas funções diferentes que nasceram no mesmo ponto do arquivo.
+
+**Antes de abrir uma conversa nova para mexer aqui, confira se já não existe
+uma branch com trabalho em andamento** (`git ls-remote --heads origin`). Duas
+frentes no mesmo arquivo custam caro.
+
 ## Armadilhas conhecidas (todas já custaram caro uma vez)
 
 ### OneDrive travando arquivo
@@ -335,6 +448,38 @@ sem erro nenhum no log. Hoje não se apaga nada antes; a troca cuida disso.
 
 O OneDrive toca nos arquivos ao sincronizar e dispara evento à toa. O monitor
 guarda o que já enviou (caminho, data e tamanho) e não reenvia igual.
+
+### Acento no nome do arquivo derrubava o envio inteiro
+
+```
+CRM: erro inesperado — 'ascii' codec can't encode character '\xe9'
+```
+
+O endereço do arquivo no storage viaja no cabeçalho do HTTP, que **só aceita
+ASCII**. Um `é` ali derruba o envio antes de qualquer coisa chegar no CRM.
+
+A causa era sutil: o `_sanitizar_arquivo` nasceu como tradução da regra do
+navegador (`[^\w.\-]+` → `_`), mas **o `\w` do Python aceita letra com acento e
+o do JavaScript não**. O acento atravessava a limpeza intacto e ia parar na
+URL. Hoje o acento vira letra simples antes, e a limpeza roda com `re.ASCII`.
+
+Isso valia para a **proposta também** — não era coisa do pedido. Todo cliente
+com acento no nome vinha falhando calado desde o começo, e dá para ver no
+banco: o `file_url` desses arquivos tem a marca da limpeza do navegador
+(`Valdir_Jos_Coppini`, com o "é" sumido), e não a do monitor — ou seja, foram
+anexados na mão. São 31 clientes com acento no nome espalhados pelo funil,
+8 deles em `Contrato`.
+
+**Lição:** ao traduzir uma regra do front para o Python, `\w` não é a mesma
+coisa nos dois lugares.
+
+### As duas pastas não podem se misturar
+
+Se a pasta dos pedidos ficar dentro da pasta de orçamentos, o mesmo PDF cairia
+nos dois vigias — e o da proposta **apaga o arquivo original** depois de montar.
+O `PropostaHandler` ignora tudo que estiver dentro da pasta de pedidos
+(`_dentro_de`), e na hora de escolher a pasta o programa recusa a mesma pasta
+dos orçamentos. Não tire nenhuma das duas proteções.
 
 ### Senha invisível
 
@@ -504,7 +649,15 @@ conectar Drive) **desiste sozinha em 20 segundos**. Se um dia isso virar um
 python crm.py testar                  # lista os negócios em "Orçamentos a Fazer"
 python crm.py testar "Lara Castilho"  # com qual card esse nome casaria
 python drive.py testar                # se o Drive está conectado
+
+python crm.py contratos               # lista quem está em "Contrato"
+python crm.py contratos "Fulano"      # para qual contrato o pedido iria
+python pedidos.py testar "<pasta>"    # confere a pasta inteira de pedidos:
+                                      # nome lido, valor lido e para onde iria
 ```
+
+O `python pedidos.py testar` não escreve nada no CRM — é o jeito de conferir se
+os nomes dos arquivos estão casando com os contratos antes de confiar nele.
 
 O log na janela preta do monitor conta tudo: o que montou, o que mandou pro
 CRM, e por que não mandou quando não mandou. **Peça o print dessa janela antes

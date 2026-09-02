@@ -34,6 +34,10 @@ Os passos 3, 4 e 5 tem freio:
     cliente pediu duas opcoes separadas (uma em PVC e outra em Aluminio), o
     card espera as duas sairem.
 
+Depois que o contrato fecha, o mesmo modulo poe o PDF do PEDIDO no card, como
+mais uma linha ("Pedido") ao lado da proposta -- so em quem esta na etapa
+"Contrato", e sem tirar nada do que ja estava anexado.
+
 Conversa com o CRM usando o seu proprio login (mesma permissao que voce tem na
 tela). Sem dependencia externa: so a biblioteca padrao do Python.
 """
@@ -79,6 +83,19 @@ ETAPAS_VALOR_DO_ORCAMENTO = {
     "novo lead", "contato realizado", "orcamento a definir",
     "orcamentos a fazer", "atualizacoes", "orcamento pronto",
 }
+
+# ── Pedido (etapa "Contrato") ─────────────────────────────────────────────────
+
+# Quando o contrato fecha, o pedido de fabrica vira mais uma linha na mesma
+# lista de orcamentos do card -- do lado da proposta, sem tomar o lugar dela.
+ETAPA_PEDIDO = "Contrato"
+ETAPA_PEDIDO_NORM = "contrato"
+NOME_LINHA_PEDIDO = "Pedido"
+
+# Card em "Contrato" quase sempre esta marcado como ganho: dos 52 que existem
+# hoje, so 7 estao "open" e 45 estao "won". Procurar so entre os abertos
+# deixaria 45 contratos de fora, e o pedido nunca acharia o cliente.
+STATUS_QUE_VALEM = ("open", "won")
 
 CONFIG_FILE = Path.home() / ".egemap_crm_config.json"
 
@@ -216,8 +233,10 @@ def _sanitizar_arquivo(nome):
     "'ascii' codec can't encode characters". Foi o que aconteceu com o
     cliente "Ricardo da Conceição Rezende" ("çã" em "Conceição").
 
-    O `\\w` do Python engana: diferente do JavaScript do CRM, ele aceita
-    letra com acento, entao o "ç" passava batido por este filtro.
+    O `\\w` do Python engana: diferente do JavaScript do CRM (onde esta regra
+    nasceu), ele aceita letra com acento -- por isso o "ç" passava batido por
+    este filtro. Aqui o conjunto e escrito na mao, so com ASCII, pra nao
+    depender desse detalhe.
 
     Acento vira a letra sem acento ("Conceição" -> "Conceicao") em vez de
     virar "_", pra continuar dando pra ler. O nome bonito, com acento, e
@@ -420,7 +439,7 @@ class CRM:
     def _apagar_pdf(self, caminho):
         try:
             self._chamar("DELETE", f"/storage/v1/object/{BUCKET}/{caminho}")
-        except CRMErro:
+        except Exception:
             pass  # arquivo orfao no storage nao quebra nada
 
     def enviar_orcamento(self, negocio, pdf_path, nome_orcamento, materiais,
@@ -551,6 +570,122 @@ class CRM:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
 
+    # -- pedido (etapa "Contrato") --
+
+    def negocios_que_valem(self):
+        """Negocios que ainda valem: os abertos e os ja ganhos.
+
+        O pedido chega depois do contrato assinado, e nessa altura o card
+        costuma estar marcado como ganho. Se olhasse so os abertos, quase
+        todo contrato ficaria de fora.
+        """
+        return self._tabela(
+            "deals",
+            "select=id,title,value,status,stage_id,contact_id,"
+            "pipeline_stages(name),contacts(first_name,last_name)"
+            f"&org_id=eq.{self.org_id}&status=in.({','.join(STATUS_QUE_VALEM)})",
+        )
+
+    def contratos(self):
+        return [n for n in self.negocios_que_valem() if _etapa_de(n) == ETAPA_PEDIDO_NORM]
+
+    def encontrar_contrato(self, cliente, negocios=None):
+        """Acha o card do cliente e exige que ele esteja em "Contrato".
+
+        Ranqueia entre TODOS os negocios que ainda valem -- nao so os de
+        "Contrato" -- pelo mesmo motivo do fluxo da proposta: procurando so
+        dentro da coluna, um pedido do "Ivan Candioto casa Noeli" cairia no
+        contrato do "ivan Candiotto", que e outra pessoa. Ganhando alguem de
+        fora do Contrato, nao mexe em nada e diz onde o card esta.
+
+        negocios ja consultados podem ser passados de fora, pra conferir uma
+        pasta inteira sem perguntar a lista ao CRM a cada arquivo.
+        """
+        if negocios is None:
+            negocios = self.negocios_que_valem()
+        negocio, duvida = self._escolher(self._ranquear(cliente, negocios))
+
+        if duvida:
+            raise ClienteNaoEncontrado(
+                f"'{cliente}' ficou parecido com dois cards "
+                f"('{duvida[0]['title']}' e '{duvida[1]['title']}'). "
+                f"Confira o nome do arquivo."
+            )
+        if not negocio:
+            raise ClienteNaoEncontrado(f"nenhum cliente parecido com '{cliente}' no CRM.")
+        if _etapa_de(negocio) != ETAPA_PEDIDO_NORM:
+            raise ClienteNaoEncontrado(
+                f"'{negocio['title']}' esta em '{_nome_etapa(negocio)}', e pedido "
+                f"so entra em '{ETAPA_PEDIDO}'."
+            )
+        return negocio
+
+    @staticmethod
+    def _nome_livre_pedido(existentes):
+        """"Pedido" quando ainda nao tem nenhum; senao "Pedido 2", "Pedido 3"...
+
+        Um contrato pode receber mais de um pedido, e nenhum pode tomar o
+        lugar do outro.
+        """
+        usados = {normalizar(b.get("name")) for b in existentes}
+        if normalizar(NOME_LINHA_PEDIDO) not in usados:
+            return NOME_LINHA_PEDIDO
+        n = 2
+        while normalizar(f"{NOME_LINHA_PEDIDO} {n}") in usados:
+            n += 1
+        return f"{NOME_LINHA_PEDIDO} {n}"
+
+    def enviar_pedido(self, negocio, pdf_path, valor, arquivo_antigo=None):
+        """Acrescenta o pedido na lista de orcamentos do contrato.
+
+        NUNCA tira o que ja esta la: a proposta anexada quando o orcamento
+        saiu continua no lugar dela. A unica linha que este metodo substitui
+        e a do PROPRIO pedido -- quando o mesmo arquivo e salvo de novo
+        depois de editado, ou quando ele so foi renomeado.
+
+        Retorna (nome_da_linha, atualizou, quantas_ficaram_intactas).
+        """
+        negocio_id = negocio["id"]
+        arquivo = Path(pdf_path).name
+
+        existentes = self._tabela(
+            "deal_budgets",
+            f"select=id,name,value,file_url,file_name&deal_id=eq.{negocio_id}",
+        )
+
+        # A linha do pedido e reconhecida pelo nome do arquivo, e nao pelo
+        # nome da linha: assim o mesmo pedido editado de novo cai na mesma
+        # linha, em vez de virar "Pedido 2".
+        nomes = {arquivo.strip().lower()}
+        if arquivo_antigo:
+            nomes.add(Path(arquivo_antigo).name.strip().lower())
+        anterior = next(
+            (b for b in existentes
+             if (b.get("file_name") or "").strip().lower() in nomes),
+            None,
+        )
+
+        caminho = self._subir_pdf(negocio_id, pdf_path)
+        registro = {
+            "value": valor,
+            "file_url": caminho,
+            "file_name": arquivo,
+            "created_by": self.user_id,
+        }
+
+        if anterior:
+            # Mantem o nome que a linha ja tinha: "Pedido 2" continua "Pedido 2"
+            registro["name"] = anterior.get("name") or NOME_LINHA_PEDIDO
+            self._tabela("deal_budgets", f"id=eq.{anterior['id']}", "PATCH", registro)
+            velho = anterior.get("file_url")
+            if velho and velho != caminho and not str(velho).startswith("http"):
+                self._apagar_pdf(velho)
+        else:
+            registro["name"] = self._nome_livre_pedido(existentes)
+            self._tabela("deal_budgets", "", "POST", {**registro, "deal_id": negocio_id})
+
+        return registro["name"], bool(anterior), len(existentes) - (1 if anterior else 0)
+
 
 # ── Ponto de entrada usado pelo monitor ───────────────────────────────────────
 
@@ -659,6 +794,46 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
 
     except ClienteNaoEncontrado as e:
         log(f"[{cliente}] CRM: nao lancei nada — {e}")
+    except CRMErro as e:
+        log(f"[{cliente}] CRM: falhou — {e}")
+    except Exception as e:  # nunca derruba o monitor por causa do CRM
+        log(f"[{cliente}] CRM: erro inesperado — {e}")
+    return False
+
+
+def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None):
+    """Poe o PDF do pedido no card do cliente. Nunca levanta excecao.
+
+    E o passo depois da proposta: contrato fechado, o pedido de fabrica entra
+    no mesmo lugar em que a proposta esta, como mais uma linha.
+
+    So mexe em quem esta em "Contrato" -- pedido de quem ainda esta em
+    orcamento nao existe, e cair no card errado seria pior do que nao fazer
+    nada. E so acrescenta: nada do que ja estava anexado sai dali.
+
+    pdf_path       -- PDF do pedido, do jeito que esta na pasta
+    cliente        -- nome do cliente lido do nome do arquivo
+    valor          -- valor do pedido (float)
+    arquivo_antigo -- nome anterior, quando o pedido acabou de ser renomeado
+    """
+    if not configurado():
+        return False
+
+    try:
+        crm = CRM().entrar()
+        negocio = crm.encontrar_contrato(cliente)
+
+        nome, atualizou, intactas = crm.enviar_pedido(
+            negocio, pdf_path, valor, arquivo_antigo)
+
+        acao = "Atualizado" if atualizou else "Lancado"
+        junto = f", junto das {intactas} linha(s) que ja estavam la" if intactas else ""
+        log(f"[{cliente}] CRM: {acao} '{nome}' em '{negocio.get('title')}' "
+            f"({ETAPA_PEDIDO}) — {_reais(valor)}{junto}")
+        return True
+
+    except ClienteNaoEncontrado as e:
+        log(f"[{cliente}] CRM: nao lancei o pedido — {e}")
     except CRMErro as e:
         log(f"[{cliente}] CRM: falhou — {e}")
     except Exception as e:  # nunca derruba o monitor por causa do CRM
@@ -775,13 +950,46 @@ def testar(nome=None):
     return 0
 
 
+def testar_contrato(nome=None):
+    """Mostra em qual contrato um pedido cairia -- sem escrever no CRM."""
+    if not configurado():
+        print("CRM ainda nao configurado. Rode: python crm.py configurar")
+        return 1
+    try:
+        crm = CRM().entrar()
+        contratos = crm.contratos()
+    except CRMErro as e:
+        print(f"ERRO: {e}")
+        return 1
+
+    print(f"\n{len(contratos)} cliente(s) em '{ETAPA_PEDIDO}':\n")
+    for n in sorted(contratos, key=lambda x: (x.get("title") or "").lower()):
+        print(f"  - {n['title']}")
+
+    if nome:
+        print(f"\nProcurando '{nome}'...")
+        try:
+            achado = crm.encontrar_contrato(nome)
+            print(f"  -> o pedido iria para: '{achado['title']}'  (id {achado['id']})")
+        except ClienteNaoEncontrado as e:
+            print(f"  -> nao iria pra lugar nenhum: {e}")
+    print()
+    return 0
+
+
 if __name__ == "__main__":
     comando = sys.argv[1] if len(sys.argv) > 1 else "testar"
+    argumento = sys.argv[2] if len(sys.argv) > 2 else None
     if comando == "configurar":
         sys.exit(configurar())
     elif comando == "testar":
-        sys.exit(testar(sys.argv[2] if len(sys.argv) > 2 else None))
+        sys.exit(testar(argumento))
+    elif comando in ("contratos", "pedido"):
+        sys.exit(testar_contrato(argumento))
     else:
         print(__doc__)
-        print("Comandos:  python crm.py configurar   |   python crm.py testar [nome do cliente]")
+        print("Comandos:")
+        print("  python crm.py configurar")
+        print("  python crm.py testar [nome do cliente]      (fila de orcamentos)")
+        print("  python crm.py contratos [nome do cliente]   (para onde o pedido iria)")
         sys.exit(1)

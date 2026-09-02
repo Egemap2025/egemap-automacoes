@@ -8,6 +8,7 @@ on:
       - claude/egemap-proposal-monitor-zw7dzh
       - claude/automacao-adicional-lshf3u
       - claude/egemap-proposal-monitor-dp611t
+      - claude/automate-pdf-orders-crm-vgkgkb
   workflow_dispatch:
 
 jobs:
@@ -31,7 +32,7 @@ jobs:
 
       - name: Gerar EXE
         run: |
-          pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." --hidden-import crm --hidden-import drive --hidden-import limpar_drive monitorar.py
+          pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." --hidden-import crm --hidden-import drive --hidden-import limpar_drive --hidden-import pedidos monitorar.py
 
       - name: Publicar EXE como artefato
         uses: actions/upload-artifact@v4
