@@ -198,9 +198,72 @@ O usuário mandou um vídeo editando o item 1 à mão. Isso revelou um **bug**:
 
 ---
 
+## MONTAR ORÇAMENTO DO ZERO ✅ v1 IMPLEMENTADA (menu opção 3)
+
+O usuário quer **montar orçamentos do zero** (achou mais fácil que alterar).
+O fluxo do W-Vetro é o MESMO da substituição — só muda a **porta de entrada**:
+em vez de ☰→"Substituir Projeto", clica no botão **"Inserir Novo Projeto"** e
+cai na mesma tela `selecioneprojeto`. Por isso o motor foi **refatorado**:
+
+- **`_construir_na_selecao(page, num, mud, prefixo)`** — motor compartilhado a
+  partir de "ESCOLHA O DESENHO": LINHA/MODELO → Pesquisar → escolhe card →
+  preenche Dados do Projeto (agora inclui **QUANTIDADE**) → Incluir item →
+  variáveis/acionamento → Confirmar. Usado por `substituir_item_projeto` e por
+  `montar_item_novo`.
+- **`montar_item_novo(page, num, mud)`** — clica "Inserir Novo Projeto"
+  (fallbacks: "novo projeto"/"adicionar item"/"incluir projeto") e chama o motor.
+- **`parse_montar(texto)`** + **`_spec_item_novo(linha)`** — lê a mensagem:
+  cabeçalho `Montar orçamento NNNN` e **uma linha por item novo**. Cada linha:
+  `[código] descrição do modelo - cor - vidro - ambiente - ...`
+  Ex.: `j01 janela 02 folhas e tela com persiana com motor l32 - branco
+  brilhante - incolor 6mm temperado - quartos`.
+  Extrai: código→TIPO (`j01`), linha embutida (`l32`→32 / `linha 25`),
+  acionamento (`motor`/`manual`), MODELO (resto da descrição), e classifica
+  cor/vidro/medida(`900x2100`)/qtde/ambiente pelos pedaços com ` - `.
+- **`modo_montar(page)`** — menu opção 3: cola a mensagem, mostra preview,
+  abre o orçamento, monta item a item (reabre o orçamento entre itens), Calcular,
+  resumo final.
+
+### MODELO (dropdown) — mapa das PORTAS (confirmado por prints do usuário 03/09)
+Lista real da LINHA **L.30**: JANELA DE CORRER, JANELA PIVOTANTE, MAXIM-AR,
+MÓDULO FIXO, PORTA CAMARÃO, PORTA DE CORRER, **PORTA DE GIRO 01/02 FOLHA(S)**,
+**PORTA PIVOTANTE** (+ 01/02 FOLHA(S)), **PORTÃO DE CORRER 01 FOLHA**, PORTAS DE
+GIRO, PORTINHOLA, VENEZIANA. `_modelo_dropdown` mapeia:
+- `maxim`→MAXIM-AR · `portinhola`→PORTINHOLA · `veneziana`→VENEZIANA ·
+  `camarão`→PORTA CAMARÃO.
+- `pivotante`: com "janela"→JANELA PIVOTANTE; com "porta"→PORTA PIVOTANTE (ou
+  `PORTA PIVOTANTE NN FOLHA(S)` se disser folhas). **Pivotante ripada** = MODELO
+  PORTA PIVOTANTE + **card "RIPADA/RIPADO VERTICAL"** (a "ripada" é o desenho,
+  não o modelo). Também existe LINHA "RIPADOS" com MODELO "PORTA PIVOTANTE 01
+  FOLHA" (cards RIP-PP1).
+- `porta` + `giro/abrir/batente`→PORTA DE GIRO 01/02 FOLHA(S) (portas internas
+  de abrir; default 01 folha). `porta de abrir` = porta de giro.
+- `porta` + `correr`: com "tras/parede/portão/embutir"→PORTÃO DE CORRER 01 FOLHA
+  (cards "porta de correr pra trás da parede"); senão PORTA DE CORRER.
+- `01 FOLHA` singular / `NN FOLHAS` plural (`_folha_sfx`).
+- fixo/painel/módulo→MÓDULO FIXO · resto→JANELA DE CORRER NN FOLHAS.
+
+### Ainda a fazer no MONTAR
+- **Solucionar o clique no card "N módulos"** (fallback ainda pede 1 clique).
+- **Ler o CRM** (`crm.egemapesquadrias.com.br/deals`): nome, telefone, cidade,
+  rua/bairro/número, responsável (vendedor) e "Resumo do orçamento".
+- **Ler o PDF arquitetônico** (tabela de esquadrias, texto legível via pymupdf)
+  para pré-preencher a **tabela do vendedor** (PDF + CRM). Protótipo em
+  `/tmp/ler_esq.py` (extraiu J1–J6, P1–P6 de um PDF real).
+- **Definir como o orçamento/cliente é criado** no W-Vetro (os vídeos reusam o
+  orçamento vazio 2346 via "Inserir Novo Projeto"; falta o fluxo de Novo Orçamento
+  + cadastro do cliente/endereço).
+- Confirmar formato da tabela do vendedor: planilha vs texto (recomendei planilha).
+
+---
+
 ## Como rodar (no PC do usuário, Windows)
 
 1. Baixar a branch (ZIP) e extrair.
 2. `instalar_robo.bat` (uma vez) — instala Playwright (usa o Chrome já instalado).
-3. `iniciar_robo.bat` — menu: 1) colar mensagem  2) editar manual.
+3. `iniciar_robo.bat` — menu: 1) colar mensagem  2) editar manual
+   3) MONTAR do zero.
 4. Login no Chrome só na 1ª vez.
+
+> Mais fácil: **`EGEMAP_ROBO.bat`** — lançador único que baixa sozinho a versão
+> mais nova do robô do GitHub (repo público) e roda. Só 2 cliques.

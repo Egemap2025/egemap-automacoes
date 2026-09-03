@@ -1258,6 +1258,96 @@ def parse_mensagem(texto):
     return orcamento, itens
 
 
+def _spec_item_novo(descricao):
+    """Le UMA linha de item novo (montar do zero) e devolve um 'mud'.
+    Formato: '[codigo] descricao do modelo - cor - vidro - ambiente - ...'
+    Ex.: 'j01 janela 02 folhas e tela com persiana com motor l32 -
+          branco brilhante - incolor 6mm temperado - quartos'
+    O 1o pedaco (antes do 1o ' - ') e a DESCRICAO/MODELO. Dela tiramos
+    o codigo (j01), a linha (l32/linha 25) e o acionamento (motor).
+    Os demais pedacos (separados por ' - ') sao classificados: cor, vidro,
+    medida, quantidade, ambiente."""
+    mud, ambiente = {}, []
+    partes = [p.strip() for p in _re.split(r"\s+[-–]\s+", descricao) if p.strip()]
+    if not partes:
+        return None
+    desc = partes[0]
+
+    # codigo no comeco: j01 / pj02 / p3 (vira 'tipo' e sai da descricao)
+    mcod = _re.match(r"^\s*([a-z]{1,3}\s*\d{1,3})\b\s*(.*)$", desc, _re.I)
+    if mcod:
+        mud["tipo"] = _re.sub(r"\s+", "", mcod.group(1)).upper()
+        resto = mcod.group(2).strip()
+        if resto:
+            desc = resto
+
+    # linha embutida na descricao: 'l32' / 'l25' / 'linha 25' / 'linha suprema 25'
+    ml = _re.search(r"\blinha\s+([a-z0-9 ]+?)(?=\s+-|\s*$)", desc, _re.I)
+    if ml:
+        mud["linha"] = ml.group(1).strip()
+        desc = _re.sub(r"\blinha\s+" + _re.escape(ml.group(1).strip()), "", desc,
+                       flags=_re.I).strip()
+    else:
+        ml2 = _re.search(r"\bl\s*(\d{2})\b", desc, _re.I)
+        if ml2:
+            mud["linha"] = ml2.group(1)
+            desc = _re.sub(r"\bl\s*" + ml2.group(1) + r"\b", "", desc,
+                           flags=_re.I).strip()
+
+    # acionamento embutido: motor / manual / correia / fita
+    if _re.search(r"\bmotor(?:izad[oa])?\b", desc, _re.I):
+        mud["acionamento"] = "MOTOR"
+    elif _re.search(r"\bmanual\b", desc, _re.I):
+        mud["acionamento"] = "MANUAL"
+
+    mud["modelo"] = _re.sub(r"\s+", " ", desc).strip()
+
+    # demais campos (cor / vidro / medida / qtde / ambiente)
+    for p in partes[1:]:
+        low = p.lower()
+        if _eh_linha(low):
+            mud["linha"] = p
+        elif _eh_acionamento(low):
+            mud["acionamento"] = _norm_acionamento(low)
+        else:
+            _classificar_parte(p, mud, ambiente)
+    if ambiente:
+        mud["ambiente"] = " ".join(ambiente)
+
+    # acionamento padrao MOTOR so faz sentido em item com persiana/esteira
+    if _re.search(r"persiana|integrad|rol[oôõ]|esteira|motor",
+                  mud.get("modelo", "").lower()):
+        mud.setdefault("acionamento", "MOTOR")
+    return mud
+
+
+def parse_montar(texto):
+    """Le uma mensagem de MONTAR ORCAMENTO DO ZERO e devolve
+    (orcamento, [lista de muds na ordem]). Cada linha (fora o cabecalho) e
+    um item NOVO a ser adicionado. O cabecalho traz o numero do orcamento
+    (ex.: 'Montar orcamento 2346')."""
+    linhas = [l.strip() for l in texto.splitlines() if l.strip()]
+    orcamento = None
+    itens = []
+    for l in linhas:
+        m = _re.search(r"or[çc]amento\s*[:#nºo\.]*\s*(\d{2,7})", l, _re.I)
+        if m and orcamento is None:
+            orcamento = m.group(1)
+            # se a linha for SO o cabecalho (montar orcamento NNNN), pula
+            if _re.match(r"^\s*montar\b", l, _re.I) or _re.search(
+                    r"^\s*or[çc]amento\b", l, _re.I):
+                continue
+        if _re.match(r"^\s*montar\s+or[çc]amento\b", l, _re.I):
+            continue
+        if orcamento is None and _re.match(r"^\d{2,7}$", l):
+            orcamento = l
+            continue
+        spec = _spec_item_novo(l)
+        if spec and spec.get("modelo"):
+            itens.append(spec)
+    return orcamento, itens
+
+
 CAMPOS_PREVIEW = (("cor", "cor"), ("largura", "largura"), ("altura", "altura"),
                   ("qtde", "quantidade"), ("vidro", "vidro"),
                   ("tipo", "tipo"), ("ambiente", "ambiente"))
@@ -1609,26 +1699,64 @@ def _melhor_opcao_texto(opcoes, termo):
     return melhor
 
 
+def _folha_sfx(n):
+    """'01 FOLHA' (singular) ou 'NN FOLHAS' (plural), como aparece na lista MODELO."""
+    n = str(n).zfill(2)
+    return f"{n} FOLHA" if n == "01" else f"{n} FOLHAS"
+
+
 def _modelo_dropdown(descricao):
-    """A partir da descricao solta do usuario (ex.: 'janela com persiana com
-    peitoril fixo', 'fixo 02 modulos verticais', 'maxim ar com bandeira',
-    'porta janela 02 folhas e tela'), decide qual MODELO escolher na lista."""
+    """A partir da descricao solta do usuario decide qual MODELO escolher na
+    lista do W-Vetro. A lista (linha L.30) tem: JANELA DE CORRER, JANELA
+    PIVOTANTE, MAXIM-AR, MODULO FIXO, PORTA CAMARAO, PORTA DE CORRER, PORTA DE
+    GIRO 01/02 FOLHA(S), PORTA PIVOTANTE (+01/02 FOLHA(S)), PORTAO DE CORRER 01
+    FOLHA, PORTAS DE GIRO, PORTINHOLA, VENEZIANA. O card certo vem depois pelo
+    texto (ex.: 'ripada' escolhe o desenho RIPADO, mas o MODELO e PORTA
+    PIVOTANTE)."""
     low = _sem_acento(descricao.lower())
     mf = _re.search(r"(\d{1,2})\s*folhas?", low)
-    folhas = mf.group(1).zfill(2) if mf else "02"
+    folhas = mf.group(1).zfill(2) if mf else None
+    tem_porta = "porta" in low
+    tem_janela = "janela" in low
+
+    # tipos que nao dependem de folhas
     if "maxim" in low:
-        return "JANELA MAXIM-AR"
+        return "MAXIM-AR"
     if "portinhola" in low:
         return "PORTINHOLA"
-    if "porta" in low:
-        if "giro" in low:
-            return f"PORTA DE GIRO {folhas} FOLHA"
-        return f"PORTA DE CORRER {folhas} FOLHAS"
+    if "veneziana" in low:
+        return "VENEZIANA"
+    if "camarao" in low:
+        return "PORTA CAMARAO"
+
+    # pivotante (porta OU janela)
+    if "pivotante" in low or "pivot" in low:
+        if tem_janela and not tem_porta:
+            return "JANELA PIVOTANTE"
+        # porta pivotante: se disse folhas usa o numerado, senao o generico
+        # (a 'ripada' e um CARD dentro de PORTA PIVOTANTE, nao um MODELO)
+        if folhas:
+            return f"PORTA PIVOTANTE {_folha_sfx(folhas)}"
+        return "PORTA PIVOTANTE"
+
+    if tem_porta:
+        # porta de giro / porta de abrir (interna/externa de abrir) -> PORTA DE GIRO
+        if "giro" in low or "abrir" in low or "batente" in low:
+            return f"PORTA DE GIRO {_folha_sfx(folhas or '01')}"
+        # porta de correr: 'pra tras da parede' / 'portao' -> PORTAO DE CORRER 01 FOLHA
+        if "correr" in low:
+            if "tras" in low or "parede" in low or "portao" in low or "embutir" in low:
+                return "PORTAO DE CORRER 01 FOLHA"
+            return "PORTA DE CORRER"
+        # porta sem tipo claro: internas costumam ser de giro/abrir
+        return f"PORTA DE GIRO {_folha_sfx(folhas or '01')}"
+
     # fixo/painel/modulo (sem ser janela/porta) -> Modulo Fixo
     if "modulo" in low or "painel" in low or \
-       ("fixo" in low and "janela" not in low and "porta" not in low):
+       ("fixo" in low and not tem_janela and not tem_porta):
         return "MODULO FIXO"
-    return f"JANELA DE CORRER {folhas} FOLHAS"
+
+    return f"JANELA DE CORRER {_folha_sfx(folhas or '02')}"
 
 
 def _selecionar_select_rotulo(page, rotulo, valor, nome):
@@ -1978,6 +2106,101 @@ def _escolher_variacao_popup(page, modelo, num=""):
     return False
 
 
+def _construir_na_selecao(page, num, mud, prefixo="sub"):
+    """MOTOR compartilhado: a partir da tela 'ESCOLHA O DESENHO | PROJETO'
+    (selecioneprojeto), escolhe LINHA/MODELO -> Pesquisa -> escolhe o card ->
+    preenche 'Dados do Projeto' -> Inclui item -> variaveis (acionamento) ->
+    Confirma. Usado TANTO pela SUBSTITUICAO quanto pelo MONTAR DO ZERO -- as
+    duas caem nesta MESMA tela, so mudam a 'porta de entrada' antes dela.
+    Retorna True se incluiu o item."""
+    modelo = mud.get("modelo", "")
+    linha = mud.get("linha", "")
+    acion = mud.get("acionamento")
+
+    # tela 'ESCOLHA O DESENHO | PROJETO'
+    if not _esperar_url_ou_texto(page, "selecioneprojeto", "ESCOLHA O DESENHO", 15000):
+        print("     [!] nao abriu a tela de selecao de projeto.")
+        print_tela(page, f"{prefixo}_sem_selecao_{num}")
+        return False
+    page.wait_for_timeout(1000)
+
+    # popup 'valores zerados' -> Fechar (se aparecer)
+    if _tem_texto_visivel(page, "valores zerados") or _tem_texto_visivel(page, "sem valor"):
+        _clicar_botao(page, r"^\s*fechar\s*$", timeout=4000)
+        page.wait_for_timeout(600)
+
+    # LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
+    # modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
+    if linha:
+        _selecionar_select_rotulo(page, "LINHA", linha, "linha")
+        page.wait_for_timeout(700)
+    else:
+        print("     [i] linha nao informada -- usando a linha PADRAO da tela (confira!).")
+    _selecionar_select_rotulo(page, "MODELO", _modelo_dropdown(modelo), "modelo")
+    page.wait_for_timeout(700)
+
+    # Pesquisar
+    _clicar_botao(page, r"^\s*pesquisar\s*$", timeout=6000)
+    page.wait_for_timeout(2000)
+
+    # escolher o card do desenho AUTOMATICAMENTE
+    if not _escolher_card_auto(page, modelo, num):
+        # Fallback: alguns cards (ex.: 'N MODULOS') abrem um popup de variacoes
+        # e nao dao para clicar direto. Entao pausa SO aqui: voce da 1 clique no
+        # desenho e o robo continua sozinho (preenche, inclui, variaveis, salva).
+        print("     [!] nao consegui abrir o desenho sozinho (essa tela tem varias opcoes).")
+        print_tela(page, f"{prefixo}_sem_card_{num}")
+        print("     " + "=" * 54)
+        print("     >> CLIQUE no desenho que voce quer, NA TELA do W-Vetro")
+        print("        (na FOTO grande do desenho certo).")
+        print("     " + "=" * 54)
+        input("     Quando abrir a tela 'Dados do Projeto', aperte ENTER aqui...  ")
+
+    # tela 'Detalhes do Projeto'
+    if not _esperar_url_ou_texto(page, "confirmadadosprojeto", "Detalhes do Projeto", 15000):
+        print("     [!] nao abriu a tela 'Dados do Projeto' apos escolher o card.")
+        print_tela(page, f"{prefixo}_sem_dados_{num}")
+        return False
+    page.wait_for_timeout(1000)
+
+    # preenche o que veio na mensagem
+    frame = _frame_dados_projeto(page)
+    if "qtde" in mud:
+        _set_input_auto(frame, "QUANTIDADE", mud["qtde"], "quantidade")
+    if "largura" in mud:
+        _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
+    if "altura" in mud:
+        _set_input_auto(frame, "ALTURA", mud["altura"], "altura")
+    if "tipo" in mud:
+        _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
+    if "ambiente" in mud:
+        _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
+    if "cor" in mud:
+        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
+    if "vidro" in mud:
+        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
+    print_tela(page, f"{prefixo}_dados_{num}")
+
+    # Incluir item no orcamento
+    if not _clicar_botao(page, r"incluir item no or", timeout=8000):
+        print("     [!] nao achei 'Incluir item no orcamento'.")
+        print_tela(page, f"{prefixo}_sem_incluir_{num}")
+        return False
+    page.wait_for_timeout(2000)
+
+    # janela 'Informe as variaveis': acionamento + CONFIRMAR
+    if _janela_variaveis_aberta(page):
+        if acion:
+            _selecionar_select_rotulo(page, "ACIONAMENTO DA ESTEIRA", acion, "acionamento")
+            page.wait_for_timeout(800)
+        if not _confirmar_edicao(page):
+            print("     [!] a janela de variaveis nao fechou sozinha.")
+            print_tela(page, f"{prefixo}_variaveis_travou_{num}")
+
+    page.wait_for_timeout(1500)
+    return True
+
+
 def substituir_item_projeto(page, linha_item, num, mud):
     """SUBSTITUIR o projeto de um item por outro modelo -- 100% AUTOMATICO.
     Abre Substituir Projeto -> Sim -> escolhe LINHA/MODELO -> Pesquisa ->
@@ -1985,7 +2208,6 @@ def substituir_item_projeto(page, linha_item, num, mud):
     variaveis (acionamento) -> Confirma. A troca APAGA o item antigo."""
     modelo = mud.get("modelo", "")
     linha = mud.get("linha", "")
-    acion = mud.get("acionamento")
     print(f"\n  >> Item {num}: SUBSTITUIR por '{modelo}'"
           + (f" (linha {linha})" if linha else ""))
     if not modelo:
@@ -2008,86 +2230,43 @@ def substituir_item_projeto(page, linha_item, num, mud):
         print_tela(page, f"sub_sem_sim_{num}")
         return False
 
-    # 3) tela 'ESCOLHA O DESENHO | PROJETO'
-    if not _esperar_url_ou_texto(page, "selecioneprojeto", "ESCOLHA O DESENHO", 15000):
-        print("     [!] nao abriu a tela de selecao de projeto.")
-        print_tela(page, f"sub_sem_selecao_{num}")
+    # 3..9) motor compartilhado (a partir de 'ESCOLHA O DESENHO')
+    if not _construir_na_selecao(page, num, mud, prefixo="sub"):
         return False
-    page.wait_for_timeout(1000)
 
-    # popup 'valores zerados' -> Fechar (se aparecer)
-    if _tem_texto_visivel(page, "valores zerados") or _tem_texto_visivel(page, "sem valor"):
-        _clicar_botao(page, r"^\s*fechar\s*$", timeout=4000)
-        page.wait_for_timeout(600)
-
-    # 4) LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
-    #    modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
-    if linha:
-        _selecionar_select_rotulo(page, "LINHA", linha, "linha")
-        page.wait_for_timeout(700)
-    else:
-        print("     [i] linha nao informada -- usando a linha PADRAO da tela (confira!).")
-    _selecionar_select_rotulo(page, "MODELO", _modelo_dropdown(modelo), "modelo")
-    page.wait_for_timeout(700)
-
-    # 5) Pesquisar
-    _clicar_botao(page, r"^\s*pesquisar\s*$", timeout=6000)
-    page.wait_for_timeout(2000)
-
-    # 6) escolher o card do desenho AUTOMATICAMENTE
-    if not _escolher_card_auto(page, modelo, num):
-        # Fallback: alguns cards (ex.: 'N MODULOS') abrem um popup de variacoes
-        # e nao dao para clicar direto. Entao pausa SO aqui: voce da 1 clique no
-        # desenho e o robo continua sozinho (preenche, inclui, variaveis, salva).
-        print("     [!] nao consegui abrir o desenho sozinho (essa tela tem varias opcoes).")
-        print_tela(page, f"sub_sem_card_{num}")
-        print("     " + "=" * 54)
-        print("     >> CLIQUE no desenho que voce quer, NA TELA do W-Vetro")
-        print("        (na FOTO grande do desenho certo).")
-        print("     " + "=" * 54)
-        input("     Quando abrir a tela 'Dados do Projeto', aperte ENTER aqui...  ")
-
-    # 7) tela 'Detalhes do Projeto'
-    if not _esperar_url_ou_texto(page, "confirmadadosprojeto", "Detalhes do Projeto", 15000):
-        print("     [!] nao abriu a tela 'Dados do Projeto' apos escolher o card.")
-        print_tela(page, f"sub_sem_dados_{num}")
-        return False
-    page.wait_for_timeout(1000)
-
-    # preenche o que veio na mensagem
-    frame = _frame_dados_projeto(page)
-    if "largura" in mud:
-        _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
-    if "altura" in mud:
-        _set_input_auto(frame, "ALTURA", mud["altura"], "altura")
-    if "tipo" in mud:
-        _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
-    if "ambiente" in mud:
-        _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
-    if "cor" in mud:
-        _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
-    if "vidro" in mud:
-        _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
-    print_tela(page, f"sub_dados_{num}")
-
-    # 8) Incluir item no orcamento
-    if not _clicar_botao(page, r"incluir item no or", timeout=8000):
-        print("     [!] nao achei 'Incluir item no orcamento'.")
-        print_tela(page, f"sub_sem_incluir_{num}")
-        return False
-    page.wait_for_timeout(2000)
-
-    # 9) janela 'Informe as variaveis': acionamento + CONFIRMAR
-    if _janela_variaveis_aberta(page):
-        if acion:
-            _selecionar_select_rotulo(page, "ACIONAMENTO DA ESTEIRA", acion, "acionamento")
-            page.wait_for_timeout(800)
-        if not _confirmar_edicao(page):
-            print("     [!] a janela de variaveis nao fechou sozinha.")
-            print_tela(page, f"sub_variaveis_travou_{num}")
-
-    page.wait_for_timeout(1500)
     print(f"     item {num} substituido. ✔")
+    return True
+
+
+def montar_item_novo(page, num, mud):
+    """MONTAR DO ZERO um item novo no orcamento -- 100% AUTOMATICO.
+    Clica 'Inserir Novo Projeto' -> cai na MESMA tela 'ESCOLHA O DESENHO' ->
+    reaproveita o motor compartilhado (LINHA/MODELO -> card -> dados -> inclui).
+    NAO apaga nada: so ADICIONA um item ao orcamento."""
+    modelo = mud.get("modelo", "")
+    linha = mud.get("linha", "")
+    print(f"\n  >> Item {num}: MONTAR '{modelo}'"
+          + (f" (linha {linha})" if linha else ""))
+    if not modelo:
+        print("     [!] falta o MODELO na descricao (ex.: 'janela 2 folhas') -- pulando.")
+        return False
+
+    # 1) botao 'Inserir Novo Projeto' (porta de entrada do MONTAR)
+    if not _clicar_botao(page, r"inserir novo projeto", timeout=8000):
+        # fallbacks de rotulo que o W-Vetro usa nessa acao
+        if not (_clicar_botao(page, r"novo projeto", timeout=4000)
+                or _clicar_botao(page, r"adicionar item", timeout=4000)
+                or _clicar_botao(page, r"incluir projeto", timeout=4000)):
+            print("     [!] nao achei o botao 'Inserir Novo Projeto'.")
+            print_tela(page, f"mon_sem_inserir_{num}")
+            return False
+    page.wait_for_timeout(1500)
+
+    # 2..8) motor compartilhado (a partir de 'ESCOLHA O DESENHO')
+    if not _construir_na_selecao(page, num, mud, prefixo="mon"):
+        return False
+
+    print(f"     item {num} montado. ✔")
     return True
 
 
@@ -2303,6 +2482,105 @@ def modo_mensagem(page):
     _resumo_final(page, itens, resultados)
 
 
+def _preview_montar(orc, itens):
+    print()
+    print("  " + "=" * 56)
+    print(f"  VOU MONTAR ESTES ITENS (orcamento {orc}):")
+    print("  " + "=" * 56)
+    for i, mud in enumerate(itens, 1):
+        cod = mud.get("tipo", "")
+        print(f"\n  ITEM {i}{(' [' + cod + ']') if cod else ''}:")
+        print(f"     modelo      -> {mud.get('modelo') or '(nao informado!)'}")
+        print(f"     linha       -> {mud.get('linha','(padrao da tela)')}")
+        if "acionamento" in mud:
+            print(f"     acionamento -> {mud['acionamento']}")
+        for chave, nome in CAMPOS_PREVIEW:
+            if chave in mud:
+                val = _descreve_vidro(mud[chave]) if chave == "vidro" else mud[chave]
+                print(f"     {nome:11s} -> {val}")
+    print("  " + "=" * 56)
+
+
+def modo_montar(page):
+    """Monta um orcamento DO ZERO: cada linha da mensagem vira um item NOVO
+    (Inserir Novo Projeto). Reaproveita o mesmo motor da substituicao."""
+    print()
+    print("MONTAR ORCAMENTO DO ZERO.")
+    print("Cole o cabecalho com o numero do orcamento e uma linha por item.")
+    print("Ex.:")
+    print("   Montar orcamento 2346")
+    print("   j01 janela 02 folhas e tela com persiana com motor l32 -"
+          " branco brilhante - incolor 6mm temperado - quartos")
+    print("Ao terminar, deixe uma linha VAZIA e aperte ENTER (ou digite FIM):")
+    linhas = []
+    while True:
+        try:
+            ln = input()
+        except EOFError:
+            break
+        if ln.strip().upper() == "FIM":
+            break
+        if ln.strip() == "" and linhas:
+            break
+        if ln.strip():
+            linhas.append(ln)
+    texto = "\n".join(linhas)
+    if not texto.strip():
+        print("  (mensagem vazia)")
+        return
+
+    orc, itens = parse_montar(texto)
+    if not orc:
+        print("  Nao achei o numero do orcamento na mensagem.")
+        return
+    if not itens:
+        print("  Nao achei itens para montar na mensagem.")
+        return
+
+    _preview_montar(orc, itens)
+    r = input("\n  Esta certo? ENTER para MONTAR  |  N para cancelar: ").strip().lower()
+    if r == "n":
+        print("  Cancelado.")
+        return
+
+    if not abrir_orcamento(page, orc):
+        print("  Nao consegui abrir o orcamento.")
+        return
+
+    resultados = {}
+    for i, mud in enumerate(itens, 1):
+        # depois de incluir um item o W-Vetro pode ir para outra tela --
+        # reabre o orcamento para achar o botao 'Inserir Novo Projeto'.
+        if not _itens_por_ordem(page) and i > 1:
+            print("  (voltando para a tela do orcamento...)")
+            abrir_orcamento(page, orc)
+        try:
+            ok = montar_item_novo(page, i, mud)
+            resultados[i] = "ok" if ok else "falhou"
+        except Exception as e:
+            print(f"  [!] erro inesperado ao montar o item {i}: {e}")
+            print_tela(page, f"mon_erro_{i}")
+            resultados[i] = "erro"
+        page.wait_for_timeout(1200)
+
+    if not _itens_por_ordem(page):
+        abrir_orcamento(page, orc)
+    print("\n  Atualizando os valores (Calcular)...")
+    if clicar_calcular(page):
+        print("  Cliquei em Calcular -- valores atualizados. ✔")
+    else:
+        print("  (Se aparecer 'Orcamento Nao Calculado', clique em Calcular.)")
+
+    print()
+    print("  " + "=" * 56)
+    print("  RESUMO DO QUE MONTEI:")
+    for i, mud in enumerate(itens, 1):
+        st = resultados.get(i, "?")
+        marca = {"ok": "✔", "falhou": "✘", "erro": "‼"}.get(st, "?")
+        print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
+    print("  " + "=" * 56)
+
+
 def menu_alteracoes(page):
     """Depois de abrir o orcamento, oferece editar um item."""
     while True:
@@ -2361,6 +2639,7 @@ def main():
                 print("O que deseja fazer?")
                 print("  1) Colar uma MENSAGEM (varias alteracoes de uma vez)")
                 print("  2) Editar um orcamento MANUALMENTE (passo a passo)")
+                print("  3) MONTAR um orcamento DO ZERO (itens novos)")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
@@ -2368,6 +2647,8 @@ def main():
                     break
                 elif op == "1":
                     modo_mensagem(page)
+                elif op == "3":
+                    modo_montar(page)
                 elif op == "2":
                     numero = input("Numero do orcamento: ").strip()
                     if not numero.isdigit():
