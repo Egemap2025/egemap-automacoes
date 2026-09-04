@@ -1296,7 +1296,22 @@ def _spec_item_novo(descricao):
             desc = _re.sub(r"\bl\s*" + ml2.group(1) + r"\b", "", desc,
                            flags=_re.I).strip()
 
-    # acionamento embutido: motor / manual / correia / fita
+    # 'sem persiana' -> tira 'persiana' da descricao (senao o card casaria com
+    # um desenho COM persiana). Vira uma janela comum (vidro/moveis).
+    if _re.search(r"\bsem\s+persiana\b", desc, _re.I):
+        desc = _re.sub(r"\bsem\s+persiana\b", " ", desc, flags=_re.I).strip()
+
+    # folhas por extenso -> numero (duas folhas -> 02 folhas), para casar tanto
+    # o MODELO quanto o card certo (os cards mostram '02 FOLHAS', '03 FOLHAS'...)
+    _NUMEXT = {"uma": "01", "um": "01", "duas": "02", "dois": "02",
+               "tres": "03", "quatro": "04", "cinco": "05", "seis": "06"}
+    def _rep_folhas(m):
+        return _NUMEXT[_sem_acento(m.group(1).lower())] + " folhas"
+    desc = _re.sub(r"\b(uma|um|duas|dois|tr[eê]s|quatro|cinco|seis)\s+folhas?\b",
+                   _rep_folhas, desc, flags=_re.I)
+
+    # acionamento embutido: motor / manual (persiana SEM 'motor' fica sem
+    # acionamento -> o W-Vetro usa o padrao, que e recolhedor).
     if _re.search(r"\bmotor(?:izad[oa])?\b", desc, _re.I):
         mud["acionamento"] = "MOTOR"
     elif _re.search(r"\bmanual\b", desc, _re.I):
@@ -1325,10 +1340,6 @@ def _spec_item_novo(descricao):
     if ambiente:
         mud["ambiente"] = " ".join(ambiente)
 
-    # acionamento padrao MOTOR so faz sentido em item com persiana/esteira
-    if _re.search(r"persiana|integrad|rol[oôõ]|esteira|motor",
-                  mud.get("modelo", "").lower()):
-        mud.setdefault("acionamento", "MOTOR")
     # QUANTIDADE e obrigatoria no W-Vetro -- padrao 1 se nao vier na mensagem
     # (o vendedor ajusta depois se precisar de mais de 1).
     mud.setdefault("qtde", "1")
@@ -1802,6 +1813,10 @@ def _modelo_dropdown(descricao):
         return "PORTA PIVOTANTE"
 
     if tem_porta:
+        # PORTA-JANELA (tem 'porta' E 'janela') = porta de correr (corre no
+        # trilho, tipo janela). Ex.: 'porta janela 3 folhas', '... sequencial'.
+        if tem_janela and "giro" not in low and "abrir" not in low:
+            return "PORTA DE CORRER"
         # porta de giro / porta de abrir (interna/externa de abrir) -> PORTA DE GIRO
         if "giro" in low or "abrir" in low or "batente" in low:
             return f"PORTA DE GIRO {_folha_sfx(folhas or '01')}"
