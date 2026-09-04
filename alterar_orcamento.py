@@ -1309,6 +1309,9 @@ def _spec_item_novo(descricao):
         return _NUMEXT[_sem_acento(m.group(1).lower())] + " folhas"
     desc = _re.sub(r"\b(uma|um|duas|dois|tr[eê]s|quatro|cinco|seis)\s+folhas?\b",
                    _rep_folhas, desc, flags=_re.I)
+    # numero de 1 digito -> 2 digitos ('4 folhas' -> '04 folhas'), igual aos cards
+    desc = _re.sub(r"\b(\d)\s+folhas?\b",
+                   lambda m: m.group(1).zfill(2) + " folhas", desc, flags=_re.I)
 
     # acionamento embutido: motor / manual (persiana SEM 'motor' fica sem
     # acionamento -> o W-Vetro usa o padrao, que e recolhedor).
