@@ -1866,8 +1866,9 @@ def _modelo_dropdown(descricao):
     tem_janela = "janela" in low
 
     # tipos que nao dependem de folhas
-    # 'basculante' a EGEMAP faz como MAXIM-AR (confirmado pelo usuario)
-    if "maxim" in low or "basculante" in low or "bascul" in low:
+    # 'basculante'/'maxiar'/'maxi-ar'/'exaustora' a EGEMAP faz como MAXIM-AR
+    if ("maxim" in low or "maxiar" in low or "maxi-ar" in low or "maxi ar" in low
+            or "basculante" in low or "bascul" in low or "exaustora" in low):
         return "MAXIM-AR"
     if "portinhola" in low:
         return "PORTINHOLA"
@@ -1900,13 +1901,16 @@ def _modelo_dropdown(descricao):
         if "correr" in low:
             if "tras" in low or "parede" in low or "portao" in low or "embutir" in low:
                 return "PORTAO DE CORRER 01 FOLHA"
-            return "PORTA DE CORRER"
+            return f"PORTA DE CORRER {_folha_sfx(folhas or '02')}"
         # porta sem tipo claro: internas costumam ser de giro/abrir
         return f"PORTA DE GIRO {_folha_sfx(folhas or '01')}"
 
-    # fixo/painel/modulo (sem ser janela/porta) -> Modulo Fixo
+    # fixo/painel/modulo -> Modulo Fixo. 'janela de vidro fixo' / 'janela fixa'
+    # tambem entram aqui (fixo/fixa SEM 'correr'/'folha' = vidro fixo, mesmo
+    # tendo a palavra 'janela'). 'peitoril fixo' NAO conta (tem 'correr'/folhas).
     if "modulo" in low or "painel" in low or \
-       ("fixo" in low and not tem_janela and not tem_porta):
+       (("fixo" in low or "fixa" in low) and "correr" not in low
+        and "folha" not in low and not tem_porta):
         return "MODULO FIXO"
 
     return f"JANELA DE CORRER {_folha_sfx(folhas or '02')}"
