@@ -1678,6 +1678,54 @@ def _clicar_botao(page, texto_regex, timeout=6000):
     return False
 
 
+def _clicar_botao_real(page, texto_regex, timeout=6000):
+    """Como _clicar_botao, mas com CLIQUE REAL de mouse no MEIO do botao.
+    Alguns botoes do W-Vetro (ex.: 'Incluir item no orcamento', 'Calcular o
+    Orcamento') so respondem a clique REAL, nao ao clique sintetico. Prefere o
+    MENOR texto que casa (o botao em si, nao um container em volta), visivel."""
+    import time as _t
+    alvo = _re.compile(texto_regex, _re.I)
+    fim = _t.time() + timeout / 1000
+    while _t.time() < fim:
+        melhor, melhor_len = None, 10 ** 9
+        for fr in page.frames:
+            for getter in ("role", "text"):
+                try:
+                    loc = (fr.get_by_role("button", name=alvo) if getter == "role"
+                           else fr.get_by_text(alvo))
+                    n = loc.count()
+                except Exception:
+                    continue
+                for i in range(n):
+                    e = loc.nth(i)
+                    try:
+                        if not e.is_visible():
+                            continue
+                        t = (e.inner_text() or "").strip()
+                        if 0 < len(t) < melhor_len:
+                            melhor, melhor_len = e, len(t)
+                    except Exception:
+                        continue
+        if melhor is not None:
+            try:
+                melhor.scroll_into_view_if_needed(timeout=2000)
+                box = melhor.bounding_box()
+            except Exception:
+                box = None
+            if box:
+                x = box["x"] + box["width"] * 0.5
+                y = box["y"] + box["height"] * 0.5
+                try:
+                    page.mouse.click(x, y)
+                    return True
+                except Exception:
+                    pass
+            if _clicar_forte(melhor):
+                return True
+        page.wait_for_timeout(300)
+    return False
+
+
 def _sem_acento(s):
     import unicodedata
     return "".join(c for c in unicodedata.normalize("NFD", s or "")
@@ -2195,13 +2243,39 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
     print_tela(page, f"{prefixo}_dados_{num}")
 
-    # Incluir item no orcamento
-    if not _clicar_botao(page, r"incluir item no or", timeout=8000):
-        print("     [!] nao achei 'Incluir item no orcamento'.")
-        print_tela(page, f"{prefixo}_sem_incluir_{num}")
-        return False
-    page.wait_for_timeout(2500)
+    # Incluir item no orcamento -- CLIQUE REAL e CONFIRMA que a tela avancou
+    # (abriu a janela de variaveis OU saiu da tela 'Detalhes do Projeto'). Se
+    # nao avancar, tenta de novo -- esse botao as vezes ignora o 1o clique.
+    import time as _t
+    def _avancou_do_incluir():
+        try:
+            if "confirmadadosprojeto" not in (page.url or "").lower():
+                return True
+        except Exception:
+            pass
+        return _janela_variaveis_aberta(page) or _modal_edicao_aberto(page)
+
+    incluiu = False
+    for _tent in range(4):
+        clicou = (_clicar_botao_real(page, r"incluir item no or", timeout=5000)
+                  or _clicar_botao(page, r"incluir item no or", timeout=3000))
+        if not clicou:
+            page.wait_for_timeout(700)
+            continue
+        fim = _t.time() + 6
+        while _t.time() < fim:
+            if _avancou_do_incluir():
+                incluiu = True
+                break
+            page.wait_for_timeout(500)
+        if incluiu:
+            break
+        print(f"     (tentando 'Incluir item no orcamento' de novo... {_tent + 1})")
     print_tela(page, f"{prefixo}_apos_incluir_{num}")
+    if not incluiu:
+        print("     [!] cliquei em 'Incluir item no orcamento' mas a tela nao avancou.")
+        print_tela(page, f"{prefixo}_incluir_travou_{num}")
+        return False
 
     # janela 'Informe as variaveis' (itens com persiana/motor pedem o
     # ACIONAMENTO). ENQUANTO ela nao for CONFIRMADA o item NAO fica salvo --
@@ -2601,7 +2675,13 @@ def modo_montar(page):
             resultados[i] = "erro"
         page.wait_for_timeout(1200)
 
-    if not _esperar_itens(7):
+    # Finaliza: na tela de selecao/cards existe o botao 'Calcular o Orcamento'
+    # (azul, canto direito) que VOLTA para o orcamento. Clica nele (real). Se
+    # nao achar / nao voltar, reabre pela Consulta.
+    if _clicar_botao_real(page, r"calcular o or", timeout=5000):
+        print("  Cliquei em 'Calcular o Orcamento' (voltando para o orcamento)...")
+        page.wait_for_timeout(3000)
+    if not _esperar_itens(8):
         abrir_orcamento(page, orc)
     print("\n  Atualizando os valores (Calcular)...")
     if clicar_calcular(page):
