@@ -2598,6 +2598,10 @@ def _preview_montar(orc, itens):
             if chave in mud:
                 val = _descreve_vidro(mud[chave]) if chave == "vidro" else mud[chave]
                 print(f"     {nome:11s} -> {val}")
+        # SEM medida o W-Vetro NAO inclui o item (trava). Avisa bem claro.
+        if "largura" not in mud or "altura" not in mud:
+            print("     >>> [!] FALTA A MEDIDA (largura x altura)! Sem medida o")
+            print("             W-Vetro nao inclui o item. Ex.: '1200x1200'.")
     print("  " + "=" * 56)
 
 
@@ -2607,10 +2611,12 @@ def modo_montar(page):
     print()
     print("MONTAR ORCAMENTO DO ZERO.")
     print("Cole o cabecalho com o numero do orcamento e uma linha por item.")
+    print("IMPORTANTE: cada item PRECISA da medida (largura x altura em mm),")
+    print("senao o W-Vetro nao inclui. Ex.: 1200x1200")
     print("Ex.:")
     print("   Montar orcamento 2346")
     print("   j01 janela 02 folhas e tela com persiana com motor l32 -"
-          " branco brilhante - incolor 6mm temperado - quartos")
+          " branco brilhante - incolor 6mm temperado - 1200x1200 - quartos")
     print("Ao terminar, deixe uma linha VAZIA e aperte ENTER (ou digite FIM):")
     linhas = []
     while True:
@@ -2661,6 +2667,12 @@ def modo_montar(page):
 
     resultados = {}
     for i, mud in enumerate(itens, 1):
+        # SEM medida o W-Vetro nao inclui e trava -- pula o item cedo (limpo).
+        if "largura" not in mud or "altura" not in mud:
+            print(f"\n  >> Item {i} [{mud.get('tipo','')}]: FALTA A MEDIDA "
+                  "(largura x altura) -- pulando este item.")
+            resultados[i] = "sem_medida"
+            continue
         # depois de incluir um item o W-Vetro volta para o orcamento -- so
         # reabre (Consulta) se ele REALMENTE nao voltou (evita perder o item).
         if i > 1 and not _esperar_itens(7):
@@ -2694,7 +2706,8 @@ def modo_montar(page):
     print("  RESUMO DO QUE MONTEI:")
     for i, mud in enumerate(itens, 1):
         st = resultados.get(i, "?")
-        marca = {"ok": "✔", "falhou": "✘", "erro": "‼"}.get(st, "?")
+        marca = {"ok": "✔", "falhou": "✘", "erro": "‼",
+                 "sem_medida": "⚠ falta medida"}.get(st, "?")
         print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
     print("  " + "=" * 56)
 
