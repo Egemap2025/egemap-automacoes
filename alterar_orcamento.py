@@ -1821,6 +1821,42 @@ def _modelo_dropdown(descricao):
     return f"JANELA DE CORRER {_folha_sfx(folhas or '02')}"
 
 
+def _definir_acionamento(page, valor):
+    """Define o ACIONAMENTO DA ESTEIRA na janela de variaveis. Em vez de achar
+    pelo rotulo (fica em outra celula, quebrado em 3 linhas: ACIONAMENTO/DA/
+    ESTEIRA), acha o <select> pelas OPCOES: o unico que tem 'MOTOR' e
+    'RECOLHEDOR'. Escolhe a opcao que casa com 'valor'. Retorna True se definiu."""
+    for fr in page.frames:
+        try:
+            selects = fr.locator("select")
+            n = selects.count()
+        except Exception:
+            continue
+        for i in range(n):
+            sel = selects.nth(i)
+            try:
+                if not sel.is_visible():
+                    continue
+                opcoes = _opcoes_do_select(sel)
+            except Exception:
+                continue
+            low = [_sem_acento(o.lower()) for o in opcoes]
+            if not (any("motor" in o for o in low) and
+                    any("recolhedor" in o for o in low)):
+                continue
+            validas = [o for o in opcoes if o.strip()
+                       and "SELECIONE" not in o.upper()]
+            escolha = _melhor_opcao_texto(validas, valor) or validas[0]
+            try:
+                sel.select_option(label=escolha)
+                page.wait_for_timeout(400)
+                print(f"     acionamento -> {escolha}")
+                return True
+            except Exception:
+                continue
+    return False
+
+
 def _selecionar_select_rotulo(page, rotulo, valor, nome):
     """Acha um <select> pelo ROTULO (em qualquer frame), seleciona a opcao que
     melhor casa com 'valor' e dispara o change. Retorna a opcao ou None."""
@@ -2303,7 +2339,8 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
     if apareceu:
         print("     janela de variaveis aberta -- finalizando...")
         if acion:
-            _selecionar_select_rotulo(page, "ACIONAMENTO DA ESTEIRA", acion, "acionamento")
+            if not _definir_acionamento(page, acion):
+                print(f"     [!] nao achei o campo ACIONAMENTO p/ definir '{acion}'.")
             page.wait_for_timeout(800)
         if not _confirmar_edicao(page):
             print("     [!] a janela de variaveis nao fechou sozinha.")
@@ -2377,6 +2414,15 @@ def montar_item_novo(page, num, mud):
     # 2..8) motor compartilhado (a partir de 'ESCOLHA O DESENHO')
     if not _construir_na_selecao(page, num, mud, prefixo="mon"):
         return False
+
+    # 9) depois de incluir + variaveis, o robo fica na tela de selecao/cards.
+    # O botao 'Calcular o Orcamento' VOLTA para o orcamento (SEM re-pesquisar).
+    for _tent in range(3):
+        if _clicar_botao_real(page, r"calcular\s+o\s+or", timeout=5000):
+            print("     'Calcular o Orcamento' -> voltando para o orcamento...")
+            page.wait_for_timeout(2500)
+            break
+        page.wait_for_timeout(800)
 
     print(f"     item {num} montado. ✔")
     return True
