@@ -1031,6 +1031,19 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
     if origem_antiga is None and _JA_ENVIADO.get(chave) == assinatura:
         return
 
+    # Proposta de outro dia nao volta pro CRM. Ela ja foi lancada no dia dela,
+    # e a linha do CRM tem o nome dos materiais ("Pvc + Aluminio"), entao a
+    # proposta de ontem tomaria o lugar da de hoje na MESMA linha. Foi o que
+    # aconteceu com a Ana Ivonete em 04/09: o monitor tinha acabado de ser
+    # reaberto (memoria zerada), o OneDrive tocou na proposta de 03-09 e ela
+    # subiu junto com a de 04-09, com valor de ontem.
+    # Renomear continua valendo: ai a intencao e trocar o nome da linha.
+    dia = dia_do_arquivo(pdf_path)
+    if origem_antiga is None and dia and dia != date.today():
+        _JA_ENVIADO[chave] = assinatura
+        log(f"[{client}] CRM: {arquivo} e de outro dia — nao reenviei.")
+        return
+
     # Peca esperando o COMPLETO (ex.: "MAD ALM") nao entra no CRM. Ela nao e
     # a proposta do cliente: ficava anexada no card atoa e depois tinha que
     # ser limpa na mao. Quem entra e a proposta final, quando o COMPLETO
@@ -1154,6 +1167,13 @@ def _lancar_no_drive(pdf_path, capa_pdf, pasta_raiz=""):
         return
     chave = _norm(pdf_path)
     if _JA_ENVIADO_DRIVE.get(chave) == assinatura:
+        return
+
+    # Mesma regra do CRM: proposta de outro dia ja esta no Drive, nao sobe de
+    # novo so porque o OneDrive tocou nela ou o monitor foi reaberto.
+    dia = dia_do_arquivo(pdf_path)
+    if dia and dia != date.today():
+        _JA_ENVIADO_DRIVE[chave] = assinatura
         return
 
     if not proposta_tem_capa(pdf_path, capa_pdf):

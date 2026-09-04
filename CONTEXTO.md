@@ -703,6 +703,32 @@ dentro, que é o Python). Por isso o `fechar_copias_antigas()` pula
 `os.getpid()` **e** `os.getppid()` — sem isso, o monitor fecharia a si mesmo
 na abertura.
 
+### Proposta de ontem voltando pro CRM por cima da de hoje
+
+04/09, cliente Ana Ivonete. O log mostrou duas linhas no mesmo segundo:
+
+    CRM: Atualizado 'Pvc + Aluminio' em 'Ana Ivonete' — R$ 90.800,25
+    CRM: Atualizado 'Pvc + Aluminio' em 'Ana Ivonete' — R$ 79.510,88
+
+A primeira é a proposta de 04-09 (68.375,26 de PVC + 22.424,99 de ALM). A
+segunda é a de **03-09**, que estava parada na pasta e foi reenviada. Como a
+linha do CRM se chama pelos materiais (`Pvc + Aluminio`), as duas caem na
+mesma linha — então a proposta de ontem tomou o lugar da de hoje, com o valor
+de ontem.
+
+Por que ela foi reenviada: o `_JA_ENVIADO` mora na memória do programa. Depois
+de reabrir o monitor ele está vazio, e qualquer toque do OneDrive numa
+proposta antiga vira evento de "modificado" — o `_queue` põe toda
+`Proposta Comercial *.pdf` de volta na fila do CRM e do Drive.
+
+Agora `_lancar_no_crm` e `_lancar_no_drive` recusam proposta cuja data no nome
+não é a de hoje (`dia_do_arquivo`), e o CRM diz no log que recusou. Renomear
+continua funcionando: quando vem `origem_antiga`, a intenção é justamente
+mexer numa proposta antiga.
+
+Isso vale também depois de trocar de versão: reabrir o monitor não relança
+mais o que já foi lançado nos dias anteriores.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
