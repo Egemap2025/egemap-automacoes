@@ -1302,6 +1302,15 @@ def _spec_item_novo(descricao):
     elif _re.search(r"\bmanual\b", desc, _re.I):
         mud["acionamento"] = "MANUAL"
 
+    # quantidade embutida na descricao: '2un' / '3 pecas' / 'qtd 2' (nao pega
+    # '2 folhas' -- exige marcador un/peca/qtd para nao confundir com folhas).
+    mqd = (_re.search(r"\b(\d+)\s*un[a-z]*\b", desc, _re.I)
+           or _re.search(r"\bqtde?\s*[:]?\s*(\d+)\b", desc, _re.I)
+           or _re.search(r"\b(\d+)\s*pe[cç]as?\b", desc, _re.I))
+    if mqd:
+        mud["qtde"] = mqd.group(1)
+        desc = (desc[:mqd.start()] + " " + desc[mqd.end():]).strip()
+
     mud["modelo"] = _re.sub(r"\s+", " ", desc).strip()
 
     # demais campos (cor / vidro / medida / qtde / ambiente)
@@ -1320,6 +1329,9 @@ def _spec_item_novo(descricao):
     if _re.search(r"persiana|integrad|rol[oôõ]|esteira|motor",
                   mud.get("modelo", "").lower()):
         mud.setdefault("acionamento", "MOTOR")
+    # QUANTIDADE e obrigatoria no W-Vetro -- padrao 1 se nao vier na mensagem
+    # (o vendedor ajusta depois se precisar de mais de 1).
+    mud.setdefault("qtde", "1")
     return mud
 
 
@@ -2613,6 +2625,7 @@ def modo_montar(page):
     print("Cole o cabecalho com o numero do orcamento e uma linha por item.")
     print("IMPORTANTE: cada item PRECISA da medida (largura x altura em mm),")
     print("senao o W-Vetro nao inclui. Ex.: 1200x1200")
+    print("A quantidade e 1 por padrao; p/ mais de 1 escreva ex.: '2un'.")
     print("Ex.:")
     print("   Montar orcamento 2346")
     print("   j01 janela 02 folhas e tela com persiana com motor l32 -"
