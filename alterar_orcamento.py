@@ -1835,6 +1835,13 @@ _JS_MARCAR_CARD = r"""
     }
   }
   if (!best || bestScore <= 0) return null;
+  // O texto que casou costuma ser o '.card-body' (so titulo + 'Mais opcoes'),
+  // que NAO contem a foto. Sobe ate o CARD inteiro (o ancestral que TEM <img>),
+  // para podermos clicar na FOTO -- e nao no texto nem no botao vermelho.
+  for (let n = best, i = 0; n && i < 6; n = n.parentElement, i++){
+    try { if (n.querySelector && n.querySelector('img')) { best = n; break; } }
+    catch(e){}
+  }
   best.setAttribute('data-egerobo','card');
   // FOTO GRANDE do desenho: a MAIOR imagem do card (nao o logo pequeno).
   let bigImg=null, bigArea=0;
@@ -1937,7 +1944,14 @@ def _escolher_card_auto(page, modelo, num=""):
                 return True
         return False
 
-    # 0) elemento de ACAO (link/onclick) -- costuma ser o que navega
+    # 1) FOTO GRANDE (a MAIOR imagem do card) -- clicar nela avanca direto.
+    #    E o clique que o usuario confirmou funcionar.
+    img = page.locator('[data-egerobo="img"]').first
+    if img.count() > 0 and _clicar_ponto(img, 0.5, 0.5):
+        return True
+
+    # 2) elemento de ACAO (o <a>/onclick que envolve a foto) -- so se NAO for o
+    #    botao vermelho 'Mais opcoes' (esse ja foi filtrado ao marcar 'acao').
     acao = page.locator('[data-egerobo="acao"]').first
     if acao.count() > 0:
         for forcar in (False, True):
@@ -1949,27 +1963,20 @@ def _escolher_card_auto(page, modelo, num=""):
                                      "Detalhes do Projeto", 5000):
                 return True
 
+    # 3) area de cima do card (onde fica a foto) -- caso o desenho seja imagem
+    #    de fundo (CSS), nao um <img>. So a PARTE DE CIMA, nunca o rodape (texto
+    #    + botao vermelho 'Mais opcoes').
     card = page.locator('[data-egerobo="card"]').first
-    # meio do desenho (a foto ocupa a parte de cima do card)
-    if card.count() > 0 and _clicar_ponto(card, 0.5, 0.40):
-        return True
-    # varios pontos da area do desenho (caso 0.40 caia numa borda)
-    for fy in (0.30, 0.5, 0.22):
+    for fy in (0.35, 0.45, 0.25, 0.55):
         if card.count() > 0 and _clicar_ponto(card, 0.5, fy):
             return True
-    # tenta a maior imagem marcada (caso o desenho seja um <img>)
-    img = page.locator('[data-egerobo="img"]').first
-    if img.count() > 0 and _clicar_ponto(img, 0.5, 0.5):
-        return True
-    # clique FORCADO (ignora sobreposicoes) no card e na imagem
-    for sel in ('[data-egerobo="img"]', '[data-egerobo="card"]'):
-        loc = page.locator(sel).first
+    # clique FORCADO na imagem (ignora sobreposicoes)
+    if img.count() > 0:
         try:
-            if loc.count() > 0:
-                loc.click(timeout=2500, force=True)
-                if _esperar_url_ou_texto(page, "confirmadadosprojeto",
-                                         "Detalhes do Projeto", 4000):
-                    return True
+            img.click(timeout=2500, force=True)
+            if _esperar_url_ou_texto(page, "confirmadadosprojeto",
+                                     "Detalhes do Projeto", 4000):
+                return True
         except Exception:
             pass
     # tenta o NOME do projeto
@@ -1982,9 +1989,14 @@ def _escolher_card_auto(page, modelo, num=""):
                 return True
         except Exception:
             pass
-    # ultimo recurso: se o clique abriu um popup de variacoes, escolhe nele
-    if _escolher_variacao_popup(page, modelo, num):
-        return True
+    # ultimo recurso: SO para modelos que dependem de escolher variacao/desenho
+    # (painel/modulo fixo, maxim-ar com N modulos). Para janela/porta comum NAO
+    # entra na lista de variacoes (evita escolher 'veneziana' por engano) -- e
+    # melhor pausar p/ 1 clique manual do que montar o item errado.
+    low_mod = _sem_acento(modelo.lower())
+    if any(w in low_mod for w in ("modulo", "painel", "fixo", "maxim")):
+        if _escolher_variacao_popup(page, modelo, num):
+            return True
     # DIAGNOSTICO: salva E IMPRIME a estrutura (HTML) do card (cole aqui p/ eu
     # descobrir o clique certo).
     try:
