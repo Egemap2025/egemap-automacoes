@@ -744,6 +744,8 @@ ROTULOS = {
     "BAIRRO":     ["BAIRRO"],
     "COMPLEMENTO": ["COMPLEMENTO"],
     "CIDADE":     ["CIDADE", "MUNICIPIO", "MUNICÍPIO"],
+    "UF":         ["UF", "ESTADO"],
+    "VENDEDOR":   ["VENDEDOR", "RESPONSAVEL", "RESPONSÁVEL"],
 }
 
 # JS que acha o campo (input/select/textarea) mais proximo de um rotulo.
@@ -1377,7 +1379,7 @@ def parse_montar(texto):
             if _re.match(r"^\s*montar\b", l, _re.I) or _re.search(
                     r"^\s*or[çc]amento\b", l, _re.I):
                 continue
-        if _re.match(r"^\s*montar\s+or[çc]amento\b", l, _re.I):
+        if _re.match(r"^\s*(montar|novo)\s+or[çc]amento\b", l, _re.I):
             continue
         if orcamento is None and _re.match(r"^\d{2,7}$", l):
             orcamento = l
@@ -2560,16 +2562,20 @@ def montar_item_novo(page, num, mud):
         print("     [!] falta o MODELO na descricao (ex.: 'janela 2 folhas') -- pulando.")
         return False
 
-    # 1) botao 'Inserir Novo Projeto' (porta de entrada do MONTAR)
-    if not _clicar_botao(page, r"inserir novo projeto", timeout=8000):
-        # fallbacks de rotulo que o W-Vetro usa nessa acao
-        if not (_clicar_botao(page, r"novo projeto", timeout=4000)
-                or _clicar_botao(page, r"adicionar item", timeout=4000)
-                or _clicar_botao(page, r"incluir projeto", timeout=4000)):
-            print("     [!] nao achei o botao 'Inserir Novo Projeto'.")
-            print_tela(page, f"mon_sem_inserir_{num}")
-            return False
-    page.wait_for_timeout(1500)
+    # 1) botao 'Inserir Novo Projeto' (porta de entrada do MONTAR). Mas se JA
+    #    estivermos na tela de selecao (ex.: 1o item logo apos 'Criar
+    #    orcamento'), pula direto para escolher o desenho.
+    ja_na_selecao = "selecioneprojeto" in (page.url or "").lower()
+    if not ja_na_selecao:
+        if not _clicar_botao(page, r"inserir novo projeto", timeout=8000):
+            # fallbacks de rotulo que o W-Vetro usa nessa acao
+            if not (_clicar_botao(page, r"novo projeto", timeout=4000)
+                    or _clicar_botao(page, r"adicionar item", timeout=4000)
+                    or _clicar_botao(page, r"incluir projeto", timeout=4000)):
+                print("     [!] nao achei o botao 'Inserir Novo Projeto'.")
+                print_tela(page, f"mon_sem_inserir_{num}")
+                return False
+        page.wait_for_timeout(1500)
 
     # 2..8) motor compartilhado (a partir de 'ESCOLHA O DESENHO')
     if not _construir_na_selecao(page, num, mud, prefixo="mon"):
@@ -2673,6 +2679,41 @@ def cadastrar_cliente(page, cli):
     page.wait_for_timeout(2500)
     print_tela(page, "cli_apos_salvar")
     print(f"  cliente '{nome}' cadastrado. ✔")
+    return True
+
+
+def criar_orcamento_novo(page, cli):
+    """Logo apos cadastrar o cliente, cria o ORCAMENTO NOVO:
+    'Cadastrado novo cliente!' -> 'Criar um novo orcamento' -> escolhe o
+    VENDEDOR -> 'Criar orcamento' -> cai na tela 'ESCOLHA O DESENHO'
+    (selecioneprojeto), pronta para montar os itens. Retorna True se chegou la."""
+    # 1) tela pos-cadastro: botao 'Criar um novo orcamento'
+    if not (_clicar_botao_real(page, r"criar\s+um\s+novo\s+or", timeout=8000)
+            or _clicar_botao(page, r"criar\s+um\s+novo\s+or", timeout=4000)):
+        print("  [!] nao achei 'Criar um novo orcamento'.")
+        print_tela(page, "orc_sem_criar_novo")
+        return False
+    page.wait_for_timeout(2000)
+
+    # 2) tela 'CADASTRO DE ORCAMENTO': VENDEDOR (lista) + 'Criar orcamento'
+    if not (_tem_texto_visivel(page, "CADASTRO DE OR") or _tem_texto_visivel(page, "VENDEDOR")):
+        page.wait_for_timeout(1500)
+    if cli.get("vendedor"):
+        _selecionar_select_rotulo(page, "VENDEDOR", cli["vendedor"], "vendedor")
+        page.wait_for_timeout(600)
+    if not (_clicar_botao_real(page, r"^\s*criar\s+or[çc]amento\s*$", timeout=6000)
+            or _clicar_botao(page, r"^\s*criar\s+or[çc]amento\s*$", timeout=4000)):
+        print("  [!] nao achei o botao 'Criar orcamento'.")
+        print_tela(page, "orc_sem_criar")
+        return False
+    page.wait_for_timeout(2500)
+
+    # 3) deve cair na tela de selecao de projeto (ESCOLHA O DESENHO)
+    if not _esperar_url_ou_texto(page, "selecioneprojeto", "ESCOLHA O DESENHO", 15000):
+        print("  [!] nao abriu a tela de montar itens apos criar o orcamento.")
+        print_tela(page, "orc_sem_selecao")
+        return False
+    print("  orcamento novo criado. ✔")
     return True
 
 
@@ -3057,6 +3098,103 @@ def modo_cadastro(page):
     cadastrar_cliente(page, cli)
 
 
+def modo_novo(page):
+    """ORCAMENTO NOVO COMPLETO: cadastra o cliente -> cria o orcamento ->
+    monta os itens. Os dados do cliente e os itens vem na MESMA mensagem
+    (dados do CRM em 'Campo: valor' e uma linha por item)."""
+    print()
+    print("ORCAMENTO NOVO (cliente + itens).")
+    print("Cole os DADOS DO CLIENTE (Campo: valor) e depois os ITENS (1 por linha).")
+    print("Ex.:")
+    print("   Cliente: Francilene Maria Ribeiro Alves")
+    print("   Celular: 554899287469")
+    print("   Cidade: Ararangua/SC")
+    print("   Vendedor: Sander Pacheco")
+    print("   Itens:")
+    print("   j01 janela 02 folhas com persiana l25 - preto - incolor 6mm temperado - 1200x1200 - quarto")
+    print("Ao terminar, deixe uma linha VAZIA e aperte ENTER (ou digite FIM):")
+    linhas = []
+    while True:
+        try:
+            ln = input()
+        except EOFError:
+            break
+        if ln.strip().upper() == "FIM":
+            break
+        if ln.strip() == "" and linhas:
+            break
+        if ln.strip():
+            linhas.append(ln)
+    texto = "\n".join(linhas)
+    if not texto.strip():
+        print("  (mensagem vazia)")
+        return
+
+    cli = parse_cliente(texto)
+    _, itens = parse_montar(texto)   # ignora o numero (o orcamento e NOVO)
+    if not cli.get("nome"):
+        print("  Nao achei o NOME do cliente na mensagem.")
+        return
+    if not itens:
+        print("  Nao achei itens para montar na mensagem.")
+        return
+
+    # preview
+    print("\n  " + "=" * 56)
+    print("  VOU CRIAR ESTE ORCAMENTO NOVO:")
+    print("  " + "-" * 56)
+    print(f"  CLIENTE: {cli.get('nome')}")
+    for k in ("celular", "telefone", "email", "cpf", "cep", "rua", "numero",
+              "bairro", "complemento", "cidade", "uf", "vendedor"):
+        if cli.get(k):
+            print(f"     {k:11s} -> {cli[k]}")
+    print("  " + "-" * 56)
+    _preview_montar("(novo)", itens)
+    r = input("\n  Esta certo? ENTER para FAZER  |  N para cancelar: ").strip().lower()
+    if r == "n":
+        print("  Cancelado.")
+        return
+
+    # 1) cadastra o cliente
+    if not cadastrar_cliente(page, cli):
+        print("  [!] parei: nao consegui cadastrar o cliente.")
+        return
+    # 2) cria o orcamento novo (vendedor) -> cai na tela de montar
+    if not criar_orcamento_novo(page, cli):
+        print("  [!] parei: nao consegui criar o orcamento novo.")
+        return
+    # 3) monta os itens (o 1o ja cai direto na selecao)
+    resultados = {}
+    for i, mud in enumerate(itens, 1):
+        if "largura" not in mud or "altura" not in mud:
+            print(f"\n  >> Item {i} [{mud.get('tipo','')}]: FALTA A MEDIDA -- pulando.")
+            resultados[i] = "sem_medida"
+            continue
+        try:
+            ok = montar_item_novo(page, i, mud)
+            resultados[i] = "ok" if ok else "falhou"
+        except Exception as e:
+            print(f"  [!] erro inesperado ao montar o item {i}: {e}")
+            print_tela(page, f"novo_erro_{i}")
+            resultados[i] = "erro"
+        page.wait_for_timeout(1200)
+
+    print("\n  Atualizando os valores (Calcular, se precisar)...")
+    if clicar_calcular(page):
+        print("  Cliquei em Calcular. ✔")
+    print()
+    print("  " + "=" * 56)
+    print("  RESUMO DO ORCAMENTO NOVO:")
+    print(f"    cliente -> {cli.get('nome')}")
+    for i, mud in enumerate(itens, 1):
+        st = resultados.get(i, "?")
+        marca = {"ok": "✔", "falhou": "✘", "erro": "‼",
+                 "sem_medida": "⚠ falta medida"}.get(st, "?")
+        print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
+    print("  " + "=" * 56)
+    print("  (As portas de giro voce adiciona manualmente, como combinamos.)")
+
+
 def menu_alteracoes(page):
     """Depois de abrir o orcamento, oferece editar um item."""
     while True:
@@ -3117,6 +3255,7 @@ def main():
                 print("  2) Editar um orcamento MANUALMENTE (passo a passo)")
                 print("  3) MONTAR um orcamento DO ZERO (itens novos)")
                 print("  4) CADASTRAR um cliente NOVO")
+                print("  5) ORCAMENTO NOVO COMPLETO (cliente + itens)")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
@@ -3128,6 +3267,8 @@ def main():
                     modo_montar(page)
                 elif op == "4":
                     modo_cadastro(page)
+                elif op == "5":
+                    modo_novo(page)
                 elif op == "2":
                     numero = input("Numero do orcamento: ").strip()
                     if not numero.isdigit():
