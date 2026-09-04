@@ -1536,16 +1536,31 @@ def _pontua_vidro(opcao, termo):
 def _melhor_opcao(opcoes, termo, esperado):
     if esperado == "vidro":
         pont = [(o, _pontua_vidro(o, termo)) for o in opcoes]
-    else:
-        palavras = [w for w in _re.split(r"\s+", termo.upper()) if len(w) > 2]
-        pont = [(o, sum(1 for w in palavras if w in o.upper())) for o in opcoes]
+        pont = [x for x in pont if x[1] > 0]
+        if not pont:
+            return None, False
+        pont.sort(key=lambda x: x[1], reverse=True)
+        melhor, s1 = pont[0]
+        s2 = pont[1][1] if len(pont) > 1 else -1
+        return melhor, (s1 > s2)
+    # cor / outros: pontua por palavras do termo
+    palavras = [w for w in _re.split(r"\s+", termo.upper()) if len(w) > 2]
+    pont = [(o, sum(1 for w in palavras if w in o.upper())) for o in opcoes]
     pont = [x for x in pont if x[1] > 0]
     if not pont:
         return None, False
-    pont.sort(key=lambda x: x[1], reverse=True)
-    melhor, s1 = pont[0]
-    s2 = pont[1][1] if len(pont) > 1 else -1
-    return melhor, (s1 > s2)
+    smax = max(s for _, s in pont)
+    topo = [o for o, s in pont if s == smax]
+    if len(topo) == 1:
+        return topo[0], True
+    # empate -> prefere o acabamento PINTURA (padrao EGEMAP p/ cor lisa:
+    # 'preto' -> PINTURA PRETO em vez de ANODIZADO PRETO).
+    pint = [o for o in topo if "PINTURA" in o.upper()]
+    if len(pint) == 1:
+        return pint[0], True
+    # ainda empatado -> pega o texto mais curto (opcao mais "pura")
+    topo.sort(key=len)
+    return topo[0], (len(topo) == 1 or len(topo[0]) < len(topo[1]))
 
 
 def _set_select_auto(frame, rotulo, esperado, termo, nome):
