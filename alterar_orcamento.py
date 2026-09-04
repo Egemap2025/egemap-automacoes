@@ -732,6 +732,18 @@ ROTULOS = {
     "AMBIENTE": ["AMBIENTE/LOCALIZACAO", "AMBIENTE/LOCALIZAÇÃO", "AMBIENTE"],
     "PERFIL":   ["ALUMINIO/PERFIL", "ALUMÍNIO/PERFIL", "PERFIL"],
     "VIDRO COR": ["VIDRO COR", "VIDRO/COR", "VIDRO"],
+    # cadastro de cliente (tela 'Cadastro Rapido' / 'Cadastro Completo')
+    "NOME":       ["NOME COMPLETO", "NOME"],
+    "EMAIL":      ["EMAIL", "E-MAIL"],
+    "TELEFONE":   ["TELEFONE FIXO", "TELEFONE"],
+    "CELULAR":    ["CELULAR"],
+    "CPF":        ["CPF/CNPJ", "CPF", "CNPJ"],
+    "CEP":        ["CEP"],
+    "RUA":        ["RUA", "ENDERECO", "ENDEREÇO", "LOGRADOURO"],
+    "NUMERO":     ["NRO.", "NRO", "NÚMERO", "NUMERO"],
+    "BAIRRO":     ["BAIRRO"],
+    "COMPLEMENTO": ["COMPLEMENTO"],
+    "CIDADE":     ["CIDADE", "MUNICIPIO", "MUNICÍPIO"],
 }
 
 # JS que acha o campo (input/select/textarea) mais proximo de um rotulo.
@@ -1370,10 +1382,66 @@ def parse_montar(texto):
         if orcamento is None and _re.match(r"^\d{2,7}$", l):
             orcamento = l
             continue
+        if _campo_cliente(l):        # linha 'Cliente:'/'Rua:'... nao e item
+            continue
+        if _re.match(r"^\s*itens?\s*[:]?\s*$", l, _re.I):   # cabecalho 'Itens:'
+            continue
         spec = _spec_item_novo(l)
         if spec and spec.get("modelo"):
             itens.append(spec)
     return orcamento, itens
+
+
+# campos do cadastro do cliente reconhecidos na mensagem ('Campo: valor')
+_CLI_CAMPOS = {
+    "nome":        ["nome", "cliente", "nome completo"],
+    "email":       ["email", "e-mail"],
+    "telefone":    ["telefone", "tel fixo", "telefone fixo", "fixo"],
+    "celular":     ["celular", "cel", "whatsapp", "zap", "fone", "telefone celular"],
+    "cpf":         ["cpf", "cnpj", "cpf/cnpj"],
+    "cep":         ["cep"],
+    "rua":         ["rua", "endereco", "endereço", "logradouro"],
+    "numero":      ["numero", "número", "nro", "nro.", "n", "num"],
+    "bairro":      ["bairro"],
+    "complemento": ["complemento", "referencia", "referência", "ponto de referencia", "obs"],
+    "cidade":      ["cidade", "municipio", "município", "cidade/uf"],
+    "uf":          ["uf", "estado"],
+    "vendedor":    ["vendedor", "responsavel", "responsável"],
+}
+
+# sigla -> nome do estado (como aparece na lista UF do W-Vetro)
+_UF_NOME = {
+    "SC": "SANTA CATARINA", "RS": "RIO GRANDE DO SUL", "PR": "PARANA",
+    "SP": "SAO PAULO", "RJ": "RIO DE JANEIRO", "MG": "MINAS GERAIS",
+    "PA": "PARA", "BA": "BAHIA", "GO": "GOIAS", "ES": "ESPIRITO SANTO",
+    "MS": "MATO GROSSO DO SUL", "MT": "MATO GROSSO", "DF": "DISTRITO FEDERAL",
+}
+
+
+def _campo_cliente(linha):
+    """Se a linha for 'Campo: valor' de um dado de cliente, devolve (campo, valor);
+    senao None. Ex.: 'Cliente: Natanael' -> ('nome','Natanael')."""
+    m = _re.match(r"^\s*([A-Za-zÀ-ÿ/ ]{2,20}?)\s*[:=]\s*(.+?)\s*$", linha)
+    if not m:
+        return None
+    rot = _sem_acento(m.group(1).strip().lower())
+    val = m.group(2).strip()
+    for campo, aliases in _CLI_CAMPOS.items():
+        if rot in [_sem_acento(a) for a in aliases]:
+            return (campo, val)
+    return None
+
+
+def parse_cliente(texto):
+    """Le os dados do cliente da mensagem (linhas 'Campo: valor'). Devolve um
+    dict (nome, celular, telefone, email, cpf, cep, rua, numero, bairro,
+    complemento, cidade, vendedor) -- so com o que veio."""
+    cli = {}
+    for l in texto.splitlines():
+        cv = _campo_cliente(l)
+        if cv:
+            cli[cv[0]] = cv[1]
+    return cli
 
 
 CAMPOS_PREVIEW = (("cor", "cor"), ("largura", "largura"), ("altura", "altura"),
@@ -2520,6 +2588,94 @@ def montar_item_novo(page, num, mud):
     return True
 
 
+def _set_input_page(page, rotulo, valor, nome):
+    """Preenche um <input> pelo ROTULO em QUALQUER frame (silencioso)."""
+    for fr in page.frames:
+        try:
+            inp = _achar_input(fr, rotulo)
+        except Exception:
+            inp = None
+        if inp is not None and _visivel(inp):
+            try:
+                inp.scroll_into_view_if_needed(timeout=2000)
+                inp.click(timeout=2000)
+                inp.fill(str(valor))
+                print(f"     {nome} -> {valor}")
+                return True
+            except Exception:
+                continue
+    print(f"     [!] nao achei o campo {nome}")
+    return False
+
+
+def cadastrar_cliente(page, cli):
+    """Cadastra um cliente NOVO no W-Vetro: tela 'NOVO CLIENTE' -> preenche o
+    'Cadastro Rapido/Completo' -> Salvar. Os dados vem do CRM (passados na
+    mensagem). So o NOME e obrigatorio."""
+    nome = cli.get("nome")
+    if not nome:
+        print("  [!] falta o NOME do cliente -- nao da pra cadastrar.")
+        return False
+    print(f"\n  >> Cadastrando cliente: {nome}")
+
+    # 1) tile/botao 'NOVO CLIENTE'
+    if not (_clicar_botao_real(page, r"novo\s+cliente", timeout=8000)
+            or _clicar_botao(page, r"novo\s+cliente", timeout=4000)):
+        print("  [!] nao achei 'NOVO CLIENTE' na tela (abra a tela inicial).")
+        print_tela(page, "cli_sem_novo")
+        return False
+    page.wait_for_timeout(2000)
+
+    # 2) espera o formulario de cadastro
+    if not (_tem_texto_visivel(page, "NOME COMPLETO")
+            or _tem_texto_visivel(page, "Cadastro")):
+        print("  [!] a tela de cadastro do cliente nao abriu.")
+        print_tela(page, "cli_sem_form")
+        return False
+
+    # 3) campos de TEXTO (CEP antes da rua: se o W-Vetro auto-preencher pelo
+    #    CEP, a rua/numero que eu informar depois sobrescreve).
+    _set_input_page(page, "NOME", nome, "nome")
+    campos = [("celular", "CELULAR", "celular"),
+              ("telefone", "TELEFONE", "telefone"),
+              ("email", "EMAIL", "email"),
+              ("cpf", "CPF", "cpf/cnpj"),
+              ("cep", "CEP", "cep"),
+              ("rua", "RUA", "rua"),
+              ("numero", "NUMERO", "numero"),
+              ("bairro", "BAIRRO", "bairro"),
+              ("complemento", "COMPLEMENTO", "complemento")]
+    for campo, rot, lbl in campos:
+        if cli.get(campo):
+            _set_input_page(page, rot, cli[campo], lbl)
+
+    # 3b) CIDADE / UF sao LISTAS (dropdown). 'cidade: Ararangua/SC' -> separa UF.
+    cidade = cli.get("cidade", "")
+    uf = cli.get("uf", "")
+    mcid = _re.match(r"^(.*?)[\s/-]+([A-Za-z]{2})\s*$", cidade)
+    if mcid and not uf:
+        cidade, uf = mcid.group(1).strip(), mcid.group(2).strip()
+    if uf:
+        _selecionar_select_rotulo(page, "UF", _UF_NOME.get(uf.upper(), uf), "uf")
+        page.wait_for_timeout(600)
+    if cidade:
+        _selecionar_select_rotulo(page, "CIDADE", cidade, "cidade")
+    print_tela(page, "cli_preenchido")
+
+    # 4) Salvar -> o botao e 'Confirmar' (canto inferior direito).
+    if not (_clicar_botao_real(page, r"^\s*confirmar\s*$", timeout=6000)
+            or _clicar_botao(page, r"^\s*confirmar\s*$", timeout=4000)
+            or _clicar_botao(page, r"salvar", timeout=3000)
+            or _clicar_botao(page, r"cadastrar", timeout=3000)):
+        print("  [!] nao achei o botao 'Confirmar'.")
+        print_tela(page, "cli_sem_salvar")
+        return False
+    page.wait_for_timeout(2500)
+    print_tela(page, "cli_apos_salvar")
+    print(f"  cliente '{nome}' cadastrado. ✔")
+    return True
+
+
 def clicar_calcular(page):
     """Depois de alterar itens, o W-Vetro mostra 'Orcamento Nao Calculado --
     clique em Calcular'. Esta funcao clica no botao 'Calcular' VISIVEL (em
@@ -2859,6 +3015,48 @@ def modo_montar(page):
     print("  " + "=" * 56)
 
 
+def modo_cadastro(page):
+    """Cadastra um cliente NOVO no W-Vetro a partir dos dados colados (CRM)."""
+    print()
+    print("CADASTRAR CLIENTE NOVO.")
+    print("Cole os dados do cliente (uma linha por campo). Ex.:")
+    print("   Cliente: Francilene Maria Ribeiro Alves")
+    print("   Celular: 48999287469")
+    print("   Rua: Rua das Flores")
+    print("   Numero: 30")
+    print("   Bairro: Centro")
+    print("   Cidade: Ararangua/SC")
+    print("Ao terminar, deixe uma linha VAZIA e aperte ENTER (ou digite FIM):")
+    linhas = []
+    while True:
+        try:
+            ln = input()
+        except EOFError:
+            break
+        if ln.strip().upper() == "FIM":
+            break
+        if ln.strip() == "" and linhas:
+            break
+        if ln.strip():
+            linhas.append(ln)
+    cli = parse_cliente("\n".join(linhas))
+    if not cli.get("nome"):
+        print("  Nao achei o NOME do cliente na mensagem.")
+        return
+    print("\n  " + "=" * 56)
+    print("  VOU CADASTRAR ESTE CLIENTE:")
+    for k in ("nome", "celular", "telefone", "email", "cpf", "cep", "rua",
+              "numero", "bairro", "complemento", "cidade", "uf", "vendedor"):
+        if cli.get(k):
+            print(f"     {k:11s} -> {cli[k]}")
+    print("  " + "=" * 56)
+    r = input("\n  Cadastrar? ENTER = sim  |  N para cancelar: ").strip().lower()
+    if r == "n":
+        print("  Cancelado.")
+        return
+    cadastrar_cliente(page, cli)
+
+
 def menu_alteracoes(page):
     """Depois de abrir o orcamento, oferece editar um item."""
     while True:
@@ -2918,6 +3116,7 @@ def main():
                 print("  1) Colar uma MENSAGEM (varias alteracoes de uma vez)")
                 print("  2) Editar um orcamento MANUALMENTE (passo a passo)")
                 print("  3) MONTAR um orcamento DO ZERO (itens novos)")
+                print("  4) CADASTRAR um cliente NOVO")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
@@ -2927,6 +3126,8 @@ def main():
                     modo_mensagem(page)
                 elif op == "3":
                     modo_montar(page)
+                elif op == "4":
+                    modo_cadastro(page)
                 elif op == "2":
                     numero = input("Numero do orcamento: ").strip()
                     if not numero.isdigit():
