@@ -2417,12 +2417,28 @@ def montar_item_novo(page, num, mud):
 
     # 9) depois de incluir + variaveis, o robo fica na tela de selecao/cards.
     # O botao 'Calcular o Orcamento' VOLTA para o orcamento (SEM re-pesquisar).
+    # Confirmamos que realmente saiu da tela de selecao (mudou de URL).
+    import time as _t
+    voltou = False
     for _tent in range(3):
         if _clicar_botao_real(page, r"calcular\s+o\s+or", timeout=5000):
             print("     'Calcular o Orcamento' -> voltando para o orcamento...")
-            page.wait_for_timeout(2500)
-            break
+            fim = _t.time() + 8
+            while _t.time() < fim:
+                try:
+                    u = (page.url or "").lower()
+                    if "selecioneprojeto" not in u and "confirmadadosprojeto" not in u:
+                        voltou = True
+                        break
+                except Exception:
+                    pass
+                page.wait_for_timeout(500)
+            if voltou:
+                break
         page.wait_for_timeout(800)
+    if not voltou:
+        print("     [!] nao confirmei o retorno pelo 'Calcular o Orcamento'.")
+    page.wait_for_timeout(1500)
 
     print(f"     item {num} montado. ✔")
     return True
@@ -2746,19 +2762,15 @@ def modo_montar(page):
             resultados[i] = "erro"
         page.wait_for_timeout(1200)
 
-    # Finaliza: na tela de selecao/cards existe o botao 'Calcular o Orcamento'
-    # (azul, canto direito) que VOLTA para o orcamento. Clica nele (real). Se
-    # nao achar / nao voltar, reabre pela Consulta.
-    if _clicar_botao_real(page, r"calcular o or", timeout=5000):
-        print("  Cliquei em 'Calcular o Orcamento' (voltando para o orcamento)...")
-        page.wait_for_timeout(3000)
-    if not _esperar_itens(8):
-        abrir_orcamento(page, orc)
-    print("\n  Atualizando os valores (Calcular)...")
+    # Cada item ja voltou para o orcamento via 'Calcular o Orcamento' (dentro
+    # de montar_item_novo). O item ja esta SALVO -- entao NAO reabrimos pela
+    # Consulta (era isso que voltava a 'procurar o orcamento' no fim).
+    page.wait_for_timeout(1500)
+    print("\n  Atualizando os valores (Calcular, se precisar)...")
     if clicar_calcular(page):
         print("  Cliquei em Calcular -- valores atualizados. ✔")
     else:
-        print("  (Se aparecer 'Orcamento Nao Calculado', clique em Calcular.)")
+        print("  (valores ja calculados / ja no orcamento)")
 
     print()
     print("  " + "=" * 56)
