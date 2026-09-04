@@ -1818,8 +1818,10 @@ def _modelo_dropdown(descricao):
     if tem_porta:
         # PORTA-JANELA (tem 'porta' E 'janela') = porta de correr (corre no
         # trilho, tipo janela). Ex.: 'porta janela 3 folhas', '... sequencial'.
+        # Inclui o Nr de folhas (02/03/04...) senao o W-Vetro pega sempre a 1a
+        # opcao (02 FOLHAS). Sem folhas informadas, assume 02.
         if tem_janela and "giro" not in low and "abrir" not in low:
-            return "PORTA DE CORRER"
+            return f"PORTA DE CORRER {_folha_sfx(folhas or '02')}"
         # porta de giro / porta de abrir (interna/externa de abrir) -> PORTA DE GIRO
         if "giro" in low or "abrir" in low or "batente" in low:
             return f"PORTA DE GIRO {_folha_sfx(folhas or '01')}"
