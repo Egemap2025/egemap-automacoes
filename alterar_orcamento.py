@@ -992,7 +992,9 @@ MARCAS_MODAL_EDICAO = ("VIDRO COR", "ALUMINIO/PERFIL", "Dados do Item")
 #   - outros casos: "Informe as variaveis"
 # Por isso reconhecemos VARIAS marcas (uma basta).
 MARCAS_JANELA_VARIAVEIS = ("Informar Medidas", "Informe as vari",
-                           "SALVAR VARI", "Medidas em MM")
+                           "SALVAR VARI", "Medidas em MM",
+                           "ACIONAMENTO DA ESTEIRA", "PASSO DAS PALHETAS",
+                           "TAMANHO DA PALHETA", "VOLTAGEM DO MOTOR")
 
 
 def _modal_edicao_aberto(page):
@@ -2198,10 +2200,22 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         print("     [!] nao achei 'Incluir item no orcamento'.")
         print_tela(page, f"{prefixo}_sem_incluir_{num}")
         return False
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(2500)
+    print_tela(page, f"{prefixo}_apos_incluir_{num}")
 
-    # janela 'Informe as variaveis': acionamento + CONFIRMAR
-    if _janela_variaveis_aberta(page):
+    # janela 'Informe as variaveis' (itens com persiana/motor pedem o
+    # ACIONAMENTO). ENQUANTO ela nao for CONFIRMADA o item NAO fica salvo --
+    # se navegar antes, perde o item. Ela demora a surgir, entao esperamos.
+    import time as _t
+    fim = _t.time() + 9
+    apareceu = False
+    while _t.time() < fim:
+        if _janela_variaveis_aberta(page) or _modal_edicao_aberto(page):
+            apareceu = True
+            break
+        page.wait_for_timeout(500)
+    if apareceu:
+        print("     janela de variaveis aberta -- finalizando...")
         if acion:
             _selecionar_select_rotulo(page, "ACIONAMENTO DA ESTEIRA", acion, "acionamento")
             page.wait_for_timeout(800)
@@ -2559,11 +2573,23 @@ def modo_montar(page):
         print("  Nao consegui abrir o orcamento.")
         return
 
+    # Espera os itens do orcamento aparecerem na tela (ate 'seg' segundos)
+    # antes de decidir reabrir. Depois de 'Incluir item no orcamento' o W-Vetro
+    # volta para o orcamento, mas demora -- reabrir cedo demais PERDE o item.
+    def _esperar_itens(seg=7):
+        import time as _t
+        fim = _t.time() + seg
+        while _t.time() < fim:
+            if _itens_por_ordem(page):
+                return True
+            page.wait_for_timeout(500)
+        return bool(_itens_por_ordem(page))
+
     resultados = {}
     for i, mud in enumerate(itens, 1):
-        # depois de incluir um item o W-Vetro pode ir para outra tela --
-        # reabre o orcamento para achar o botao 'Inserir Novo Projeto'.
-        if not _itens_por_ordem(page) and i > 1:
+        # depois de incluir um item o W-Vetro volta para o orcamento -- so
+        # reabre (Consulta) se ele REALMENTE nao voltou (evita perder o item).
+        if i > 1 and not _esperar_itens(7):
             print("  (voltando para a tela do orcamento...)")
             abrir_orcamento(page, orc)
         try:
@@ -2575,7 +2601,7 @@ def modo_montar(page):
             resultados[i] = "erro"
         page.wait_for_timeout(1200)
 
-    if not _itens_por_ordem(page):
+    if not _esperar_itens(7):
         abrir_orcamento(page, orc)
     print("\n  Atualizando os valores (Calcular)...")
     if clicar_calcular(page):
