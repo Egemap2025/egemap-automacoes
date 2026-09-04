@@ -1866,7 +1866,8 @@ def _modelo_dropdown(descricao):
     tem_janela = "janela" in low
 
     # tipos que nao dependem de folhas
-    if "maxim" in low:
+    # 'basculante' a EGEMAP faz como MAXIM-AR (confirmado pelo usuario)
+    if "maxim" in low or "basculante" in low or "bascul" in low:
         return "MAXIM-AR"
     if "portinhola" in low:
         return "PORTINHOLA"
