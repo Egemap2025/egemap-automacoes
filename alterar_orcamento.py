@@ -3195,6 +3195,72 @@ def modo_novo(page):
     print("  (As portas de giro voce adiciona manualmente, como combinamos.)")
 
 
+def modo_montar_aberto(page):
+    """Monta os itens num orcamento que VOCE ja criou e deixou na tela
+    'ESCOLHA O DESENHO' (ex.: cliente ja cadastrado -> NOVO ORCAMENTO ->
+    escolheu o cliente -> Criar orcamento). O robo so monta os itens."""
+    print()
+    print("MONTAR ITENS (orcamento JA ABERTO na tela 'Escolha o desenho').")
+    print("Deixe o W-Vetro na tela 'ESCOLHA O DESENHO | PROJETO' e cole os itens")
+    print("(1 por linha). Ex.:")
+    print("   j01 janela 02 folhas com persiana l25 - preto - incolor 6mm temperado - 1200x1200 - quarto")
+    print("Ao terminar, deixe uma linha VAZIA e aperte ENTER (ou digite FIM):")
+    linhas = []
+    while True:
+        try:
+            ln = input()
+        except EOFError:
+            break
+        if ln.strip().upper() == "FIM":
+            break
+        if ln.strip() == "" and linhas:
+            break
+        if ln.strip():
+            linhas.append(ln)
+    _, itens = parse_montar("\n".join(linhas))
+    if not itens:
+        print("  Nao achei itens para montar.")
+        return
+    _preview_montar("(aberto)", itens)
+    r = input("\n  Esta certo? ENTER para MONTAR  |  N para cancelar: ").strip().lower()
+    if r == "n":
+        print("  Cancelado.")
+        return
+    if "selecioneprojeto" not in (page.url or "").lower():
+        print("  [!] voce nao esta na tela 'Escolha o desenho'. Abra ela antes")
+        print("      (NOVO ORCAMENTO -> escolha o cliente -> Criar orcamento).")
+        return
+
+    resultados = {}
+    for i, mud in enumerate(itens, 1):
+        if "largura" not in mud or "altura" not in mud:
+            print(f"\n  >> Item {i} [{mud.get('tipo','')}]: FALTA A MEDIDA -- pulando.")
+            resultados[i] = "sem_medida"
+            continue
+        try:
+            ok = montar_item_novo(page, i, mud)
+            resultados[i] = "ok" if ok else "falhou"
+        except Exception as e:
+            print(f"  [!] erro inesperado ao montar o item {i}: {e}")
+            print_tela(page, f"aberto_erro_{i}")
+            resultados[i] = "erro"
+        page.wait_for_timeout(1200)
+
+    print("\n  Atualizando os valores (Calcular, se precisar)...")
+    if clicar_calcular(page):
+        print("  Cliquei em Calcular. ✔")
+    print()
+    print("  " + "=" * 56)
+    print("  RESUMO:")
+    for i, mud in enumerate(itens, 1):
+        st = resultados.get(i, "?")
+        marca = {"ok": "✔", "falhou": "✘", "erro": "‼",
+                 "sem_medida": "⚠ falta medida"}.get(st, "?")
+        print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
+    print("  " + "=" * 56)
+    print("  (As portas de giro voce adiciona manualmente.)")
+
+
 def menu_alteracoes(page):
     """Depois de abrir o orcamento, oferece editar um item."""
     while True:
@@ -3256,6 +3322,7 @@ def main():
                 print("  3) MONTAR um orcamento DO ZERO (itens novos)")
                 print("  4) CADASTRAR um cliente NOVO")
                 print("  5) ORCAMENTO NOVO COMPLETO (cliente + itens)")
+                print("  6) MONTAR itens (orcamento ja aberto na tela 'Escolha o desenho')")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
@@ -3269,6 +3336,8 @@ def main():
                     modo_cadastro(page)
                 elif op == "5":
                     modo_novo(page)
+                elif op == "6":
+                    modo_montar_aberto(page)
                 elif op == "2":
                     numero = input("Numero do orcamento: ").strip()
                     if not numero.isdigit():
