@@ -97,7 +97,7 @@ resto nem sempre:
 | O que o monitor faz | Onde acontece |
 |---|---|
 | Troca o PDF e o valor da linha do orçamento | Em qualquer etapa |
-| Atualiza o **valor do negócio** (o maior das opções) | Até *Orçamento Pronto*. De *Orçamento Apresentado* em diante o número é do vendedor (pode ter negociado desconto) e não é tocado |
+| Atualiza o **valor do negócio** | Em qualquer etapa. Sem pedido, vale o maior dos orçamentos; com pedido de fábrica no card, vale o pedido — foi nele que fechou |
 | Marca o orçamento como **feito** | Só nas filas de trabalho: *Orçamentos a Fazer* e *Atualizações* |
 | **Move o card** para *Orçamento Pronto* | Saindo das filas: *Orçamentos a Fazer* e *Atualizações* |
 

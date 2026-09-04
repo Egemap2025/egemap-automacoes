@@ -7,7 +7,7 @@ que voce fazia na mao:
 
   1. Acha o cliente pelo nome da pasta
   2. Lanca o orcamento (nome + valor) e anexa o PDF da proposta
-  3. Atualiza o valor do negocio (a maior das opcoes)
+  3. Atualiza o valor do negocio (a maior das opcoes, ou o pedido)
   4. Marca o orcamento como feito
   5. Arrasta o cliente para "Orcamento Pronto"
 
@@ -19,11 +19,12 @@ BRANCO.pdf" vira a linha "Branco". Entao duas opcoes do mesmo material
 (BRANCO e CINZA) sao duas linhas e convivem, e renomear a proposta renomeia
 a linha em vez de criar outra.
 
-Os passos 3, 4 e 5 tem freio:
+O valor do negocio e atualizado em qualquer etapa do funil. Enquanto e
+orcamento, vale a MAIOR das opcoes; assim que o pedido de fabrica entra no
+card, o valor passa a ser o do pedido -- foi nele que o negocio fechou.
 
-  - o valor do negocio so e mexido enquanto ele ainda e do orcamento. Depois
-    de "Orcamento Apresentado" o numero e do vendedor (pode ter negociado
-    desconto), e o monitor so troca o PDF.
+Os passos 4 e 5 tem freio:
+
   - marcar feito e mover so acontece com o card numa fila de trabalho
     ("Orcamentos a Fazer" ou "Atualizacoes"). Card ja adiantado no funil so
     recebe o PDF novo, e nao volta pra tras.
@@ -76,14 +77,6 @@ ETAPA_ORIGEM_NORM = "orcamentos a fazer"
 # que chega e o orcamento sendo feito, entao marca como feito.
 ETAPAS_FILA = {"orcamentos a fazer", "atualizacoes"}
 
-# Etapas em que o valor do negocio ainda e do orcamento. Depois que a proposta
-# foi apresentada, o numero passa a ser do vendedor (pode ter negociado
-# desconto), entao o monitor nunca sobrescreve -- so troca o PDF.
-ETAPAS_VALOR_DO_ORCAMENTO = {
-    "novo lead", "contato realizado", "orcamento a definir",
-    "orcamentos a fazer", "atualizacoes", "orcamento pronto",
-}
-
 # ── Pedido (etapa "Contrato") ─────────────────────────────────────────────────
 
 # Quando o contrato fecha, o pedido de fabrica vira mais uma linha na mesma
@@ -96,6 +89,16 @@ NOME_LINHA_PEDIDO = "Pedido"
 # hoje, so 7 estao "open" e 45 estao "won". Procurar so entre os abertos
 # deixaria 45 contratos de fora, e o pedido nunca acharia o cliente.
 STATUS_QUE_VALEM = ("open", "won")
+
+
+def e_linha_de_pedido(nome):
+    """A linha e um pedido de fabrica: "Pedido", "Pedido 2", "Pedido 3"...
+
+    Serve pra separar pedido de orcamento na hora de calcular o valor do
+    negocio. Compara a primeira palavra, sem acento nem maiuscula.
+    """
+    palavras = normalizar(nome or "").split()
+    return bool(palavras) and palavras[0] == normalizar(NOME_LINHA_PEDIDO)
 
 CONFIG_FILE = Path.home() / ".egemap_crm_config.json"
 
@@ -502,18 +505,35 @@ class CRM:
         return len(substituir)
 
     def atualizar_valor(self, negocio_id):
-        """Valor do negocio = o MAIOR dos orcamentos lancados.
+        """Valor do negocio: o pedido manda; sem pedido, o MAIOR orcamento.
 
-        Quando o cliente recebe duas opcoes (ex.: PVC branco e PVC cinza), ele
-        vai fechar uma so -- somar as duas inflaria a previsao de vendas. O
-        maior mostra o teto do negocio, que e como isso vinha sendo preenchido
-        na mao.
+        Enquanto e orcamento, o cliente tem opcoes (ex.: PVC branco e PVC
+        cinza) e vai fechar uma so -- somar as duas inflaria a previsao de
+        vendas, e a maior mostra o teto do negocio.
+
+        Quando o PDF do pedido de fabrica chega, o negocio ja fechou: o valor
+        passa a ser o do pedido, que e o numero real. Mais de um pedido no
+        mesmo contrato sao pedidos diferentes do mesmo fechamento (a fabrica
+        separou PVC e aluminio, por exemplo), entao ai eles somam.
+
+        Devolve (valor, "pedido" ou "orcamento").
         """
-        linhas = self._tabela("deal_budgets", f"select=value&deal_id=eq.{negocio_id}")
-        valores = [float(b["value"]) for b in linhas if b.get("value") is not None]
-        maior = max(valores, default=0.0)
-        self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {"value": maior})
-        return maior
+        linhas = self._tabela("deal_budgets",
+                              f"select=name,value&deal_id=eq.{negocio_id}")
+        pedidos, orcamentos = [], []
+        for linha in linhas:
+            if linha.get("value") is None:
+                continue
+            alvo = pedidos if e_linha_de_pedido(linha.get("name")) else orcamentos
+            alvo.append(float(linha["value"]))
+
+        if pedidos:
+            valor, origem = sum(pedidos), "pedido"
+        else:
+            valor, origem = max(orcamentos, default=0.0), "orcamento"
+
+        self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {"value": valor})
+        return valor, origem
 
     def marcar_feito(self, negocio, materiais):
         """Marca como feitos os orcamentos que esta proposta cobre.
@@ -760,16 +780,18 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
         log(f"[{cliente}] CRM: {acao} '{nome_linha}' em '{titulo}' "
             f"({_nome_etapa(negocio)}) — {_reais(valor)}")
 
-        # 2. Valor do negocio: so enquanto ele ainda e do orcamento.
-        if etapa in ETAPAS_VALOR_DO_ORCAMENTO:
-            total = crm.atualizar_valor(negocio["id"])
-            if total > valor:
-                log(f"[{cliente}] CRM: valor do negocio ficou {_reais(total)} "
-                    f"(a maior das opcoes).")
+        # 2. Valor do negocio: atualizado em qualquer etapa. Se o pedido de
+        #    fabrica ja entrou no card, quem manda e ele -- o negocio fechou
+        #    naquele numero, e a proposta nao mexe mais nisso.
+        total, origem = crm.atualizar_valor(negocio["id"])
+        if origem == "pedido":
+            log(f"[{cliente}] CRM: valor do negocio continua {_reais(total)} "
+                f"— e o do pedido, que ja fechou.")
+        elif total > valor:
+            log(f"[{cliente}] CRM: valor do negocio ficou {_reais(total)} "
+                f"(a maior das opcoes).")
         else:
-            total = None
-            log(f"[{cliente}] CRM: valor do negocio nao foi mexido — "
-                f"'{_nome_etapa(negocio)}' e numero do vendedor.")
+            log(f"[{cliente}] CRM: valor do negocio atualizado para {_reais(total)}.")
 
         # 3. Marcar feito e mover: so quando o card esta numa fila de trabalho
         #    e a proposta e a final, nao uma peca esperando o COMPLETO.
@@ -788,8 +810,7 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
 
         crm.mover_para_pronto(negocio["id"])
         log(f"[{cliente}] CRM: movido de '{_nome_etapa(negocio)}' para "
-            f"'{ETAPA_DESTINO}'"
-            + (f" — total {_reais(total)}" if total is not None else ""))
+            f"'{ETAPA_DESTINO}' — total {_reais(total)}")
         return True
 
     except ClienteNaoEncontrado as e:
@@ -830,6 +851,12 @@ def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None):
         junto = f", junto das {intactas} linha(s) que ja estavam la" if intactas else ""
         log(f"[{cliente}] CRM: {acao} '{nome}' em '{negocio.get('title')}' "
             f"({ETAPA_PEDIDO}) — {_reais(valor)}{junto}")
+
+        # O pedido e o numero fechado: passa a ser o valor do negocio, no
+        # lugar do orcamento que estava la.
+        total, _ = crm.atualizar_valor(negocio["id"])
+        log(f"[{cliente}] CRM: valor do negocio agora e {_reais(total)} "
+            f"— pelo pedido.")
         return True
 
     except ClienteNaoEncontrado as e:

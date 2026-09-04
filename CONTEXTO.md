@@ -168,18 +168,38 @@ apagaria o primeiro. Como o nome vem do arquivo, as duas opções convivem — e
 renomear a proposta renomeia a linha em vez de criar outra (o rename é
 detectado e o nome anterior vai junto para o CRM saber qual linha atualizar).
 
-### O valor do negócio é o MAIOR, não a soma
+### Sem pedido, o valor do negócio é o MAIOR orçamento, não a soma
 
 **Por quê:** duas opções são alternativas — o cliente fecha uma. A Maria
 Teresa tinha R$ 113.711 e R$ 162.717; somar daria R$ 276.428 e inflaria a
 previsão de vendas. Na mão, o Natanael preenchia com a maior.
 
-### O valor só é mexido até "Orçamento Pronto"
+### Com pedido, o valor do negócio é o do PEDIDO
 
-**Por quê:** havia 97 negócios abertos em *Apresentado*, *Negociação* e
-*Contrato* com valor preenchido — números que o vendedor já negociou.
-Sobrescrever seria apagar o desconto fechado sem ninguém perceber. Dessas
-etapas em diante o monitor **só troca o PDF**.
+**Por quê:** o pedido de fábrica é o número que fechou. Enquanto é orçamento
+o valor é estimativa; quando o pedido entra no card, ele manda, e proposta
+nova não mexe mais nisso (`atualizar_valor` devolve `"pedido"` e o
+`lancar_proposta` só registra no log que não mexeu).
+
+Dois pedidos no mesmo contrato **somam** — são pedidos diferentes do mesmo
+fechamento (a fábrica separou PVC e alumínio, por exemplo). Um pedido
+reeditado não cria linha nova: o `enviar_pedido` acha a linha pelo nome do
+arquivo, então "Pedido 2" só aparece quando é outro pedido mesmo.
+
+### O valor é atualizado em QUALQUER etapa
+
+Foi o contrário até 04/09/2026: o valor só era mexido até "Orçamento Pronto",
+porque havia 97 negócios em *Apresentado*, *Negociação* e *Contrato* com valor
+preenchido e a ideia era não apagar o desconto que o vendedor tinha negociado.
+
+O Natanael viu no log da Ana Ivonete (`valor do negocio nao foi mexido —
+'Orçamento Apresentado' e numero do vendedor`), não entendeu, e decidiu:
+**"pode sempre atualizar o valor lá independente de onde estiver"**. A regra
+do desconto virou a regra do pedido: o número do vendedor deixa de ser
+sobrescrito quando o pedido chega, que é quando ele realmente é definitivo.
+
+Hoje toda proposta escreve uma linha no log dizendo o que aconteceu com o
+valor — não existe mais o caso silencioso.
 
 ### "MAD ALM" não vai pro CRM nem pro Drive
 
