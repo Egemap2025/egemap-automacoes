@@ -746,6 +746,8 @@ ROTULOS = {
     "CIDADE":     ["CIDADE", "MUNICIPIO", "MUNICÍPIO"],
     "UF":         ["UF", "ESTADO"],
     "VENDEDOR":   ["VENDEDOR", "RESPONSAVEL", "RESPONSÁVEL"],
+    "MODULOS":    ["QUANTIDADE DE MODULOS", "QUANTIDADE DE MÓDULOS",
+                   "QTDE DE MODULOS", "MODULOS", "MÓDULOS"],
 }
 
 # JS que acha o campo (input/select/textarea) mais proximo de um rotulo.
@@ -1326,6 +1328,17 @@ def _spec_item_novo(descricao):
     # numero de 1 digito -> 2 digitos ('4 folhas' -> '04 folhas'), igual aos cards
     desc = _re.sub(r"\b(\d)\s+folhas?\b",
                    lambda m: m.group(1).zfill(2) + " folhas", desc, flags=_re.I)
+
+    # MODULOS (horizontais) -- ex.: 'maxim ar 03 modulos'. No W-Vetro o Nr de
+    # modulos NAO e o card, e o campo MD (QUANTIDADE DE MODULOS) da janela de
+    # variaveis. Guarda o numero e tira da descricao.
+    desc = _re.sub(r"\b(uma|um|duas|dois|tr[eê]s|quatro|cinco|seis)\s+m[oó]dulos?\b",
+                   lambda m: _NUMEXT[_sem_acento(m.group(1).lower())] + " modulos",
+                   desc, flags=_re.I)
+    mmod = _re.search(r"\b(\d+)\s*m[oó]dulos?\b", desc, _re.I)
+    if mmod:
+        mud["modulos"] = str(int(mmod.group(1)))
+        desc = _re.sub(r"\b\d+\s*m[oó]dulos?\b", " ", desc, flags=_re.I).strip()
 
     # acionamento embutido: motor / manual (persiana SEM 'motor' fica sem
     # acionamento -> o W-Vetro usa o padrao, que e recolhedor).
@@ -2505,6 +2518,13 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         page.wait_for_timeout(500)
     if apareceu:
         print("     janela de variaveis aberta -- finalizando...")
+        # MODULOS horizontais (ex.: maxim ar 03 modulos): preenche o campo MD
+        # 'QUANTIDADE DE MODULOS' com o numero pedido.
+        if mud.get("modulos"):
+            if _set_input_page(page, "MODULOS", mud["modulos"], "modulos"):
+                page.wait_for_timeout(600)
+            else:
+                print(f"     [!] nao achei o campo QUANTIDADE DE MODULOS.")
         if acion:
             if not _definir_acionamento(page, acion):
                 print(f"     [!] nao achei o campo ACIONAMENTO p/ definir '{acion}'.")
@@ -2946,6 +2966,8 @@ def _preview_montar(orc, itens):
         print(f"     linha       -> {mud.get('linha','(padrao da tela)')}")
         if "acionamento" in mud:
             print(f"     acionamento -> {mud['acionamento']}")
+        if "modulos" in mud:
+            print(f"     modulos     -> {mud['modulos']}")
         for chave, nome in CAMPOS_PREVIEW:
             if chave in mud:
                 val = _descreve_vidro(mud[chave]) if chave == "vidro" else mud[chave]
