@@ -1821,6 +1821,78 @@ def _modelo_dropdown(descricao):
     return f"JANELA DE CORRER {_folha_sfx(folhas or '02')}"
 
 
+_JS_MARCAR_CALCORC = r"""
+() => {
+  const nd = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  document.querySelectorAll('[data-egerobo="calcorc"]').forEach(e=>e.removeAttribute('data-egerobo'));
+  const cands = Array.from(document.querySelectorAll('button,a,input,div,span'));
+  let best=null, bl=1e9;
+  for (const e of cands){
+    const t = nd(e.textContent) + ' ' + nd(e.value||'');
+    if (t.includes('calcular o or')){
+      const r = e.getBoundingClientRect();
+      if (r.width < 10 || r.height < 8) continue;
+      const len = ((e.textContent||'') + (e.value||'')).trim().length;
+      if (len < bl){ best=e; bl=len; }
+    }
+  }
+  if (!best) return false;
+  best.setAttribute('data-egerobo','calcorc');
+  best.scrollIntoView({block:'center'});
+  return true;
+}
+"""
+
+
+def _clicar_calcular_orcamento(page, timeout=9000):
+    """Clica no botao 'Calcular o Orcamento' (tela de selecao/cards), que VOLTA
+    para o orcamento. Localiza via JS (getBoundingClientRect) e clica com MOUSE
+    REAL no centro -- mesma tecnica que funciona no card. Retorna True se saiu
+    da tela de selecao (mudou de URL)."""
+    import time as _t
+    fim = _t.time() + timeout / 1000
+    while _t.time() < fim:
+        try:
+            achou = page.evaluate(_JS_MARCAR_CALCORC)
+        except Exception:
+            achou = False
+        if achou:
+            loc = page.locator('[data-egerobo="calcorc"]').first
+            try:
+                loc.scroll_into_view_if_needed(timeout=2000)
+                box = loc.bounding_box()
+            except Exception:
+                box = None
+            clicou = False
+            if box:
+                x = box["x"] + box["width"] * 0.5
+                y = box["y"] + box["height"] * 0.5
+                try:
+                    page.mouse.click(x, y)
+                    clicou = True
+                except Exception:
+                    clicou = False
+            if not clicou:
+                try:
+                    loc.click(timeout=2000, force=True)
+                    clicou = True
+                except Exception:
+                    clicou = False
+            if clicou:
+                # confirma que saiu da tela de selecao/dados
+                f2 = _t.time() + 8
+                while _t.time() < f2:
+                    try:
+                        u = (page.url or "").lower()
+                        if "selecioneprojeto" not in u and "confirmadadosprojeto" not in u:
+                            return True
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(500)
+        page.wait_for_timeout(400)
+    return False
+
+
 def _definir_acionamento(page, valor):
     """Define o ACIONAMENTO DA ESTEIRA na janela de variaveis. Em vez de achar
     pelo rotulo (fica em outra celula, quebrado em 3 linhas: ACIONAMENTO/DA/
@@ -2417,27 +2489,11 @@ def montar_item_novo(page, num, mud):
 
     # 9) depois de incluir + variaveis, o robo fica na tela de selecao/cards.
     # O botao 'Calcular o Orcamento' VOLTA para o orcamento (SEM re-pesquisar).
-    # Confirmamos que realmente saiu da tela de selecao (mudou de URL).
-    import time as _t
-    voltou = False
-    for _tent in range(3):
-        if _clicar_botao_real(page, r"calcular\s+o\s+or", timeout=5000):
-            print("     'Calcular o Orcamento' -> voltando para o orcamento...")
-            fim = _t.time() + 8
-            while _t.time() < fim:
-                try:
-                    u = (page.url or "").lower()
-                    if "selecioneprojeto" not in u and "confirmadadosprojeto" not in u:
-                        voltou = True
-                        break
-                except Exception:
-                    pass
-                page.wait_for_timeout(500)
-            if voltou:
-                break
-        page.wait_for_timeout(800)
-    if not voltou:
-        print("     [!] nao confirmei o retorno pelo 'Calcular o Orcamento'.")
+    if _clicar_calcular_orcamento(page, timeout=10000):
+        print("     'Calcular o Orcamento' -> voltou para o orcamento. ✔")
+    else:
+        print("     [!] nao consegui clicar em 'Calcular o Orcamento' sozinho.")
+        print_tela(page, f"mon_sem_calcular_{num}")
     page.wait_for_timeout(1500)
 
     print(f"     item {num} montado. ✔")
