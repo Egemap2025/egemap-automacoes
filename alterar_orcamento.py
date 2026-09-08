@@ -2363,20 +2363,27 @@ _JS_MARCAR_CARD = r"""
   const ehCodigo = w => w.length >= 5 && /[0-9]/.test(w) && /[a-z]/.test(w);
   // limpa marcacoes antigas
   document.querySelectorAll('[data-egerobo]').forEach(e => e.removeAttribute('data-egerobo'));
+  // palavras que DIFERENCIAM o desenho (peso alto): tela, persiana, motor...
+  const DIFF = ['tela','persiana','motor','bandeira','peitoril','veneziana',
+                'basculante','ripad','lambri','colonial'];
   const nodes = Array.from(document.querySelectorAll('div,li,article,a,td,section'));
   let best=null, bestScore=-1, bestLen=1e9;
+  const cands = [];
   for (const b of nodes){
     const t = nd(b.textContent);
     if (t.length < 6 || t.length > 500) continue;
     const pareceCard = t.includes('ege-') || t.includes('perf-') || t.includes('projeto com');
     if (!pareceCard) continue;
     let s = 0;
-    for (const w of pal){ if (w.length >= 2 && t.includes(w)) s += ehCodigo(w) ? 20 : 1; }
+    for (const w of pal){ if (w.length >= 2 && t.includes(w)) s += ehCodigo(w) ? 20 : (DIFF.indexOf(w) >= 0 ? 6 : 1); }
+    cands.push({t: (b.textContent||'').replace(/\s+/g,' ').trim().slice(0,80), s: s});
     if (s > bestScore || (s === bestScore && t.length < bestLen)){
       best=b; bestScore=s; bestLen=t.length;
     }
   }
   if (!best || bestScore <= 0) return null;
+  cands.sort((a,b)=>b.s-a.s);
+  const topo = cands.slice(0, 8);
   // O texto que casou costuma ser o '.card-body' (so titulo + 'Mais opcoes'),
   // que NAO contem a foto. Sobe ate o CARD inteiro (o ancestral que TEM <img>),
   // para podermos clicar na FOTO -- e nao no texto nem no botao vermelho.
@@ -2432,7 +2439,7 @@ _JS_MARCAR_CARD = r"""
   // estrutura do card (para diagnostico quando o clique nao pegar)
   let html = (best.outerHTML||'').replace(/\s+/g,' ');
   if (html.length > 2500) html = html.slice(0,2500) + '...';
-  return {score: bestScore, titulo, html};
+  return {score: bestScore, titulo, html, candidatos: topo};
 }
 """
 
@@ -2461,6 +2468,11 @@ def _escolher_card_auto(page, modelo, num=""):
     if not res or res.get("score", 0) <= 0:
         return False
     print(f"     card escolhido -> {res.get('titulo','?')}")
+    cands = res.get("candidatos") or []
+    if len(cands) > 1:
+        print("     (opcoes que vi -- se pegou o errado, me manda estas linhas:)")
+        for c in cands[:8]:
+            print(f"        [{c.get('s')}] {c.get('t')}")
 
     # Clicar na FOTO GRANDE do card avanca direto (confirmado pelo usuario).
     # O desenho costuma ser imagem de FUNDO num quadro (nao um <img>), entao o
