@@ -2080,38 +2080,115 @@ _JS_MARCAR_MODULOS = r"""
 """
 
 
+def _preencher_campo_modulos(campo, n, page):
+    """Preenche um input/select ja localizado com o Nr de modulos."""
+    try:
+        tag = campo.evaluate("e => e.tagName.toLowerCase()")
+    except Exception:
+        tag = "input"
+    try:
+        if tag == "select":
+            try:
+                campo.select_option(label=n)
+            except Exception:
+                campo.select_option(value=n)
+        else:
+            campo.scroll_into_view_if_needed(timeout=2000)
+            campo.click(timeout=2000)
+            campo.fill(n)
+            if (campo.input_value() or "").strip() in ("", "0", "0,00", "1", "1,00"):
+                campo.fill(f"{n},00")
+        page.wait_for_timeout(400)
+        print(f"     modulos -> {n}")
+        return True
+    except Exception:
+        return False
+
+
 def _definir_modulos(page, n):
     """Define o campo MD 'QUANTIDADE DE MODULOS' na janela de variaveis. O
-    rotulo fica separado do campo (grade), entao acha via JS a linha que tem
-    'MODULOS' e pega o input/select dela. Preenche 'n' (tenta '3' e '3,00')."""
+    rotulo fica separado do campo (grade), quebrado em varias linhas. Tenta:
+    (1) Playwright get_by_text('modulos') -> input/select da mesma linha/card;
+    (2) marcacao via JS (ancorada no campo). Preenche 'n' (tenta '3' e '3,00').
+    Se nada der, DIAGNOSTICO: dump da estrutura da janela para eu ver."""
     n = str(int(str(n)))
+    alvo = _re.compile(r"m[oó]dulos", _re.I)
+
+    # (1) Playwright: acha o texto 'MODULOS' e o campo da mesma linha/card
+    for fr in page.frames:
+        try:
+            lab = fr.get_by_text(alvo)
+            cnt = min(lab.count(), 4)
+        except Exception:
+            cnt = 0
+        for i in range(cnt):
+            el = lab.nth(i)
+            for xp in ("xpath=ancestor-or-self::*[.//input or .//select][1]//input",
+                       "xpath=ancestor-or-self::*[.//input or .//select][1]//select",
+                       "xpath=following::input[1]",
+                       "xpath=following::select[1]"):
+                try:
+                    campo = el.locator(xp).first
+                    if campo.count() == 0 or not campo.is_visible():
+                        continue
+                except Exception:
+                    continue
+                if _preencher_campo_modulos(campo, n, page):
+                    return True
+
+    # (2) marcacao via JS (ancorada no campo)
     for fr in page.frames:
         try:
             tag = fr.evaluate(_JS_MARCAR_MODULOS)
         except Exception:
             tag = None
-        if not tag:
-            continue
-        loc = fr.locator('[data-egerobo="md"]').first
-        try:
-            if tag == "select":
-                try:
-                    loc.select_option(label=n)
-                except Exception:
-                    loc.select_option(value=n)
-            else:
-                loc.scroll_into_view_if_needed(timeout=2000)
-                loc.click(timeout=2000)
-                loc.fill(n)
-                # alguns campos formatam com virgula
-                if (loc.input_value() or "").strip() in ("", "0", "0,00", "1", "1,00"):
-                    loc.fill(f"{n},00")
-            page.wait_for_timeout(400)
-            print(f"     modulos -> {n}")
-            return True
-        except Exception:
-            continue
+        if tag:
+            campo = fr.locator('[data-egerobo="md"]').first
+            if _preencher_campo_modulos(campo, n, page):
+                return True
+
+    # (3) DIAGNOSTICO: salva a estrutura da janela de variaveis p/ analise
+    try:
+        for fr in page.frames:
+            try:
+                info = fr.evaluate(_JS_DIAG_VARIAVEIS)
+            except Exception:
+                info = None
+            if info and info.get("tem_modulo"):
+                PRINTS_DIR.mkdir(parents=True, exist_ok=True)
+                cam = PRINTS_DIR / "diag_modulos.txt"
+                cam.write_text(info.get("html", ""), encoding="utf-8")
+                print("     " + "-" * 54)
+                print("     ESTRUTURA DA JANELA (linhas com campo):")
+                for ln in info.get("linhas", [])[:20]:
+                    print("       " + ln)
+                print(f"     (salvei tambem em: {cam})")
+                print("     " + "-" * 54)
+                break
+    except Exception:
+        pass
     return False
+
+
+_JS_DIAG_VARIAVEIS = r"""
+() => {
+  const nd = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const campos = Array.from(document.querySelectorAll('input,select'));
+  const linhas = [];
+  for (const c of campos){
+    let ctx = '';
+    for (let n=c, i=0; n && i<6; n=n.parentElement, i++){
+      const t = (n.textContent||'').replace(/\s+/g,' ').trim();
+      if (t.length > 3){ ctx = t; if (t.length > 12) break; }
+    }
+    linhas.push(c.tagName.toLowerCase() + " [" + (c.value||'') + "] <- " + ctx.slice(0,70));
+  }
+  const body = nd(document.body ? document.body.innerText : '');
+  return { tem_modulo: body.includes('modulo'),
+           linhas: linhas,
+           html: (document.body ? document.body.innerHTML : '').replace(/\s+/g,' ').slice(0, 4000) };
+}
+"""
 
 
 def _fechar_aviso_valores(page):
