@@ -2054,6 +2054,76 @@ def _definir_acionamento(page, valor):
     return False
 
 
+_JS_MARCAR_MODULOS = r"""
+() => {
+  const nd = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  document.querySelectorAll('[data-egerobo="md"]').forEach(e=>e.removeAttribute('data-egerobo'));
+  // acha o ROTULO 'QUANTIDADE DE MODULOS' (pode vir quebrado em varias linhas)
+  let lab=null, labLen=1e9;
+  for (const el of document.querySelectorAll('div,span,td,p,label,b,strong,font')){
+    const t = nd(el.textContent);
+    if (t.length>60) continue;
+    if (t.includes('modulo') && (t.includes('quantidade') || t.includes('qtd')
+        || t.replace(/\s/g,'').startsWith('md'))){
+      const l=(el.textContent||'').length;
+      if (l<labLen){ lab=el; labLen=l; }
+    }
+  }
+  // fallback: qualquer rotulo curto que contenha 'modulo'
+  if(!lab){
+    for (const el of document.querySelectorAll('div,span,td,p,label,b')){
+      const t=nd(el.textContent);
+      if(t.length<=25 && t.includes('modulo')){ lab=el; break; }
+    }
+  }
+  if(!lab) return false;
+  // sobe ate um ancestral que contenha um input/select (a linha da grade)
+  let campo=null;
+  for(let n=lab,i=0;n&&i<6;n=n.parentElement,i++){
+    try{ const c=n.querySelector('input,select'); if(c){ campo=c; break; } }catch(e){}
+  }
+  if(!campo) return false;
+  campo.setAttribute('data-egerobo','md');
+  campo.scrollIntoView({block:'center'});
+  return campo.tagName.toLowerCase();   // 'input' ou 'select'
+}
+"""
+
+
+def _definir_modulos(page, n):
+    """Define o campo MD 'QUANTIDADE DE MODULOS' na janela de variaveis. O
+    rotulo fica separado do campo (grade), entao acha via JS a linha que tem
+    'MODULOS' e pega o input/select dela. Preenche 'n' (tenta '3' e '3,00')."""
+    n = str(int(str(n)))
+    for fr in page.frames:
+        try:
+            tag = fr.evaluate(_JS_MARCAR_MODULOS)
+        except Exception:
+            tag = None
+        if not tag:
+            continue
+        loc = fr.locator('[data-egerobo="md"]').first
+        try:
+            if tag == "select":
+                try:
+                    loc.select_option(label=n)
+                except Exception:
+                    loc.select_option(value=n)
+            else:
+                loc.scroll_into_view_if_needed(timeout=2000)
+                loc.click(timeout=2000)
+                loc.fill(n)
+                # alguns campos formatam com virgula
+                if (loc.input_value() or "").strip() in ("", "0", "0,00", "1", "1,00"):
+                    loc.fill(f"{n},00")
+            page.wait_for_timeout(400)
+            print(f"     modulos -> {n}")
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def _fechar_aviso_valores(page):
     """Fecha o popup 'Atencao! Existem itens com valores zerados / sem valor de
     venda' clicando em FECHAR (nunca em 'Conferir itens sem valor'). Pode
@@ -2564,7 +2634,7 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         # MODULOS horizontais (ex.: maxim ar 03 modulos): preenche o campo MD
         # 'QUANTIDADE DE MODULOS' com o numero pedido.
         if mud.get("modulos"):
-            if _set_input_page(page, "MODULOS", mud["modulos"], "modulos"):
+            if _definir_modulos(page, mud["modulos"]):
                 page.wait_for_timeout(600)
             else:
                 print(f"     [!] nao achei o campo QUANTIDADE DE MODULOS.")
