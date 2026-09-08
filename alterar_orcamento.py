@@ -2253,6 +2253,41 @@ def _fechar_aviso_valores(page):
     return ok
 
 
+def _fechar_popup(page, tentativas=4):
+    """Fecha QUALQUER popup/aviso/erro clicando em 'Fechar' (ou OK) -- usado
+    depois de 'Calcular o Orcamento', onde pode aparecer um aviso e, seja qual
+    for, e so fechar pra seguir. Fecha ate empilhados. Retorna True se fechou."""
+    import time as _t
+    alvo = _re.compile(r"^\s*(fechar|ok)\s*$", _re.I)
+    fechou = False
+    for _ in range(tentativas):
+        clicou = False
+        for fr in page.frames:
+            for getter in ("role", "text"):
+                try:
+                    loc = (fr.get_by_role("button", name=alvo) if getter == "role"
+                           else fr.get_by_text(alvo))
+                    n = loc.count()
+                except Exception:
+                    continue
+                for i in range(n):
+                    e = loc.nth(i)
+                    try:
+                        if e.is_visible() and _clicar_forte(e):
+                            clicou = fechou = True
+                            break
+                    except Exception:
+                        continue
+                if clicou:
+                    break
+            if clicou:
+                break
+        if not clicou:
+            break
+        page.wait_for_timeout(700)
+    return fechou
+
+
 def _selecionar_select_rotulo(page, rotulo, valor, nome):
     """Acha um <select> pelo ROTULO (em qualquer frame), seleciona a opcao que
     melhor casa com 'valor' e dispara o change. Retorna a opcao ou None."""
@@ -3288,12 +3323,11 @@ def modo_montar(page):
 
     # No FIM: 'Calcular o Orcamento' UMA vez (volta pro orcamento e calcula).
     print("\n  Finalizando (Calcular o Orcamento)...")
-    if _clicar_calcular_orcamento(page, timeout=12000):
-        print("  'Calcular o Orcamento' -> orcamento calculado. ✔")
-    elif clicar_calcular(page):
-        print("  Cliquei em Calcular -- valores atualizados. ✔")
-    else:
-        print("  (se aparecer 'Orcamento Nao Calculado', clique em Calcular)")
+    _clicar_calcular_orcamento(page, timeout=12000)
+    if _fechar_popup(page):        # qualquer aviso/erro apos calcular -> Fechar
+        print("  (fechei um aviso apos calcular; segui em frente)")
+    clicar_calcular(page)          # garante o recalculo se ainda pedir
+    print("  Finalizado -- confira o orcamento. ✔")
 
     print()
     print("  " + "=" * 56)
@@ -3430,10 +3464,11 @@ def modo_novo(page):
         page.wait_for_timeout(1000)
 
     print("\n  Finalizando (Calcular o Orcamento)...")
-    if _clicar_calcular_orcamento(page, timeout=12000):
-        print("  'Calcular o Orcamento' -> orcamento calculado. ✔")
-    elif clicar_calcular(page):
-        print("  Cliquei em Calcular. ✔")
+    _clicar_calcular_orcamento(page, timeout=12000)
+    if _fechar_popup(page):        # qualquer aviso/erro apos calcular -> Fechar
+        print("  (fechei um aviso apos calcular; segui em frente)")
+    clicar_calcular(page)          # garante o recalculo se ainda pedir
+    print("  Finalizado -- confira o orcamento. ✔")
     print()
     print("  " + "=" * 56)
     print("  RESUMO DO ORCAMENTO NOVO:")
@@ -3499,10 +3534,11 @@ def modo_montar_aberto(page):
         page.wait_for_timeout(1000)
 
     print("\n  Finalizando (Calcular o Orcamento)...")
-    if _clicar_calcular_orcamento(page, timeout=12000):
-        print("  'Calcular o Orcamento' -> orcamento calculado. ✔")
-    elif clicar_calcular(page):
-        print("  Cliquei em Calcular. ✔")
+    _clicar_calcular_orcamento(page, timeout=12000)
+    if _fechar_popup(page):        # qualquer aviso/erro apos calcular -> Fechar
+        print("  (fechei um aviso apos calcular; segui em frente)")
+    clicar_calcular(page)          # garante o recalculo se ainda pedir
+    print("  Finalizado -- confira o orcamento. ✔")
     print()
     print("  " + "=" * 56)
     print("  RESUMO:")
