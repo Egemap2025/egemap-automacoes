@@ -1895,6 +1895,12 @@ def _modelo_dropdown(descricao):
     tem_porta = "porta" in low
     tem_janela = "janela" in low
 
+    # TELA conta como +1 FOLHA no W-Vetro: '2 folhas com tela' vira 3 folhas
+    # (2 vidros + 1 tela). Vale p/ janela e porta de correr. (Nao afeta maxim/
+    # fixo, que ignoram o Nr de folhas.)
+    if "tela" in low:
+        folhas = str((int(folhas) if folhas else 2) + 1).zfill(2)
+
     # tipos que nao dependem de folhas
     # 'basculante'/'maxiar'/'maxi-ar'/'exaustora' a EGEMAP faz como MAXIM-AR
     if ("maxim" in low or "maxiar" in low or "maxi-ar" in low or "maxi ar" in low
