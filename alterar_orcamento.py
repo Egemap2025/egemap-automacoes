@@ -2063,7 +2063,20 @@ def _selecionar_select_rotulo(page, rotulo, valor, nome):
                   and "SELECIONE" not in o.upper()]
         if not opcoes:
             continue
-        escolha = _melhor_opcao_texto(opcoes, valor)
+        # LINHA: 'l25'/'l32' devem usar a linha NORMAL. Linhas ESPECIAIS
+        # (Solene, Guarda-corpo, Portao...) so entram se o usuario escrever o
+        # nome. Sem isso, 'l25' casava com 'SOLENE 25' (que nao tem fixo/maxim).
+        opcoes_busca = opcoes
+        if nome == "linha":
+            vlow = _sem_acento(valor.lower())
+            ESPECIAIS = ("solene", "guarda", "portao", "corre facil",
+                         "corre-facil", "reforcad")
+            filtradas = [o for o in opcoes
+                         if not any(esp in _sem_acento(o.lower())
+                                    and esp not in vlow for esp in ESPECIAIS)]
+            if filtradas:
+                opcoes_busca = filtradas
+        escolha = _melhor_opcao_texto(opcoes_busca, valor)
         if not escolha:
             continue
         try:
