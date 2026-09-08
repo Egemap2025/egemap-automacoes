@@ -1539,10 +1539,12 @@ def _melhor_opcao(opcoes, termo, esperado):
         pont = [x for x in pont if x[1] > 0]
         if not pont:
             return None, False
-        pont.sort(key=lambda x: x[1], reverse=True)
-        melhor, s1 = pont[0]
-        s2 = pont[1][1] if len(pont) > 1 else -1
-        return melhor, (s1 > s2)
+        smax = max(s for _, s in pont)
+        topo = [o for o, s in pont if s == smax]
+        # empate -> escolhe o mais CURTO (menos qualificadores extras, ex.:
+        # 'INCOLOR 06MM - TEMPERADO' em vez de 'BOX INCOLOR 06MM - TEMPERADO').
+        topo.sort(key=len)
+        return topo[0], True
     # cor / outros: pontua por palavras do termo
     palavras = [w for w in _re.split(r"\s+", termo.upper()) if len(w) > 2]
     pont = [(o, sum(1 for w in palavras if w in o.upper())) for o in opcoes]
@@ -2650,15 +2652,10 @@ def montar_item_novo(page, num, mud):
     if not _construir_na_selecao(page, num, mud, prefixo="mon"):
         return False
 
-    # 9) depois de incluir + variaveis, o robo fica na tela de selecao/cards.
-    # O botao 'Calcular o Orcamento' VOLTA para o orcamento (SEM re-pesquisar).
-    if _clicar_calcular_orcamento(page, timeout=10000):
-        print("     'Calcular o Orcamento' -> voltou para o orcamento. ✔")
-    else:
-        print("     [!] nao consegui clicar em 'Calcular o Orcamento' sozinho.")
-        print_tela(page, f"mon_sem_calcular_{num}")
-    page.wait_for_timeout(1500)
-
+    # NAO clica 'Calcular o Orcamento' aqui: fica DENTRO do orcamento e o
+    # proximo item so aperta 'Inserir Novo Projeto' de novo (sem sair/
+    # re-pesquisar). O 'Calcular o Orcamento' e feito UMA vez, no fim.
+    page.wait_for_timeout(1200)
     print(f"     item {num} montado. ✔")
     return True
 
@@ -3092,11 +3089,9 @@ def modo_montar(page):
                   "(largura x altura) -- pulando este item.")
             resultados[i] = "sem_medida"
             continue
-        # depois de incluir um item o W-Vetro volta para o orcamento -- so
-        # reabre (Consulta) se ele REALMENTE nao voltou (evita perder o item).
-        if i > 1 and not _esperar_itens(7):
-            print("  (voltando para a tela do orcamento...)")
-            abrir_orcamento(page, orc)
+        # NAO reabre a Consulta entre itens: o robo continua DENTRO do
+        # orcamento e o proprio montar_item_novo aperta 'Inserir Novo Projeto'
+        # pro proximo (bem mais rapido).
         try:
             ok = montar_item_novo(page, i, mud)
             resultados[i] = "ok" if ok else "falhou"
@@ -3104,17 +3099,16 @@ def modo_montar(page):
             print(f"  [!] erro inesperado ao montar o item {i}: {e}")
             print_tela(page, f"mon_erro_{i}")
             resultados[i] = "erro"
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1000)
 
-    # Cada item ja voltou para o orcamento via 'Calcular o Orcamento' (dentro
-    # de montar_item_novo). O item ja esta SALVO -- entao NAO reabrimos pela
-    # Consulta (era isso que voltava a 'procurar o orcamento' no fim).
-    page.wait_for_timeout(1500)
-    print("\n  Atualizando os valores (Calcular, se precisar)...")
-    if clicar_calcular(page):
+    # No FIM: 'Calcular o Orcamento' UMA vez (volta pro orcamento e calcula).
+    print("\n  Finalizando (Calcular o Orcamento)...")
+    if _clicar_calcular_orcamento(page, timeout=12000):
+        print("  'Calcular o Orcamento' -> orcamento calculado. ✔")
+    elif clicar_calcular(page):
         print("  Cliquei em Calcular -- valores atualizados. ✔")
     else:
-        print("  (valores ja calculados / ja no orcamento)")
+        print("  (se aparecer 'Orcamento Nao Calculado', clique em Calcular)")
 
     print()
     print("  " + "=" * 56)
@@ -3248,10 +3242,12 @@ def modo_novo(page):
             print(f"  [!] erro inesperado ao montar o item {i}: {e}")
             print_tela(page, f"novo_erro_{i}")
             resultados[i] = "erro"
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1000)
 
-    print("\n  Atualizando os valores (Calcular, se precisar)...")
-    if clicar_calcular(page):
+    print("\n  Finalizando (Calcular o Orcamento)...")
+    if _clicar_calcular_orcamento(page, timeout=12000):
+        print("  'Calcular o Orcamento' -> orcamento calculado. ✔")
+    elif clicar_calcular(page):
         print("  Cliquei em Calcular. ✔")
     print()
     print("  " + "=" * 56)
@@ -3315,10 +3311,12 @@ def modo_montar_aberto(page):
             print(f"  [!] erro inesperado ao montar o item {i}: {e}")
             print_tela(page, f"aberto_erro_{i}")
             resultados[i] = "erro"
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1000)
 
-    print("\n  Atualizando os valores (Calcular, se precisar)...")
-    if clicar_calcular(page):
+    print("\n  Finalizando (Calcular o Orcamento)...")
+    if _clicar_calcular_orcamento(page, timeout=12000):
+        print("  'Calcular o Orcamento' -> orcamento calculado. ✔")
+    elif clicar_calcular(page):
         print("  Cliquei em Calcular. ✔")
     print()
     print("  " + "=" * 56)
