@@ -2114,27 +2114,52 @@ def _definir_modulos(page, n):
     n = str(int(str(n)))
     alvo = _re.compile(r"m[oó]dulos", _re.I)
 
-    # (1) Playwright: acha o texto 'MODULOS' e o campo da mesma linha/card
+    # (1) GEOMETRIA (metodo principal): acha o texto 'MODULOS' (get_by_text, que
+    # funciona nessa janela) e pega o input/select ALINHADO na mesma linha.
     for fr in page.frames:
         try:
             lab = fr.get_by_text(alvo)
-            cnt = min(lab.count(), 4)
+            nlab = lab.count()
         except Exception:
-            cnt = 0
-        for i in range(cnt):
-            el = lab.nth(i)
-            for xp in ("xpath=ancestor-or-self::*[.//input or .//select][1]//input",
-                       "xpath=ancestor-or-self::*[.//input or .//select][1]//select",
-                       "xpath=following::input[1]",
-                       "xpath=following::select[1]"):
+            nlab = 0
+        if not nlab:
+            continue
+        laby = None
+        for i in range(min(nlab, 6)):
+            try:
+                if lab.nth(i).is_visible():
+                    b = lab.nth(i).bounding_box()
+                    if b:
+                        laby = b["y"] + b["height"] / 2
+                        break
+            except Exception:
+                continue
+        if laby is None:
+            continue
+        # entre os campos visiveis, o mais alinhado verticalmente ao rotulo
+        best, bestd = None, 1e9
+        for seletor in ("input", "select"):
+            try:
+                campos = fr.locator(seletor)
+                nc = campos.count()
+            except Exception:
+                nc = 0
+            for i in range(nc):
+                c = campos.nth(i)
                 try:
-                    campo = el.locator(xp).first
-                    if campo.count() == 0 or not campo.is_visible():
+                    if not c.is_visible():
                         continue
+                    b = c.bounding_box()
+                    if not b:
+                        continue
+                    d = abs((b["y"] + b["height"] / 2) - laby)
+                    if d < bestd:
+                        bestd, best = d, c
                 except Exception:
                     continue
-                if _preencher_campo_modulos(campo, n, page):
-                    return True
+        if best is not None and bestd <= 45:   # mesma linha do rotulo
+            if _preencher_campo_modulos(best, n, page):
+                return True
 
     # (2) marcacao via JS (ancorada no campo)
     for fr in page.frames:
