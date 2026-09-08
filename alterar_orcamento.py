@@ -2052,6 +2052,20 @@ def _definir_acionamento(page, valor):
     return False
 
 
+def _fechar_aviso_valores(page):
+    """Fecha o popup 'Atencao! Existem itens com valores zerados / sem valor de
+    venda' clicando em FECHAR (nunca em 'Conferir itens sem valor'). Pode
+    aparecer em varios momentos. Retorna True se fechou algo."""
+    marcas = ("valores zerados", "sem valor", "conferir itens",
+              "tabela de pre", "valor de venda")
+    if not any(_tem_texto_visivel(page, m) for m in marcas):
+        return False
+    ok = (_clicar_botao(page, r"^\s*fechar\s*$", timeout=4000)
+          or _clicar_botao_real(page, r"^\s*fechar\s*$", timeout=3000))
+    page.wait_for_timeout(500)
+    return ok
+
+
 def _selecionar_select_rotulo(page, rotulo, valor, nome):
     """Acha um <select> pelo ROTULO (em qualquer frame), seleciona a opcao que
     melhor casa com 'valor' e dispara o change. Retorna a opcao ou None."""
@@ -2442,10 +2456,8 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         return False
     page.wait_for_timeout(1000)
 
-    # popup 'valores zerados' -> Fechar (se aparecer)
-    if _tem_texto_visivel(page, "valores zerados") or _tem_texto_visivel(page, "sem valor"):
-        _clicar_botao(page, r"^\s*fechar\s*$", timeout=4000)
-        page.wait_for_timeout(600)
+    # popup 'Atencao! itens com valores zerados' -> Fechar (se aparecer)
+    _fechar_aviso_valores(page)
 
     # LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
     # modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
@@ -2460,6 +2472,7 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
     # Pesquisar
     _clicar_botao(page, r"^\s*pesquisar\s*$", timeout=6000)
     page.wait_for_timeout(2000)
+    _fechar_aviso_valores(page)   # o aviso pode reaparecer apos pesquisar
 
     # escolher o card do desenho AUTOMATICAMENTE
     if not _escolher_card_auto(page, modelo, num):
@@ -2614,6 +2627,9 @@ def montar_item_novo(page, num, mud):
     if not modelo:
         print("     [!] falta o MODELO na descricao (ex.: 'janela 2 folhas') -- pulando.")
         return False
+
+    # o aviso 'itens com valores zerados' pode estar aberto na tela do orcamento
+    _fechar_aviso_valores(page)
 
     # 1) botao 'Inserir Novo Projeto' (porta de entrada do MONTAR). Mas se JA
     #    estivermos na tela de selecao (ex.: 1o item logo apos 'Criar
