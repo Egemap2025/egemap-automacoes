@@ -243,17 +243,56 @@ GIRO, PORTINHOLA, VENEZIANA. `_modelo_dropdown` mapeia:
 - `01 FOLHA` singular / `NN FOLHAS` plural (`_folha_sfx`).
 - fixo/painel/módulo→MÓDULO FIXO · resto→JANELA DE CORRER NN FOLHAS.
 
-### Ainda a fazer no MONTAR
-- **Solucionar o clique no card "N módulos"** (fallback ainda pede 1 clique).
-- **Ler o CRM** (`crm.egemapesquadrias.com.br/deals`): nome, telefone, cidade,
-  rua/bairro/número, responsável (vendedor) e "Resumo do orçamento".
-- **Ler o PDF arquitetônico** (tabela de esquadrias, texto legível via pymupdf)
-  para pré-preencher a **tabela do vendedor** (PDF + CRM). Protótipo em
-  `/tmp/ler_esq.py` (extraiu J1–J6, P1–P6 de um PDF real).
-- **Definir como o orçamento/cliente é criado** no W-Vetro (os vídeos reusam o
-  orçamento vazio 2346 via "Inserir Novo Projeto"; falta o fluxo de Novo Orçamento
-  + cadastro do cliente/endereço).
-- Confirmar formato da tabela do vendedor: planilha vs texto (recomendei planilha).
+### ✅ MONTAR — ESTADO ATUAL (08/09): FUNCIONA 100% ponta a ponta (testado no 2346)
+Rodou automático 9 janelas + portas de correr num orçamento real, sem parar.
+Opções do menu: **3** montar (orçamento existente pelo nº) · **4** cadastrar
+cliente · **5** orçamento novo completo (cliente+itens) · **6** montar em
+orçamento já aberto na tela de seleção.
+
+**Aprendizados do W-Vetro (não reaprender!):**
+- **LINHA:** "l25"/"l32" = linha NORMAL. `_selecionar_select_rotulo` filtra
+  linhas ESPECIAIS (SOLENE, GUARDA, PORTÃO...) a menos que o texto peça. "25"
+  cai em VERSATIC 25; "32" em DELUXE 32. Solene só se escrever "solene". **Isso
+  importava muito**: Solene não tem módulo fixo nem maxim-ar.
+- **MODELO extra:** `maxiar`/`maxi-ar`/`basculante`/`exaustora`→MAXIM-AR;
+  `vidro fixo`/`janela fixa`→MÓDULO FIXO (mesmo com a palavra "janela", desde
+  que sem "correr"/"folha"); `porta janela`→PORTA DE CORRER NN FOLHAS.
+- **COR automática** (`_melhor_opcao`, empate→PINTURA): preto→PINTURA PRETO,
+  branco→PINTURA BRANCO BRILHANTE. Não pergunta mais.
+- **VIDRO automático** (`_melhor_opcao` vidro, empate→mais curto): "incolor 6mm
+  temperado"→INCOLOR 06MM - TEMPERADO (não o "BOX INCOLOR"); mini boreal 4mm→
+  MINI-BOREAL 04MM - COMUM. Não pergunta mais.
+- **FLUXO rápido:** NÃO sai do orçamento entre itens — `montar_item_novo` só
+  aperta "Inserir Novo Projeto" pro próximo; "Calcular o Orçamento" é UMA vez no
+  fim. (Antes reabria a Consulta a cada item = lento.)
+- **Popup "valores zerados":** `_fechar_aviso_valores` fecha em vários pontos.
+- **MÓDULOS horizontais** (maxim-ar N módulos): campo **MD "QUANTIDADE DE
+  MÓDULOS"** na janela "Informe as variáveis" (frame separado!). `_definir_modulos`
+  acha pelo TEXTO ESPECÍFICO "quantidade de módulos" (a tela de trás tem
+  "MÓDULOS" na nomenclatura e confundia) + input logo após / alinhado. Escreve o
+  número (2, 3...). `_definir_acionamento` acha o select MOTOR/RECOLHEDOR pelas
+  opções (rótulo fica separado do campo na grade).
+- **Salvar cadastro/cria orçamento:** botão **"Confirmar"** (cadastro cliente) →
+  tela "Cadastrado novo cliente!" → **"Criar um novo orçamento"** → escolhe
+  VENDEDOR → **"Criar orçamento"** → cai em selecioneprojeto. CIDADE/UF são LISTA.
+
+**Formato da mensagem (montar):** `Montar orcamento NNNN` + 1 linha por item:
+`CÓD descrição - cor - vidro - LARGxALT - Nun - AMBIENTE`. Medida obrigatória
+(sem ela o W-Vetro não inclui). Qtde vazia = 1un. Ambiente vazio fica vazio.
+
+**LER O LEVANTAMENTO/PDF (semi-automático, feito à mão pelo Claude por ora):**
+o vendedor preenche o **"Levantamento de Aberturas"** (ITEM/AMBIENTE/VÃO/
+TIPOLOGIA/PERSIANA/QTD) — dá pra ler com pymupdf `find_tables()` e o quadro de
+esquadrias do arquitetônico (última coluna = quantidade). Ambientes: cruzar as
+marcações Jx da planta baixa com o cômodo mais próximo (via coordenadas dos
+`get_text("words")`).
+
+### Ainda a fazer / ideias
+- **Automatizar a leitura do "Levantamento de Aberturas" PDF** → gerar a
+  mensagem do robô sozinho (hoje o Claude faz isso na conversa).
+- **Ler o CRM direto** (nome/telefone/cidade/vendedor/resumo) para o cadastro.
+- **Portas de madeira / de giro:** o usuário faz manual (ainda não mapeado).
+- Card "N módulos" quando a foto não abre: fallback pede 1 clique (raro agora).
 
 ---
 
