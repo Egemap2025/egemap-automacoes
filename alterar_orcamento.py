@@ -2112,10 +2112,10 @@ def _definir_modulos(page, n):
     (2) marcacao via JS (ancorada no campo). Preenche 'n' (tenta '3' e '3,00').
     Se nada der, DIAGNOSTICO: dump da estrutura da janela para eu ver."""
     n = str(int(str(n)))
-    alvo = _re.compile(r"m[oó]dulos", _re.I)
+    # texto ESPECIFICO da janela de variaveis (o 'JANELA MAXIM-AR N MODULOS' da
+    # nomenclatura NAO tem 'quantidade', entao nao confunde).
+    alvo = _re.compile(r"quantidade\s+de\s+m[oó]dulos", _re.I)
 
-    # (1) GEOMETRIA (metodo principal): acha o texto 'MODULOS' (get_by_text, que
-    # funciona nessa janela) e pega o input/select ALINHADO na mesma linha.
     for fr in page.frames:
         try:
             lab = fr.get_by_text(alvo)
@@ -2124,42 +2124,56 @@ def _definir_modulos(page, n):
             nlab = 0
         if not nlab:
             continue
+        el = None
         laby = None
         for i in range(min(nlab, 6)):
             try:
                 if lab.nth(i).is_visible():
-                    b = lab.nth(i).bounding_box()
+                    el = lab.nth(i)
+                    b = el.bounding_box()
                     if b:
                         laby = b["y"] + b["height"] / 2
-                        break
+                    break
             except Exception:
                 continue
-        if laby is None:
+        if el is None:
             continue
-        # entre os campos visiveis, o mais alinhado verticalmente ao rotulo
-        best, bestd = None, 1e9
-        for seletor in ("input", "select"):
+        # (a) input logo APOS o rotulo (mesma linha da grade)
+        for xp in ("xpath=following::input[1]", "xpath=following::select[1]",
+                   "xpath=ancestor::*[.//input or .//select][1]//input",
+                   "xpath=ancestor::*[.//input or .//select][1]//select"):
             try:
-                campos = fr.locator(seletor)
-                nc = campos.count()
+                campo = el.locator(xp).first
+                if campo.count() and campo.is_visible():
+                    if _preencher_campo_modulos(campo, n, page):
+                        return True
             except Exception:
-                nc = 0
-            for i in range(nc):
-                c = campos.nth(i)
+                continue
+        # (b) GEOMETRIA: o input alinhado verticalmente ao rotulo
+        if laby is not None:
+            best, bestd = None, 1e9
+            for seletor in ("input", "select"):
                 try:
-                    if not c.is_visible():
-                        continue
-                    b = c.bounding_box()
-                    if not b:
-                        continue
-                    d = abs((b["y"] + b["height"] / 2) - laby)
-                    if d < bestd:
-                        bestd, best = d, c
+                    campos = fr.locator(seletor)
+                    nc = campos.count()
                 except Exception:
-                    continue
-        if best is not None and bestd <= 45:   # mesma linha do rotulo
-            if _preencher_campo_modulos(best, n, page):
-                return True
+                    nc = 0
+                for i in range(nc):
+                    c = campos.nth(i)
+                    try:
+                        if not c.is_visible():
+                            continue
+                        b = c.bounding_box()
+                        if not b:
+                            continue
+                        d = abs((b["y"] + b["height"] / 2) - laby)
+                        if d < bestd:
+                            bestd, best = d, c
+                    except Exception:
+                        continue
+            if best is not None and bestd <= 60:
+                if _preencher_campo_modulos(best, n, page):
+                    return True
 
     # (2) marcacao via JS (ancorada no campo)
     for fr in page.frames:
@@ -2172,24 +2186,32 @@ def _definir_modulos(page, n):
             if _preencher_campo_modulos(campo, n, page):
                 return True
 
-    # (3) DIAGNOSTICO: salva a estrutura da janela de variaveis p/ analise
+    # (3) DIAGNOSTICO: dumpa a janela de VARIAVEIS (a que tem 'FOLGA' X/Y --
+    # so existe nela; a tela de tras tem 'modulo' na nomenclatura e confundia).
     try:
+        escolhido = None
         for fr in page.frames:
             try:
                 info = fr.evaluate(_JS_DIAG_VARIAVEIS)
             except Exception:
                 info = None
-            if info and info.get("tem_modulo"):
-                PRINTS_DIR.mkdir(parents=True, exist_ok=True)
-                cam = PRINTS_DIR / "diag_modulos.txt"
-                cam.write_text(info.get("html", ""), encoding="utf-8")
-                print("     " + "-" * 54)
-                print("     ESTRUTURA DA JANELA (linhas com campo):")
-                for ln in info.get("linhas", [])[:20]:
-                    print("       " + ln)
-                print(f"     (salvei tambem em: {cam})")
-                print("     " + "-" * 54)
+            if not info:
+                continue
+            if info.get("tem_folga"):     # esse E o frame da janela de variaveis
+                escolhido = info
                 break
+            if info.get("tem_modulo") and escolhido is None:
+                escolhido = info
+        if escolhido:
+            PRINTS_DIR.mkdir(parents=True, exist_ok=True)
+            cam = PRINTS_DIR / "diag_modulos.txt"
+            cam.write_text(escolhido.get("html", ""), encoding="utf-8")
+            print("     " + "-" * 54)
+            print("     ESTRUTURA DA JANELA (linhas com campo):")
+            for ln in escolhido.get("linhas", [])[:24]:
+                print("       " + ln)
+            print(f"     (salvei tambem em: {cam})")
+            print("     " + "-" * 54)
     except Exception:
         pass
     return False
@@ -2210,6 +2232,7 @@ _JS_DIAG_VARIAVEIS = r"""
   }
   const body = nd(document.body ? document.body.innerText : '');
   return { tem_modulo: body.includes('modulo'),
+           tem_folga: body.includes('folga'),
            linhas: linhas,
            html: (document.body ? document.body.innerHTML : '').replace(/\s+/g,' ').slice(0, 4000) };
 }
