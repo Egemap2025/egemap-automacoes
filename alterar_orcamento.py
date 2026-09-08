@@ -2058,34 +2058,24 @@ _JS_MARCAR_MODULOS = r"""
 () => {
   const nd = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
   document.querySelectorAll('[data-egerobo="md"]').forEach(e=>e.removeAttribute('data-egerobo'));
-  // acha o ROTULO 'QUANTIDADE DE MODULOS' (pode vir quebrado em varias linhas)
-  let lab=null, labLen=1e9;
-  for (const el of document.querySelectorAll('div,span,td,p,label,b,strong,font')){
-    const t = nd(el.textContent);
-    if (t.length>60) continue;
-    if (t.includes('modulo') && (t.includes('quantidade') || t.includes('qtd')
-        || t.replace(/\s/g,'').startsWith('md'))){
-      const l=(el.textContent||'').length;
-      if (l<labLen){ lab=el; labLen=l; }
+  // ancora no CAMPO: para cada input/select visivel, sobe ate achar o texto
+  // da 'linha' e ve se e a de MODULOS (e NAO uma folga X/Y).
+  const campos = Array.from(document.querySelectorAll('input,select'));
+  for (const c of campos){
+    const r = c.getBoundingClientRect();
+    if (r.width < 10 || r.height < 8) continue;
+    let ctx = '';
+    for (let n = c, i = 0; n && i < 6; n = n.parentElement, i++){
+      ctx = nd(n.textContent || '');
+      if (ctx.includes('modulo') || ctx.includes('folga')) break;
+    }
+    if (ctx.includes('modulo') && !ctx.includes('folga')){
+      c.setAttribute('data-egerobo','md');
+      c.scrollIntoView({block:'center'});
+      return c.tagName.toLowerCase();   // 'input' ou 'select'
     }
   }
-  // fallback: qualquer rotulo curto que contenha 'modulo'
-  if(!lab){
-    for (const el of document.querySelectorAll('div,span,td,p,label,b')){
-      const t=nd(el.textContent);
-      if(t.length<=25 && t.includes('modulo')){ lab=el; break; }
-    }
-  }
-  if(!lab) return false;
-  // sobe ate um ancestral que contenha um input/select (a linha da grade)
-  let campo=null;
-  for(let n=lab,i=0;n&&i<6;n=n.parentElement,i++){
-    try{ const c=n.querySelector('input,select'); if(c){ campo=c; break; } }catch(e){}
-  }
-  if(!campo) return false;
-  campo.setAttribute('data-egerobo','md');
-  campo.scrollIntoView({block:'center'});
-  return campo.tagName.toLowerCase();   // 'input' ou 'select'
+  return false;
 }
 """
 
