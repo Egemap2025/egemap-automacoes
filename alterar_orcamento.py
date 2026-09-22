@@ -1618,6 +1618,41 @@ def _set_input_auto(frame, rotulo, valor, nome, exato=False):
         return False
 
 
+def _set_quantidade(frame, page, valor):
+    """Preenche a QUANTIDADE na tela 'Dados do Projeto' e CONFERE se fixou
+    (limpa o campo, digita, da Tab e le de volta; tenta 2x). O campo as vezes
+    reverte pra 1 se so der fill -- por isso verifica."""
+    valor = str(int(str(valor)))
+    inp = _achar_input(frame, "QTDE") or _achar_input(frame, "QUANTIDADE")
+    if inp is None:
+        print("     [!] nao achei o campo QUANTIDADE")
+        return False
+    for _tent in range(2):
+        try:
+            inp.scroll_into_view_if_needed(timeout=2000)
+            inp.click(timeout=2000)
+            try:
+                inp.press("Control+a")
+            except Exception:
+                pass
+            inp.fill("")
+            inp.type(valor, delay=40)
+            inp.press("Tab")
+            page.wait_for_timeout(400)
+            atual = (inp.input_value() or "").strip()
+            if atual.replace(",00", "").replace(",0", "").strip() == valor:
+                print(f"     quantidade -> {valor}")
+                return True
+        except Exception:
+            continue
+    try:
+        atual = inp.input_value()
+    except Exception:
+        atual = "?"
+    print(f"     [!] quantidade nao fixou (ficou '{atual}', queria {valor})")
+    return False
+
+
 def _itens_por_ordem(page):
     """Mapa {numero_do_item (coluna Ord.): linha_locator}."""
     mapa = {}
@@ -2737,7 +2772,7 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
     # preenche o que veio na mensagem
     frame = _frame_dados_projeto(page)
     if "qtde" in mud:
-        _set_input_auto(frame, "QUANTIDADE", mud["qtde"], "quantidade")
+        _set_quantidade(frame, page, mud["qtde"])
     if "largura" in mud:
         _set_input_auto(frame, "LARGURA", mud["largura"], "largura")
     if "altura" in mud:
