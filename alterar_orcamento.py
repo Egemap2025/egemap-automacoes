@@ -3080,7 +3080,8 @@ def _escolher_vendedor(page, valor):
         print_tela(page, "orc_sem_vendedor")
         return False
 
-    # 1) tenta casar com o que veio na mensagem/CRM
+    # 1) CAMINHO NORMAL: vendedor veio na mensagem/CRM -> seleciona SOZINHO,
+    #    sem perguntar nada.
     if valor:
         escolha = _melhor_opcao_texto(opcoes, valor)
         # so aceita match automatico se compartilhar alguma palavra de verdade
@@ -3091,21 +3092,25 @@ def _escolher_vendedor(page, valor):
             try:
                 loc.select_option(label=escolha)
                 page.wait_for_timeout(500)
-                print(f"     vendedor -> {escolha}")
+                print(f"     vendedor -> {escolha}  (automatico)")
                 return True
             except Exception:
                 pass
-        else:
-            print(f"     (nao achei o vendedor '{valor}' na lista -- escolha abaixo)")
+        print(f"\n     [!] AVISO: nao achei o vendedor '{valor}' na lista do W-Vetro.")
+    else:
+        print("\n     [!] AVISO: voce NAO informou o VENDEDOR (e obrigatorio).")
 
-    # 2) escolha manual pela lista numerada
+    # 2) PLANO B (so cai aqui se esqueceu ou digitou errado): mostra a lista
+    #    pra escolher agora. Se preferir, aperte ENTER pra cancelar e informar
+    #    o vendedor na mensagem (ou escolher direto no sistema).
+    print("     Dica: coloque 'Vendedor: Nome' na mensagem que ele escolhe sozinho.")
     print("\n     VENDEDORES disponiveis:")
     for i, o in enumerate(opcoes, 1):
         print(f"        {i:2d}) {o}")
     while True:
-        esc = input("     Digite o NUMERO do vendedor (ou parte do nome): ").strip()
+        esc = input("     NUMERO do vendedor (ou parte do nome) | ENTER = cancelar: ").strip()
         if not esc:
-            print("     (sem vendedor escolhido)")
+            print("     (nenhum vendedor escolhido -- cancelado)")
             return False
         escolha = None
         if esc.isdigit() and 1 <= int(esc) <= len(opcoes):
