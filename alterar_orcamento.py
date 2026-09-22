@@ -3505,8 +3505,26 @@ def modo_novo(page):
     if not cli.get("nome"):
         print("  Nao achei o NOME do cliente na mensagem.")
         return
+
+    # SO cliente (sem itens): faz apenas o cadastro do cliente e para.
+    # (util pra testar/cadastrar cliente pela opcao 5 sem precisar de itens.)
     if not itens:
-        print("  Nao achei itens para montar na mensagem.")
+        print("\n  (Sem itens na mensagem -- vou fazer SO o cadastro do cliente.)")
+        print("  " + "-" * 56)
+        print(f"  CLIENTE: {cli.get('nome')}")
+        for k in ("celular", "telefone", "email", "cpf", "cep", "rua", "numero",
+                  "bairro", "complemento", "cidade", "uf", "vendedor"):
+            if cli.get(k):
+                print(f"     {k:11s} -> {cli[k]}")
+        print("  " + "-" * 56)
+        r = input("\n  Cadastrar este cliente? ENTER para SIM  |  N para cancelar: ").strip().lower()
+        if r == "n":
+            print("  Cancelado.")
+            return
+        if cadastrar_cliente(page, cli):
+            print("  ✔ Cliente cadastrado. (nenhum item foi montado -- nao havia itens)")
+        else:
+            print("  [!] nao consegui cadastrar o cliente.")
         return
 
     # preview
