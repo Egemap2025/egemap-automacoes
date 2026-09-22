@@ -3054,6 +3054,76 @@ def cadastrar_cliente(page, cli):
     return True
 
 
+def _achar_select_vendedor(page):
+    """Acha o <select> do VENDEDOR (tela 'Cadastro de Orcamento') em qualquer
+    frame. Retorna (loc, opcoes_validas) ou (None, [])."""
+    for fr in page.frames:
+        loc = _campo_por_js(fr, "VENDEDOR", "select")
+        if loc is None or not _visivel(loc):
+            continue
+        opcoes = [o for o in _opcoes_do_select(loc) if o.strip()
+                  and "SELECIONE" not in o.upper()
+                  and "TODOS" not in o.upper()]
+        if opcoes:
+            return loc, opcoes
+    return None, []
+
+
+def _escolher_vendedor(page, valor):
+    """Escolhe o VENDEDOR na tela 'Cadastro de Orcamento'. Se 'valor' casar com
+    um vendedor da lista, seleciona sozinho. Se nao vier (ou nao casar), MOSTRA
+    a lista numerada e deixa o usuario escolher pelo numero (ou por parte do
+    nome). Retorna True se selecionou algum vendedor."""
+    loc, opcoes = _achar_select_vendedor(page)
+    if loc is None:
+        print("     [!] nao achei a lista de VENDEDOR na tela.")
+        print_tela(page, "orc_sem_vendedor")
+        return False
+
+    # 1) tenta casar com o que veio na mensagem/CRM
+    if valor:
+        escolha = _melhor_opcao_texto(opcoes, valor)
+        # so aceita match automatico se compartilhar alguma palavra de verdade
+        alvo = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(valor.lower()))
+                if len(w) >= 2 and w not in _STOP]
+        casou = escolha and any(w in _sem_acento(escolha.lower()) for w in alvo)
+        if casou:
+            try:
+                loc.select_option(label=escolha)
+                page.wait_for_timeout(500)
+                print(f"     vendedor -> {escolha}")
+                return True
+            except Exception:
+                pass
+        else:
+            print(f"     (nao achei o vendedor '{valor}' na lista -- escolha abaixo)")
+
+    # 2) escolha manual pela lista numerada
+    print("\n     VENDEDORES disponiveis:")
+    for i, o in enumerate(opcoes, 1):
+        print(f"        {i:2d}) {o}")
+    while True:
+        esc = input("     Digite o NUMERO do vendedor (ou parte do nome): ").strip()
+        if not esc:
+            print("     (sem vendedor escolhido)")
+            return False
+        escolha = None
+        if esc.isdigit() and 1 <= int(esc) <= len(opcoes):
+            escolha = opcoes[int(esc) - 1]
+        else:
+            escolha = _melhor_opcao_texto(opcoes, esc)
+        if not escolha:
+            print("     Nao entendi. Tente o numero da lista.")
+            continue
+        try:
+            loc.select_option(label=escolha)
+            page.wait_for_timeout(500)
+            print(f"     vendedor -> {escolha}")
+            return True
+        except Exception:
+            print("     Nao consegui selecionar esse. Tente outro.")
+
+
 def criar_orcamento_novo(page, cli):
     """Logo apos cadastrar o cliente, cria o ORCAMENTO NOVO:
     'Cadastrado novo cliente!' -> 'Criar um novo orcamento' -> escolhe o
@@ -3070,9 +3140,12 @@ def criar_orcamento_novo(page, cli):
     # 2) tela 'CADASTRO DE ORCAMENTO': VENDEDOR (lista) + 'Criar orcamento'
     if not (_tem_texto_visivel(page, "CADASTRO DE OR") or _tem_texto_visivel(page, "VENDEDOR")):
         page.wait_for_timeout(1500)
-    if cli.get("vendedor"):
-        _selecionar_select_rotulo(page, "VENDEDOR", cli["vendedor"], "vendedor")
-        page.wait_for_timeout(600)
+    # escolhe o vendedor: casa com o que veio no CRM/mensagem ou mostra a lista
+    if not _escolher_vendedor(page, cli.get("vendedor")):
+        print("  [!] nenhum vendedor foi escolhido -- parando antes de criar o orcamento.")
+        print("      (o W-Vetro costuma exigir o vendedor). Rode de novo e escolha um.")
+        return False
+    page.wait_for_timeout(600)
     if not (_clicar_botao_real(page, r"^\s*criar\s+or[çc]amento\s*$", timeout=6000)
             or _clicar_botao(page, r"^\s*criar\s+or[çc]amento\s*$", timeout=4000)):
         print("  [!] nao achei o botao 'Criar orcamento'.")
@@ -3476,10 +3549,8 @@ def modo_cadastro(page):
     if r2 == "n":
         print("  Ok, cliente cadastrado. Parei aqui.")
         return
-    if not cli.get("vendedor"):
-        vend = input("  Nome do VENDEDOR (ENTER pula e voce escolhe na tela): ").strip()
-        if vend:
-            cli["vendedor"] = vend
+    # o vendedor e escolhido dentro de criar_orcamento_novo (casa com o CRM ou
+    # mostra a lista pra voce escolher pelo numero)
     if criar_orcamento_novo(page, cli):
         print("\n  ✔ Orcamento novo criado. Voce esta na tela 'Escolha o desenho'.")
         print("  Para montar os itens agora, use a opcao 6 (montar itens) e cole os itens.")
