@@ -1435,8 +1435,11 @@ _UF_NOME = {
 
 def _campo_cliente(linha):
     """Se a linha for 'Campo: valor' de um dado de cliente, devolve (campo, valor);
-    senao None. Ex.: 'Cliente: Natanael' -> ('nome','Natanael')."""
-    m = _re.match(r"^\s*([A-Za-zÀ-ÿ/ ]{2,20}?)\s*[:=]\s*(.+?)\s*$", linha)
+    senao None. Ex.: 'Cliente: Natanael' -> ('nome','Natanael').
+    Aceita valor VAZIO ('Telefone:' sem nada) -- assim a linha e reconhecida
+    como campo de cliente e NAO vira item; o valor vazio simplesmente nao e
+    preenchido no cadastro."""
+    m = _re.match(r"^\s*([A-Za-zÀ-ÿ/ ]{2,20}?)\s*[:=]\s*(.*)$", linha)
     if not m:
         return None
     rot = _sem_acento(m.group(1).strip().lower())
@@ -1454,7 +1457,7 @@ def parse_cliente(texto):
     cli = {}
     for l in texto.splitlines():
         cv = _campo_cliente(l)
-        if cv:
+        if cv and cv[1]:          # so guarda campo com valor (ignora 'Telefone:' vazio)
             cli[cv[0]] = cv[1]
     return cli
 
@@ -2953,6 +2956,28 @@ def _set_input_page(page, rotulo, valor, nome):
     return False
 
 
+def _ir_para_home(page):
+    """Leva o robo para a TELA INICIAL do W-Vetro (onde ficam os quadros/atalhos
+    'NOVO CLIENTE', 'NOVO ORCAMENTO', etc.). Necessario porque o robo costuma
+    abrir na Consulta de Orcamentos. Tenta pela URL da home e, se nao rolar,
+    clica no menu 'Inicio/Home'."""
+    try:
+        page.goto(URL_HOME, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(2500)
+    except Exception as e:
+        log(f"   (nao consegui abrir a home pela URL: {e})")
+    # ja apareceu o quadro 'NOVO CLIENTE'? entao estamos na home.
+    for _ in range(3):
+        if _tem_texto_visivel(page, "NOVO CLIENTE"):
+            return True
+        # tenta um atalho de menu para a tela inicial
+        if not (_clicar_botao(page, r"^\s*(in[ií]cio|home|p[aá]gina inicial)\s*$",
+                              timeout=2500)):
+            break
+        page.wait_for_timeout(1800)
+    return _tem_texto_visivel(page, "NOVO CLIENTE")
+
+
 def cadastrar_cliente(page, cli):
     """Cadastra um cliente NOVO no W-Vetro: tela 'NOVO CLIENTE' -> preenche o
     'Cadastro Rapido/Completo' -> Salvar. Os dados vem do CRM (passados na
@@ -2963,12 +2988,20 @@ def cadastrar_cliente(page, cli):
         return False
     print(f"\n  >> Cadastrando cliente: {nome}")
 
+    # 0) O quadro 'NOVO CLIENTE' fica na TELA INICIAL (home). Se o robo abriu
+    #    em outra tela (ex.: Consulta de Orcamentos), vai pra home primeiro.
+    _ir_para_home(page)
+
     # 1) tile/botao 'NOVO CLIENTE'
     if not (_clicar_botao_real(page, r"novo\s+cliente", timeout=8000)
             or _clicar_botao(page, r"novo\s+cliente", timeout=4000)):
-        print("  [!] nao achei 'NOVO CLIENTE' na tela (abra a tela inicial).")
-        print_tela(page, "cli_sem_novo")
-        return False
+        # 2a chance: talvez ainda nao estava na home -- volta e tenta de novo
+        _ir_para_home(page)
+        if not (_clicar_botao_real(page, r"novo\s+cliente", timeout=8000)
+                or _clicar_botao(page, r"novo\s+cliente", timeout=4000)):
+            print("  [!] nao achei 'NOVO CLIENTE' na tela inicial.")
+            print_tela(page, "cli_sem_novo")
+            return False
     page.wait_for_timeout(2000)
 
     # 2) espera o formulario de cadastro
