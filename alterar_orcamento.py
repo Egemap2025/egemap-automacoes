@@ -3465,7 +3465,27 @@ def modo_cadastro(page):
     if r == "n":
         print("  Cancelado.")
         return
-    cadastrar_cliente(page, cli)
+    if not cadastrar_cliente(page, cli):
+        return
+
+    # Apos cadastrar, o W-Vetro mostra 'Cadastrado novo cliente!' com o botao
+    # 'Criar um novo orcamento'. Oferece seguir direto para criar o orcamento
+    # (escolhendo o vendedor) e cair na tela de montar itens.
+    print()
+    r2 = input("  Criar um orcamento agora para este cliente? ENTER = sim  |  N = nao: ").strip().lower()
+    if r2 == "n":
+        print("  Ok, cliente cadastrado. Parei aqui.")
+        return
+    if not cli.get("vendedor"):
+        vend = input("  Nome do VENDEDOR (ENTER pula e voce escolhe na tela): ").strip()
+        if vend:
+            cli["vendedor"] = vend
+    if criar_orcamento_novo(page, cli):
+        print("\n  ✔ Orcamento novo criado. Voce esta na tela 'Escolha o desenho'.")
+        print("  Para montar os itens agora, use a opcao 6 (montar itens) e cole os itens.")
+    else:
+        print("  [!] cadastrei o cliente, mas nao consegui criar o orcamento.")
+        print("      Voce pode clicar em 'Criar um novo orcamento' na tela e seguir manual.")
 
 
 def modo_novo(page):
