@@ -3546,16 +3546,10 @@ def modo_cadastro(page):
     if not cadastrar_cliente(page, cli):
         return
 
-    # Apos cadastrar, o W-Vetro mostra 'Cadastrado novo cliente!' com o botao
-    # 'Criar um novo orcamento'. Oferece seguir direto para criar o orcamento
-    # (escolhendo o vendedor) e cair na tela de montar itens.
-    print()
-    r2 = input("  Criar um orcamento agora para este cliente? ENTER = sim  |  N = nao: ").strip().lower()
-    if r2 == "n":
-        print("  Ok, cliente cadastrado. Parei aqui.")
-        return
-    # o vendedor e escolhido dentro de criar_orcamento_novo (casa com o CRM ou
-    # mostra a lista pra voce escolher pelo numero)
+    # Apos cadastrar, o W-Vetro mostra 'Cadastrado novo cliente!'. SEMPRE segue
+    # direto criando o orcamento novo (o vendedor casa com o CRM/mensagem; se
+    # faltar, avisa e mostra a lista).
+    print("\n  Criando o orcamento novo...")
     if criar_orcamento_novo(page, cli):
         print("\n  ✔ Orcamento novo criado. Voce esta na tela 'Escolha o desenho'.")
         print("  Para montar os itens agora, use a opcao 6 (montar itens) e cole os itens.")
@@ -3602,10 +3596,10 @@ def modo_novo(page):
         print("  Nao achei o NOME do cliente na mensagem.")
         return
 
-    # SO cliente (sem itens): faz apenas o cadastro do cliente e para.
-    # (util pra testar/cadastrar cliente pela opcao 5 sem precisar de itens.)
+    # SO cliente (sem itens): cadastra o cliente e ja CRIA o orcamento novo
+    # (mesmo comportamento da opcao 4), parando na tela 'Escolha o desenho'.
     if not itens:
-        print("\n  (Sem itens na mensagem -- vou fazer SO o cadastro do cliente.)")
+        print("\n  (Sem itens na mensagem -- vou cadastrar o cliente e criar o orcamento.)")
         print("  " + "-" * 56)
         print(f"  CLIENTE: {cli.get('nome')}")
         for k in ("celular", "telefone", "email", "cpf", "cep", "rua", "numero",
@@ -3613,14 +3607,19 @@ def modo_novo(page):
             if cli.get(k):
                 print(f"     {k:11s} -> {cli[k]}")
         print("  " + "-" * 56)
-        r = input("\n  Cadastrar este cliente? ENTER para SIM  |  N para cancelar: ").strip().lower()
+        r = input("\n  Cadastrar? ENTER para SIM  |  N para cancelar: ").strip().lower()
         if r == "n":
             print("  Cancelado.")
             return
-        if cadastrar_cliente(page, cli):
-            print("  ✔ Cliente cadastrado. (nenhum item foi montado -- nao havia itens)")
-        else:
+        if not cadastrar_cliente(page, cli):
             print("  [!] nao consegui cadastrar o cliente.")
+            return
+        print("\n  Criando o orcamento novo...")
+        if criar_orcamento_novo(page, cli):
+            print("\n  ✔ Orcamento novo criado. Voce esta na tela 'Escolha o desenho'.")
+            print("  Para montar os itens, use a opcao 6 (montar itens) e cole os itens.")
+        else:
+            print("  [!] cadastrei o cliente, mas nao consegui criar o orcamento.")
         return
 
     # preview
