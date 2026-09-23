@@ -2580,6 +2580,12 @@ def _escolher_card_auto(page, modelo, num=""):
         for extra in ("sequenc", "moveis"):
             if extra not in palavras:
                 palavras.append(extra)
+    # PORTINHOLA 'ventilada' = card COM VENEZIANA (palhetas). O card se chama
+    # 'PORTINHOLA ... COM VENEZIANA', entao adiciona 'veneziana' (senao 'ventilada'
+    # nao casa e a palavra DIFF 'veneziana' ainda penalizaria o card certo).
+    if "portinhola" in low_mod and ("ventilad" in low_mod or "veneziana" in low_mod):
+        if "veneziana" not in palavras:
+            palavras.append("veneziana")
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
     import time as _t
     fim = _t.time() + 10
