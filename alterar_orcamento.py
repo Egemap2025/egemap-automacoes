@@ -2502,15 +2502,18 @@ def _escolher_card_auto(page, modelo, num=""):
     # 'vidro fixo' (mensagem) x 'JANELA FIXA' (card) -> usa o radical 'fix'.
     palavras = ["fix" if w.startswith("fix") else w for w in palavras]
     palavras = list(dict.fromkeys(palavras))   # remove repetidos, mantem a ordem
-    # PORTA DE CORRER de vidro (sem persiana/bandeira/fechamento central): o
-    # padrao EGEMAP e o desenho 'SEQUENCIAIS MOVEIS | VIDRO' (todas as folhas
-    # deslizam em sequencia), NAO o 'fechamento central'. Adiciona um leve peso
-    # p/ o robo preferir esse. Se o vendedor quiser outro, escreve na mensagem
-    # ('fechamento central', 'bandeira', 'persiana'...).
+    # Desenho SEQUENCIAL como PADRAO ('SEQUENCIAIS MOVEIS | VIDRO' -- todas as
+    # folhas deslizam em sequencia), em vez de 'fechamento central'. Aplica em:
+    #   - PORTA de correr (padrao EGEMAP), e
+    #   - QUALQUER correr de 4 FOLHAS, porta OU janela (pedido do usuario).
+    # Nao aplica quando o item pede outra coisa (persiana/bandeira/fechamento
+    # central/tela/fixo) -- ai o vendedor escolhe escrevendo na mensagem.
     low_mod = _sem_acento(modelo.lower())
-    if ("porta" in low_mod and "correr" in low_mod and not any(
-            w in low_mod for w in ("persiana", "bandeira", "fechamento",
-                                    "central", "fix", "veneziana", "tela"))):
+    tem_correr = "correr" in low_mod
+    quatro_folhas = bool(_re.search(r"\b0?4\s*folhas?\b", low_mod))
+    bloqueia = any(w in low_mod for w in ("persiana", "bandeira", "fechamento",
+                                          "central", "fix", "veneziana", "tela"))
+    if tem_correr and not bloqueia and ("porta" in low_mod or quatro_folhas):
         for extra in ("sequenc", "moveis"):
             if extra not in palavras:
                 palavras.append(extra)
