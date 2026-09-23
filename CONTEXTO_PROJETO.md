@@ -287,11 +287,53 @@ esquadrias do arquitetônico (última coluna = quantidade). Ambientes: cruzar as
 marcações Jx da planta baixa com o cômodo mais próximo (via coordenadas dos
 `get_text("words")`).
 
+### PORTAS DE MADEIRA (montar do zero) — MAPEADO E FUNCIONANDO ✔
+Detecção: `_eh_madeira(low)` = palavra `\bmadeira\b` (NÃO "amadeirado", que é
+alumínio) OU marca (tauari/grapia/imbuia/.../semi-oca/macica/colonial/rohden),
+e nunca quando tem "aluminio".
+
+- **LINHA:** `L. 30` (a mensagem manda `l30` → linha "30" → casa "L. 30").
+  As RIPADAS usam LINHA `RIPADOS` (ainda manual).
+- **MODELO** (`_modelo_dropdown`):
+  - giro / abrir / colonial / semi-oca / maciça / pm15/pm28/pm33 → **PORTAS DE GIRO**
+  - correr (1 folha, interna E externa) → **PORTÃO DE CORRER 01 FOLHA**
+    (NÃO "PORTA DE CORRER", que traz caixilho/4 folhas)
+  - pivotante → **PORTA PIVOTANTE**
+- **CARD** por palavra: semi-oca→PGSEMI-MAD, pm28→PGM-MACIÇA-PM28, colonial→
+  PGMCOL, correr semi-oca→card semi-oca do portão. ('colonial'/'ripad' são
+  palavras DIFF: penalizam o card que as tem sem terem sido pedidas.)
+- **COR / VIDRO / ACESSÓRIO automáticos** (regra EGEMAP, em `_spec_item_novo`,
+  só quando o vendedor não informa):
+  - COR ACESSÓRIOS = **INOX** (campo/rotulo "COR ACESSORIOS", setado antes)
+  - VIDRO = **SEM VIDRO** (`_melhor_opcao` casa direto "sem vidro"/"sem")
+  - COR PERFIL: semi-oca→**MADEIRA TAUARI**; branca→**BRANCO**; senão
+    (externa/maciça/colonial)→**MADEIRA GRÁPIA**
+  - A espécie vai no MESMO campo do alumínio: **"COR ALUMÍNIO | PERFIL"**.
+    `_melhor_opcao` (cor) casa SEM acento: `grapia`→"MADEIRA GRÁPIA".
+- **Variáveis** (batente/sentido/lado/puxador/ALM alum×madeira): o vendedor
+  clica **"SALVAR VARIÁVEIS COMO PADRÃO"** uma vez por tipo → robô só confirma.
+- **Pivotante RIPADA** (LINHA RIPADOS, card EGE-PPIV-RIPADO): alumínio×madeira
+  é escolhido na variável **ALM/ALUMÍNIO** — ainda a automatizar.
+
+### CORREÇÕES recentes do alumínio (montar) — todas OK
+- Vidro **ACIDATO** entra certo (estava só em VIDRO_TIPOS, faltava VIDRO_NOMES).
+- **Fixo** casa card "JANELA FIXA" pelo radical `fix` (fixo↔fixa).
+- Card com característica NÃO pedida (tela/persiana/veneziana/bandeira...) leva
+  penalidade −5 no `_JS_MARCAR_CARD` (ex.: "porta correr 04 folhas" sem tela
+  não pega mais "03 vidros 01 tela").
+- **Correr 4 folhas (porta OU janela)** → prefere desenho **SEQUENCIAIS MÓVEIS**.
+
+### CADASTRO CLIENTE + orçamento novo — OK
+- Opção 4/5: vai pra HOME (`_ir_para_home`) antes do "NOVO CLIENTE"; campos
+  vazios ("Telefone:" sem valor) não viram item; sempre cria o orçamento após
+  cadastrar; **vendedor** casa sozinho com o nome informado, senão mostra a
+  lista numerada (só quando falta — é obrigatório).
+
 ### Ainda a fazer / ideias
 - **Automatizar a leitura do "Levantamento de Aberturas" PDF** → gerar a
   mensagem do robô sozinho (hoje o Claude faz isso na conversa).
 - **Ler o CRM direto** (nome/telefone/cidade/vendedor/resumo) para o cadastro.
-- **Portas de madeira / de giro:** o usuário faz manual (ainda não mapeado).
+- **Pivotante ripada madeira/alumínio** (variável ALM) e **P5 giro ripado**.
 - Card "N módulos" quando a foto não abre: fallback pede 1 clique (raro agora).
 
 ---
