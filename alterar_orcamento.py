@@ -1167,18 +1167,20 @@ def _eh_linha(low):
 
 
 def _eh_acionamento(low):
-    return ("motor" in low) or ("recolhedor" in low) or low in ("fita", "cordao", "cordão")
+    return ("motor" in low) or ("recolhedor" in low) or ("manual" in low) \
+        or low in ("fita", "cordao", "cordão")
 
 
 def _norm_acionamento(low):
-    """Normaliza o acionamento pedido para casar com a lista de variaveis."""
+    """Normaliza o acionamento pedido para casar com a lista de variaveis.
+    'manual' (persiana manual) = RECOLHEDOR (fita por padrao)."""
     if "fita" in low:
         return "RECOLHEDOR FITA"
     if "cordão" in low or "cordao" in low:
         return "RECOLHEDOR CORDÃO"
     if "motor" in low:
         return "MOTOR"
-    if "recolhedor" in low:
+    if "recolhedor" in low or "manual" in low:
         return "RECOLHEDOR FITA"
     return "MOTOR"
 
@@ -1363,12 +1365,13 @@ def _spec_item_novo(descricao):
         mud["modulos"] = str(int(mmod.group(1)))
         desc = _re.sub(r"\b\d+\s*m[oó]dulos?\b", " ", desc, flags=_re.I).strip()
 
-    # acionamento embutido: motor / manual (persiana SEM 'motor' fica sem
-    # acionamento -> o W-Vetro usa o padrao, que e recolhedor).
+    # acionamento embutido: motor / manual. ATENCAO: o padrao do W-Vetro para
+    # persiana e MOTOR -- entao persiana MANUAL PRECISA ser dita ('manual' ou
+    # 'recolhedor'), senao sai motorizada. 'manual' = RECOLHEDOR (fita/cordao).
     if _re.search(r"\bmotor(?:izad[oa])?\b", desc, _re.I):
         mud["acionamento"] = "MOTOR"
-    elif _re.search(r"\bmanual\b", desc, _re.I):
-        mud["acionamento"] = "MANUAL"
+    elif _re.search(r"\brecolhedor\b|\bmanual\b|\bfita\b|\bcord[aã]o\b", desc, _re.I):
+        mud["acionamento"] = _norm_acionamento(_sem_acento(desc.lower()))
 
     # quantidade embutida na descricao: '2un' / '3 pecas' / 'qtd 2' (nao pega
     # '2 folhas' -- exige marcador un/peca/qtd para nao confundir com folhas).
