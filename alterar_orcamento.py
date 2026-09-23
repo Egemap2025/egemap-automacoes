@@ -731,6 +731,8 @@ ROTULOS = {
     "TIPO":     ["TIPO"],
     "AMBIENTE": ["AMBIENTE/LOCALIZACAO", "AMBIENTE/LOCALIZAÇÃO", "AMBIENTE"],
     "PERFIL":   ["ALUMINIO/PERFIL", "ALUMÍNIO/PERFIL", "PERFIL"],
+    "COR ACESSORIOS": ["COR ACESSORIOS", "COR ACESSÓRIOS", "COR ACESSORIO",
+                       "COR ACESSÓRIO", "ACESSORIOS", "ACESSÓRIOS"],
     "VIDRO COR": ["VIDRO COR", "VIDRO/COR", "VIDRO"],
     # cadastro de cliente (tela 'Cadastro Rapido' / 'Cadastro Completo')
     "NOME":       ["NOME COMPLETO", "NOME"],
@@ -1280,6 +1282,21 @@ def parse_mensagem(texto):
     return orcamento, itens
 
 
+# marcas que identificam porta de MADEIRA (alem da palavra 'madeira').
+_MADEIRA_MARK = ("tauari", "grapia", "imbuia", "cedro", "angelim", "itauba",
+                 "cumaru", "freijo", "jatoba", "osmocolor", "semi-oca",
+                 "semioca", "semi oca", "macica", "colonial", "rohden")
+
+
+def _eh_madeira(low):
+    """low = descricao SEM acento, minuscula. True se e porta de MADEIRA.
+    Usa a palavra 'madeira' (nao 'amadeirado', que e aluminio) ou marcas de
+    porta de madeira; NUNCA quando o texto diz 'aluminio'."""
+    return ((_re.search(r"\bmadeira\b", low) is not None
+             or any(m in low for m in _MADEIRA_MARK))
+            and "aluminio" not in low)
+
+
 def _spec_item_novo(descricao):
     """Le UMA linha de item novo (montar do zero) e devolve um 'mud'.
     Formato: '[codigo] descricao do modelo - cor - vidro - ambiente - ...'
@@ -1373,6 +1390,25 @@ def _spec_item_novo(descricao):
             _classificar_parte(p, mud, ambiente)
     if ambiente:
         mud["ambiente"] = " ".join(ambiente)
+
+    # MADEIRA: padroes de cor/acessorio (regra EGEMAP), aplicados so quando o
+    # vendedor NAO informou:
+    #   - COR ACESSORIOS = INOX (sempre)
+    #   - VIDRO = SEM VIDRO (portas de madeira, salvo se informar vidro)
+    #   - COR PERFIL: semi-oca -> MADEIRA TAUARI; branca -> BRANCO;
+    #                 senao (externa/maciça/colonial) -> MADEIRA GRAPIA
+    low_modelo = _sem_acento(mud.get("modelo", "").lower())
+    if _eh_madeira(low_modelo):
+        mud.setdefault("acessorio", "inox")
+        mud.setdefault("vidro", "sem vidro")
+        if "cor" not in mud:
+            if "branc" in low_modelo:
+                mud["cor"] = "branco"
+            elif ("semi-oca" in low_modelo or "semioca" in low_modelo
+                  or "semi oca" in low_modelo):
+                mud["cor"] = "madeira tauari"
+            else:
+                mud["cor"] = "madeira grapia"
 
     # QUANTIDADE e obrigatoria no W-Vetro -- padrao 1 se nao vier na mensagem
     # (o vendedor ajusta depois se precisar de mais de 1).
@@ -1966,15 +2002,7 @@ def _modelo_dropdown(descricao):
     # ── MADEIRA ─────────────────────────────────────────────────────────────
     # Portas de madeira usam MODELOs proprios (linha L.30). A especie
     # (tauari/grapia) e o 'SEM VIDRO' vao depois no 'Dados do Projeto'.
-    # Detecta pela palavra 'madeira' (nao 'amadeirado', que e aluminio) ou por
-    # marcas de porta de madeira. NUNCA quando o texto diz 'aluminio'.
-    MADEIRA_MARK = ("tauari", "grapia", "imbuia", "cedro", "angelim", "itauba",
-                    "cumaru", "freijo", "jatoba", "osmocolor", "semi-oca",
-                    "semioca", "semi oca", "macica", "colonial", "rohden")
-    eh_madeira = ((_re.search(r"\bmadeira\b", low) is not None
-                   or any(m in low for m in MADEIRA_MARK))
-                  and "aluminio" not in low)
-    if eh_madeira:
+    if _eh_madeira(low):
         if "pivotante" in low or "pivot" in low:
             return "PORTA PIVOTANTE"
         if "correr" in low:
@@ -2842,6 +2870,8 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         _set_input_auto(frame, "TIPO", mud["tipo"], "tipo", exato=True)
     if "ambiente" in mud:
         _set_input_auto(frame, "AMBIENTE", mud["ambiente"], "ambiente")
+    if "acessorio" in mud:      # madeira: COR ACESSORIOS = INOX (antes do resto)
+        _set_select_auto(frame, "COR ACESSORIOS", "cor", mud["acessorio"], "cor acessorio")
     if "cor" in mud:
         _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
     if "vidro" in mud:
