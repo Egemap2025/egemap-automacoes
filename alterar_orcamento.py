@@ -1096,7 +1096,7 @@ NOMES_VIDRO = [("mini-boreal", "MINI-BOREAL"), ("mini boreal", "MINI-BOREAL"),
 VIDRO_TIPOS = ("temperado", "comum", "laminado", "refletivo", "acidato", "insulado")
 VIDRO_NOMES = ("incolor", "verde", "fume", "fumê", "bronze", "azul", "cinza",
                "boreal", "mini-boreal", "pontilhado", "quadrato", "canelado",
-               "float", "antelio", "prata")
+               "float", "antelio", "prata", "acidato", "jateado")
 
 
 def _parece_spec_vidro(low):
@@ -2420,6 +2420,10 @@ _JS_MARCAR_CARD = r"""
     if (!pareceCard) continue;
     let s = 0;
     for (const w of pal){ if (w.length >= 2 && t.includes(w)) s += ehCodigo(w) ? 20 : (DIFF.indexOf(w) >= 0 ? 6 : 1); }
+    // PENALIDADE: o card tem uma caracteristica (tela/persiana/veneziana/motor...)
+    // que NAO foi pedida na mensagem. Ex.: 'porta de correr 04 folhas' (sem tela)
+    // nao deve casar com o desenho '04 FOLHAS 03 VIDROS 01 TELA'.
+    for (const d of DIFF){ if (t.includes(d) && pal.indexOf(d) < 0) s -= 5; }
     cands.push({t: (b.textContent||'').replace(/\s+/g,' ').trim().slice(0,80), s: s});
     if (s > bestScore || (s === bestScore && t.length < bestLen)){
       best=b; bestScore=s; bestLen=t.length;
@@ -2494,6 +2498,10 @@ def _escolher_card_auto(page, modelo, num=""):
     auto-scroll). Mostra qual card escolheu. Retorna True se conseguiu navegar."""
     palavras = [w for w in _re.split(r"[^a-z0-9]+", _sem_acento(modelo.lower()))
                 if len(w) >= 2 and w not in _STOP]
+    # RADICAIS: casa variacoes de grafia entre a mensagem e o nome do card.
+    # 'vidro fixo' (mensagem) x 'JANELA FIXA' (card) -> usa o radical 'fix'.
+    palavras = ["fix" if w.startswith("fix") else w for w in palavras]
+    palavras = list(dict.fromkeys(palavras))   # remove repetidos, mantem a ordem
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
     import time as _t
     fim = _t.time() + 10
