@@ -2502,6 +2502,18 @@ def _escolher_card_auto(page, modelo, num=""):
     # 'vidro fixo' (mensagem) x 'JANELA FIXA' (card) -> usa o radical 'fix'.
     palavras = ["fix" if w.startswith("fix") else w for w in palavras]
     palavras = list(dict.fromkeys(palavras))   # remove repetidos, mantem a ordem
+    # PORTA DE CORRER de vidro (sem persiana/bandeira/fechamento central): o
+    # padrao EGEMAP e o desenho 'SEQUENCIAIS MOVEIS | VIDRO' (todas as folhas
+    # deslizam em sequencia), NAO o 'fechamento central'. Adiciona um leve peso
+    # p/ o robo preferir esse. Se o vendedor quiser outro, escreve na mensagem
+    # ('fechamento central', 'bandeira', 'persiana'...).
+    low_mod = _sem_acento(modelo.lower())
+    if ("porta" in low_mod and "correr" in low_mod and not any(
+            w in low_mod for w in ("persiana", "bandeira", "fechamento",
+                                    "central", "fix", "veneziana", "tela"))):
+        for extra in ("sequenc", "moveis"):
+            if extra not in palavras:
+                palavras.append(extra)
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
     import time as _t
     fim = _t.time() + 10
