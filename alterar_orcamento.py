@@ -2005,12 +2005,10 @@ def _modelo_dropdown(descricao):
     if _eh_madeira(low):
         if "pivotante" in low or "pivot" in low:
             return "PORTA PIVOTANTE"
+        # correr de madeira (interna OU externa, 1 folha) -> PORTAO DE CORRER
+        # 01 FOLHA. (NAO a 'PORTA DE CORRER', que traz as de caixilho/4 folhas.)
         if "correr" in low:
-            # 'pra tras da parede'/'embutir'/'portao' -> embutida na parede;
-            # senao a de SOBREPOR (a que a EGEMAP usa por padrao).
-            if "tras" in low or "parede" in low or "embutir" in low or "portao" in low:
-                return "PORTAO DE CORRER 01 FOLHA"
-            return "PORTA DE CORRER"
+            return "PORTAO DE CORRER 01 FOLHA"
         # giro / abrir / colonial / semi-oca / maciça / pm* -> PORTAS DE GIRO
         return "PORTAS DE GIRO"
 
