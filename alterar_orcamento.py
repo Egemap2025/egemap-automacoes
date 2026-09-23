@@ -1080,7 +1080,11 @@ import re as _re
 
 CORES_PERFIL = ("pintura", "anodizado", "anod", "branco", "preto", "bronze",
                 "natural", "fosco", "madeira", "cinza", "grafite", "champagne",
-                "amadeirado", "corten", "brilhante", "bicolor", "louro")
+                "amadeirado", "corten", "brilhante", "bicolor", "louro",
+                # especies/acabamentos de MADEIRA (vao no campo COR PERFIL):
+                "tauari", "grapia", "grápia", "imbuia", "imbuía", "cedro",
+                "angelim", "itauba", "itaúba", "cumaru", "freijo", "freijó",
+                "jatoba", "jatobá", "eucalipto", "osmocolor")
 
 CORES_VIDRO = {"incolor": "INCOLOR", "verde": "VERDE", "bronze": "BRONZE",
                "fume": "FUME", "fumê": "FUME", "azul": "AZUL", "acidato": "ACIDATO"}
@@ -1538,6 +1542,13 @@ def _pontua_vidro(opcao, termo):
 
 def _melhor_opcao(opcoes, termo, esperado):
     if esperado == "vidro":
+        # SEM VIDRO (portas de madeira, painéis sem vidro): casa direto com a
+        # opcao 'SEM VIDRO' da lista.
+        low = _sem_acento((termo or "").lower()).strip()
+        if "sem vidro" in low or low in ("sem", "nao", "n/a", "na", "sv", ""):
+            for o in opcoes:
+                if "SEM VIDRO" in _sem_acento(o.upper()):
+                    return o, True
         pont = [(o, _pontua_vidro(o, termo)) for o in opcoes]
         pont = [x for x in pont if x[1] > 0]
         if not pont:
@@ -1548,9 +1559,10 @@ def _melhor_opcao(opcoes, termo, esperado):
         # 'INCOLOR 06MM - TEMPERADO' em vez de 'BOX INCOLOR 06MM - TEMPERADO').
         topo.sort(key=len)
         return topo[0], True
-    # cor / outros: pontua por palavras do termo
-    palavras = [w for w in _re.split(r"\s+", termo.upper()) if len(w) > 2]
-    pont = [(o, sum(1 for w in palavras if w in o.upper())) for o in opcoes]
+    # cor / outros: pontua por palavras do termo (SEM acento, p/ casar
+    # 'grapia' com 'GRÁPIA', 'imbuia' com 'IMBUÍA', etc.)
+    palavras = [w for w in _re.split(r"\s+", _sem_acento(termo.upper())) if len(w) > 2]
+    pont = [(o, sum(1 for w in palavras if w in _sem_acento(o.upper()))) for o in opcoes]
     pont = [x for x in pont if x[1] > 0]
     if not pont:
         return None, False
@@ -1950,6 +1962,29 @@ def _modelo_dropdown(descricao):
         return "VENEZIANA"
     if "camarao" in low:
         return "PORTA CAMARAO"
+
+    # ── MADEIRA ─────────────────────────────────────────────────────────────
+    # Portas de madeira usam MODELOs proprios (linha L.30). A especie
+    # (tauari/grapia) e o 'SEM VIDRO' vao depois no 'Dados do Projeto'.
+    # Detecta pela palavra 'madeira' (nao 'amadeirado', que e aluminio) ou por
+    # marcas de porta de madeira. NUNCA quando o texto diz 'aluminio'.
+    MADEIRA_MARK = ("tauari", "grapia", "imbuia", "cedro", "angelim", "itauba",
+                    "cumaru", "freijo", "jatoba", "osmocolor", "semi-oca",
+                    "semioca", "semi oca", "macica", "colonial", "rohden")
+    eh_madeira = ((_re.search(r"\bmadeira\b", low) is not None
+                   or any(m in low for m in MADEIRA_MARK))
+                  and "aluminio" not in low)
+    if eh_madeira:
+        if "pivotante" in low or "pivot" in low:
+            return "PORTA PIVOTANTE"
+        if "correr" in low:
+            # 'pra tras da parede'/'embutir'/'portao' -> embutida na parede;
+            # senao a de SOBREPOR (a que a EGEMAP usa por padrao).
+            if "tras" in low or "parede" in low or "embutir" in low or "portao" in low:
+                return "PORTAO DE CORRER 01 FOLHA"
+            return "PORTA DE CORRER"
+        # giro / abrir / colonial / semi-oca / maciça / pm* -> PORTAS DE GIRO
+        return "PORTAS DE GIRO"
 
     # pivotante (porta OU janela)
     if "pivotante" in low or "pivot" in low:
