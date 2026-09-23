@@ -2474,15 +2474,20 @@ _JS_MARCAR_CARD = r"""
   // limpa marcacoes antigas
   document.querySelectorAll('[data-egerobo]').forEach(e => e.removeAttribute('data-egerobo'));
   // palavras que DIFERENCIAM o desenho (peso alto): tela, persiana, motor...
-  const DIFF = ['tela','persiana','motor','bandeira','peitoril','veneziana',
-                'basculante','ripad','lambri','colonial'];
+  // 'integrad' = persiana integrada (as JANELAS validadas *EGE com persiana se
+  // chamam 'INTEGRADA', nao 'persiana').
+  const DIFF = ['tela','persiana','integrad','motor','bandeira','peitoril',
+                'veneziana','basculante','ripad','lambri','colonial'];
   const nodes = Array.from(document.querySelectorAll('div,li,article,a,td,section'));
   let best=null, bestScore=-1, bestLen=1e9;
   const cands = [];
   for (const b of nodes){
     const t = nd(b.textContent);
     if (t.length < 6 || t.length > 500) continue;
-    const pareceCard = t.includes('ege-') || t.includes('perf-') || t.includes('projeto com');
+    // SO desenhos VALIDADOS pela EGEMAP: codigo comeca com *EGE (texto tem
+    // 'ege-'). Ignora os do fornecedor (PERF-..., RIP-...), que nao sao
+    // validados pela equipe.
+    const pareceCard = t.includes('ege-');
     if (!pareceCard) continue;
     let s = 0;
     for (const w of pal){ if (w.length >= 2 && t.includes(w)) s += ehCodigo(w) ? 20 : (DIFF.indexOf(w) >= 0 ? 6 : 1); }
@@ -2589,6 +2594,10 @@ def _escolher_card_auto(page, modelo, num=""):
     if "portinhola" in low_mod and ("ventilad" in low_mod or "veneziana" in low_mod):
         if "veneziana" not in palavras:
             palavras.append("veneziana")
+    # PERSIANA em JANELA = card 'INTEGRADA' (a janela validada *EGE com persiana
+    # se chama 'INTEGRADA', nao 'persiana'). Adiciona 'integrad' p/ casar.
+    if "persiana" in low_mod and "integrad" not in palavras:
+        palavras.append("integrad")
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
     import time as _t
     fim = _t.time() + 10
