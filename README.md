@@ -97,7 +97,8 @@ resto nem sempre:
 | O que o monitor faz | Onde acontece |
 |---|---|
 | Troca o PDF e o valor da linha do orçamento | Em qualquer etapa |
-| Atualiza o **valor do negócio** | Em qualquer etapa. Sem pedido, vale o maior dos orçamentos; com pedido de fábrica no card, vale o pedido — foi nele que fechou |
+| Preenche a **composição por material** da linha | Quando sabe a divisão: proposta de um material só, ou COMPLETO (PVC + alumínio). Senão fica "Composição pendente" e avisa no log |
+| Atualiza o **valor do negócio** | Quem faz é o próprio CRM: sem pedido vale o maior orçamento, com pedido vale o pedido. Negócio já ganho fica com o valor do fechamento |
 | Marca o orçamento como **feito** | Só nas filas de trabalho: *Orçamentos a Fazer* e *Atualizações* |
 | **Move o card** para *Orçamento Pronto* | Saindo das filas: *Orçamentos a Fazer* e *Atualizações* |
 

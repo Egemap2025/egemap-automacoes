@@ -997,6 +997,43 @@ def materiais_da_proposta(pdf_path):
     return materiais
 
 
+def composicao_da_proposta(pdf_path, materiais, valor):
+    """Quanto da proposta e de cada material, pro CRM preencher a composicao.
+
+    Desde 23/09/2026 cada linha do CRM mostra a divisao por material. Linha
+    sem isso fica com a etiqueta "Composicao pendente" no card e alguem tem
+    que preencher na mao -- era o que estava acontecendo com tudo o que o
+    monitor mandava.
+
+    So devolve quando tem CERTEZA da divisao:
+      - proposta de um material so: o valor inteiro vai nele;
+      - COMPLETO de PVC + aluminio: os dois totais que ja estao dentro do PDF
+        montado, e so se eles somarem exatamente o total da Pagina Final.
+
+    A conferencia da soma nao e frescura: o gatilho do banco recalcula o valor
+    da linha somando a composicao, entao uma divisao errada mudaria o valor da
+    proposta no CRM.
+
+    Um W-Vetro que traz madeira e aluminio no mesmo PDF sai com um total so:
+    nao da pra dividir, entao devolve vazio e a composicao fica pendente.
+    """
+    if crm_egemap is None or valor <= 0:
+        return []
+
+    if len(materiais) == 1:
+        material = crm_egemap.MATERIAL_NA_COMPOSICAO.get(next(iter(materiais)))
+        return [(material, valor)] if material else []
+
+    if materiais == {"pvc", "aluminio"}:
+        pvc = _valor(extract_total_pvc(pdf_path))
+        alm = _valor(extract_total_alm(pdf_path))
+        if pvc > 0 and alm > 0 and abs(pvc + alm - valor) <= 0.02:
+            return [(crm_egemap.MATERIAL_NA_COMPOSICAO["pvc"], pvc),
+                    (crm_egemap.MATERIAL_NA_COMPOSICAO["aluminio"], alm)]
+
+    return []
+
+
 # Proposta ja mandada ao CRM: caminho -> (mtime, tamanho)
 _JA_ENVIADO = {}
 # Proposta ja mandada ao Drive: caminho -> (mtime, tamanho)
@@ -1075,13 +1112,19 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
         nome_antigo = nome_da_linha(
             origem_antiga, materiais_do_nome_do_arquivo(origem_antiga) or materiais)
 
+    composicao = composicao_da_proposta(pdf_path, materiais, valor)
+    if not composicao:
+        log(f"[{client}] CRM: nao sei dividir {arquivo} por material — "
+            f"a composicao vai ficar pendente no card.")
+
     threading.Thread(
         target=crm_egemap.lancar_proposta,
         args=(pdf_path, client, valor, materiais),
         kwargs={"log": log,
                 "nome_linha": nome_da_linha(pdf_path, materiais),
                 "nome_antigo": nome_antigo,
-                "parcial": e_peca_de_completo(pdf_path)},
+                "parcial": e_peca_de_completo(pdf_path),
+                "composicao": composicao},
         daemon=True,
     ).start()
 

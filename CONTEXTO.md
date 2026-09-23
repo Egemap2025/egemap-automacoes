@@ -168,6 +168,54 @@ apagaria o primeiro. Como o nome vem do arquivo, as duas opções convivem — e
 renomear a proposta renomeia a linha em vez de criar outra (o rename é
 detectado e o nome anterior vai junto para o CRM saber qual linha atualizar).
 
+### O CRM mudou em 23/09/2026: composição, pedido e valor automático
+
+O Natanael mandou um print de um card com a etiqueta vermelha **"Composição
+pendente"** na linha do orçamento. Fui ver o projeto do CRM no Lovable
+(`CRM EGEMAP 2.0`, id `bdfb78cf-b7ce-4a79-baf5-6f03829164bd`) e achei três
+mudanças de uma vez — as migrations `0020`, `0024` e `0025`:
+
+**1. Composição por material.** Cada linha de orçamento agora tem itens numa
+tabela nova, `deal_budget_items` (material + valor). Linha sem item nenhum
+mostra "Composição pendente". Como o monitor não escrevia esses itens, TODA
+proposta que ele mandava ficava pendente.
+
+Um gatilho (`sync_budget_from_items`) recalcula `deal_budgets.value` como a
+**soma dos itens** e `material` como o material único ou `"Misto"`. Por isso a
+composição tem que fechar com o total: se a divisão estiver errada, o valor da
+proposta muda no CRM. O `composicao_da_proposta` só devolve divisão quando tem
+certeza, e confere a soma antes (tolerância de 2 centavos).
+
+Os nomes dos materiais têm que ser exatamente os do seletor da tela
+(`src/lib/materials.ts`): **Alumínio, PVC, Madeira, Outro**. "Misto" não é
+escolhível — é a etiqueta que o banco põe sozinho.
+
+**2. Pedido virou um tipo, não um nome.** `deal_budgets.tipo` é
+`'orcamento'` ou `'pedido'`, com **default `'orcamento'`**. O monitor não
+mandava esse campo, então todo pedido novo entraria como orçamento — apareceria
+na lista errada do card, e a trava de ganho ("Para marcar ganho, anexe o pedido
+e o contrato assinado") nunca acharia o pedido. A migration corrigiu os
+antigos uma vez só, por nome; novos não.
+
+Tem um índice único: **um pedido vigente por negócio**. Então o "Pedido 2" que
+o monitor criava não é mais possível — pedido novo marca o anterior com
+`substituido_em` (vira "Ver pedidos anteriores" no card), igual à tela faz.
+
+**3. O valor do negócio agora é calculado pelo próprio CRM**, num gatilho
+(`recalcular_valor_negocio`), com exatamente a regra que o Natanael tinha
+pedido em 04/09: pedido vigente manda; sem pedido, o maior orçamento. Tirei o
+cálculo do lado do Python — dois donos do mesmo número brigariam. O monitor só
+**lê** e conta no log.
+
+Uma diferença que vale lembrar: o gatilho do CRM só mexe em negócio com
+`status = 'open'`. Negócio já marcado como ganho tem o valor congelado, porque
+lá o número vem do fechamento (`deal_closings`, com desconto). O monitor avisa
+isso no log em vez de passar por cima.
+
+**O que fica pendente de propósito:** um W-Vetro que traz madeira e alumínio no
+mesmo PDF sai com um total só — não dá para dividir, e chutar mudaria o valor.
+Essas ficam "Composição pendente" e o monitor diz isso no log.
+
 ### Sem pedido, o valor do negócio é o MAIOR orçamento, não a soma
 
 **Por quê:** duas opções são alternativas — o cliente fecha uma. A Maria
@@ -181,12 +229,13 @@ o valor é estimativa; quando o pedido entra no card, ele manda, e proposta
 nova não mexe mais nisso (`atualizar_valor` devolve `"pedido"` e o
 `lancar_proposta` só registra no log que não mexeu).
 
-Dois pedidos no mesmo contrato **somam** — são pedidos diferentes do mesmo
-fechamento (a fábrica separou PVC e alumínio, por exemplo). Um pedido
-reeditado não cria linha nova: o `enviar_pedido` acha a linha pelo nome do
-arquivo, então "Pedido 2" só aparece quando é outro pedido mesmo.
+Dois pedidos vigentes no mesmo contrato **não existem mais**: desde 23/09/2026
+o banco tem índice único e o pedido novo manda o anterior para o histórico.
+(Eu tinha decidido somar os dois em 04/09 — o CRM resolveu a questão de outro
+jeito.) Um pedido reeditado continua caindo na mesma linha, porque o
+`enviar_pedido` acha a linha pelo nome do arquivo.
 
-### O valor é atualizado em QUALQUER etapa
+### O valor é atualizado em QUALQUER etapa (hoje quem faz é o CRM)
 
 Foi o contrário até 04/09/2026: o valor só era mexido até "Orçamento Pronto",
 porque havia 97 negócios em *Apresentado*, *Negociação* e *Contrato* com valor
@@ -200,6 +249,9 @@ sobrescrito quando o pedido chega, que é quando ele realmente é definitivo.
 
 Hoje toda proposta escreve uma linha no log dizendo o que aconteceu com o
 valor — não existe mais o caso silencioso.
+
+**Atualização de 23/09/2026:** quem passou a fazer essa conta é o próprio CRM,
+com a mesma regra. O Python só lê. Ver a seção da mudança do CRM acima.
 
 ### "MAD ALM" não vai pro CRM nem pro Drive
 

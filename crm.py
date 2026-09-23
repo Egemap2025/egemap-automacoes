@@ -7,7 +7,7 @@ que voce fazia na mao:
 
   1. Acha o cliente pelo nome da pasta
   2. Lanca o orcamento (nome + valor) e anexa o PDF da proposta
-  3. Atualiza o valor do negocio (a maior das opcoes, ou o pedido)
+  3. Preenche a composicao por material da linha
   4. Marca o orcamento como feito
   5. Arrasta o cliente para "Orcamento Pronto"
 
@@ -19,9 +19,17 @@ BRANCO.pdf" vira a linha "Branco". Entao duas opcoes do mesmo material
 (BRANCO e CINZA) sao duas linhas e convivem, e renomear a proposta renomeia
 a linha em vez de criar outra.
 
-O valor do negocio e atualizado em qualquer etapa do funil. Enquanto e
-orcamento, vale a MAIOR das opcoes; assim que o pedido de fabrica entra no
-card, o valor passa a ser o do pedido -- foi nele que o negocio fechou.
+Desde 23/09/2026 quem calcula o valor do negocio e o PROPRIO CRM, num gatilho
+do banco, com a regra que ja era a nossa: o pedido vigente manda e, sem
+pedido, vale o MAIOR orcamento. O monitor so le e conta no log -- se
+escrevesse tambem, os dois brigariam. Negocio ja marcado como ganho tem o
+valor congelado pelo CRM, porque la o numero vem do fechamento.
+
+Cada linha tem tambem a COMPOSICAO por material: quanto dela e de PVC, de
+aluminio, de madeira. Linha sem composicao aparece no card com a etiqueta
+"Composicao pendente". O monitor preenche sozinho quando sabe a divisao --
+proposta de um material so, ou COMPLETO, onde ele ja leu os dois totais na
+hora de juntar.
 
 Os passos 4 e 5 tem freio:
 
@@ -35,9 +43,10 @@ Os passos 4 e 5 tem freio:
     cliente pediu duas opcoes separadas (uma em PVC e outra em Aluminio), o
     card espera as duas sairem.
 
-Depois que o contrato fecha, o mesmo modulo poe o PDF do PEDIDO no card, como
-mais uma linha ("Pedido") ao lado da proposta -- so em quem esta na etapa
-"Contrato", e sem tirar nada do que ja estava anexado.
+Depois que o contrato fecha, o mesmo modulo poe o PDF do PEDIDO no card, no
+lugar proprio dele ("Pedido e contrato") -- so em quem esta na etapa
+"Contrato", e sem tirar nada do que ja estava anexado. O CRM so aceita um
+pedido vigente por negocio: pedido novo manda o anterior para o historico.
 
 Conversa com o CRM usando o seu proprio login (mesma permissao que voce tem na
 tela). Sem dependencia externa: so a biblioteca padrao do Python.
@@ -91,14 +100,27 @@ NOME_LINHA_PEDIDO = "Pedido"
 STATUS_QUE_VALEM = ("open", "won")
 
 
-def e_linha_de_pedido(nome):
-    """A linha e um pedido de fabrica: "Pedido", "Pedido 2", "Pedido 3"...
+# ── Composicao por material (novidade do CRM em 23/09/2026) ──────────────────
 
-    Serve pra separar pedido de orcamento na hora de calcular o valor do
-    negocio. Compara a primeira palavra, sem acento nem maiuscula.
-    """
-    palavras = normalizar(nome or "").split()
-    return bool(palavras) and palavras[0] == normalizar(NOME_LINHA_PEDIDO)
+# Cada linha de orcamento/pedido tem agora a "composicao": quanto dela e de
+# cada material. Linha sem composicao aparece no CRM com a etiqueta vermelha
+# "Composicao pendente" e alguem tem que preencher na mao.
+#
+# Os nomes tem que ser EXATAMENTE estes -- sao os que a tela oferece no
+# seletor (src/lib/materials.ts). "Misto" nao e escolhivel: e a etiqueta que
+# o proprio banco poe na linha quando ela tem mais de um material.
+MATERIAL_NA_COMPOSICAO = {
+    "pvc": "PVC",
+    "aluminio": "Alumínio",
+    "madeira": "Madeira",
+}
+MATERIAL_MISTO = "Misto"
+
+
+def _agora():
+    """Agora, no formato que o banco do CRM guarda."""
+    return datetime.now(timezone.utc).isoformat()
+
 
 CONFIG_FILE = Path.home() / ".egemap_crm_config.json"
 
@@ -445,8 +467,34 @@ class CRM:
         except Exception:
             pass  # arquivo orfao no storage nao quebra nada
 
+    def _trocar_composicao(self, linha_id, composicao):
+        """Reescreve a composicao por material de uma linha de orcamento.
+
+        Apaga a que estava e poe a nova, igual ao que a tela do CRM faz. O
+        banco tem um gatilho que, depois disso, recalcula sozinho o valor e o
+        material da linha a partir dos itens -- por isso os itens tem que
+        somar exatamente o total da proposta.
+        """
+        if not composicao:
+            return
+        self._tabela("deal_budget_items", f"budget_id=eq.{linha_id}", "DELETE")
+        self._tabela("deal_budget_items", "", "POST", [
+            {"budget_id": linha_id, "material": material,
+             "value": round(float(parcela), 2), "sort_order": i}
+            for i, (material, parcela) in enumerate(composicao)
+        ])
+
+    @staticmethod
+    def _material_da_linha(composicao):
+        """O que vai na coluna 'material' da linha: um so, ou 'Misto'."""
+        if not composicao:
+            return None
+        if len(composicao) == 1:
+            return composicao[0][0]
+        return MATERIAL_MISTO
+
     def enviar_orcamento(self, negocio, pdf_path, nome_orcamento, materiais,
-                         valor, nome_antigo=None):
+                         valor, nome_antigo=None, composicao=None):
         """Sobe o PDF e cria (ou atualiza) a linha de orcamento do negocio.
 
         Quem identifica a linha e o NOME, que vem do nome do arquivo. Assim
@@ -466,9 +514,12 @@ class CRM:
         """
         negocio_id = negocio["id"]
 
+        # So linha de orcamento entra na conta: o pedido tem lugar proprio no
+        # CRM e nunca pode ser substituido por uma proposta.
         existentes = self._tabela(
             "deal_budgets",
-            f"select=id,name,value,file_url,file_name,created_at&deal_id=eq.{negocio_id}",
+            "select=id,name,value,file_url,file_name,created_at"
+            f"&deal_id=eq.{negocio_id}&tipo=eq.orcamento",
         )
 
         def substitui(linha):
@@ -488,52 +539,56 @@ class CRM:
             "value": valor,
             "file_url": caminho,
             "file_name": Path(pdf_path).name,
+            "tipo": "orcamento",
             "created_by": self.user_id,
         }
+        # So mexe no material quando sabemos a composicao. Mandar None
+        # apagaria o que alguem tivesse preenchido na mao.
+        if composicao:
+            registro["material"] = self._material_da_linha(composicao)
 
         if substituir:
-            self._tabela("deal_budgets", f"id=eq.{substituir[0]['id']}", "PATCH", registro)
-            for velho in substituir[1:]:
-                self._tabela("deal_budgets", f"id=eq.{velho['id']}", "DELETE")
-            for velho in substituir:
-                arquivo = velho.get("file_url")
+            linha_id = substituir[0]["id"]
+            self._tabela("deal_budgets", f"id=eq.{linha_id}", "PATCH", registro)
+            for antiga in substituir[1:]:
+                self._tabela("deal_budgets", f"id=eq.{antiga['id']}", "DELETE")
+            for antiga in substituir:
+                arquivo = antiga.get("file_url")
                 if arquivo and not str(arquivo).startswith("http"):
                     self._apagar_pdf(arquivo)
         else:
-            self._tabela("deal_budgets", "", "POST", {**registro, "deal_id": negocio_id})
+            criada = self._tabela("deal_budgets", "select=id", "POST",
+                                  {**registro, "deal_id": negocio_id}, retornar=True)
+            linha_id = criada[0]["id"] if criada else None
+
+        if linha_id:
+            self._trocar_composicao(linha_id, composicao)
 
         return len(substituir)
 
-    def atualizar_valor(self, negocio_id):
-        """Valor do negocio: o pedido manda; sem pedido, o MAIOR orcamento.
+    def valor_do_negocio(self, negocio_id):
+        """Le o valor do negocio e de onde ele veio. NAO escreve nada.
 
-        Enquanto e orcamento, o cliente tem opcoes (ex.: PVC branco e PVC
-        cinza) e vai fechar uma so -- somar as duas inflaria a previsao de
-        vendas, e a maior mostra o teto do negocio.
+        Desde 23/09/2026 quem calcula isso e o proprio CRM, num gatilho do
+        banco (recalcular_valor_negocio), com a regra que o Natanael pediu:
+        o pedido vigente manda; sem pedido, vale o MAIOR orcamento. O monitor
+        so le pra contar no log -- se escrevesse tambem, os dois brigariam.
 
-        Quando o PDF do pedido de fabrica chega, o negocio ja fechou: o valor
-        passa a ser o do pedido, que e o numero real. Mais de um pedido no
-        mesmo contrato sao pedidos diferentes do mesmo fechamento (a fabrica
-        separou PVC e aluminio, por exemplo), entao ai eles somam.
+        O CRM congela o valor de negocio ja marcado como GANHO, porque la o
+        numero vem do fechamento (com desconto). Por isso o monitor avisa,
+        em vez de passar por cima.
 
-        Devolve (valor, "pedido" ou "orcamento").
+        Devolve (valor, "pedido" ou "orcamento", mexe_sozinho).
         """
-        linhas = self._tabela("deal_budgets",
-                              f"select=name,value&deal_id=eq.{negocio_id}")
-        pedidos, orcamentos = [], []
-        for linha in linhas:
-            if linha.get("value") is None:
-                continue
-            alvo = pedidos if e_linha_de_pedido(linha.get("name")) else orcamentos
-            alvo.append(float(linha["value"]))
+        negocios = self._tabela("deals", f"select=value,status&id=eq.{negocio_id}")
+        valor = float((negocios[0].get("value") or 0) if negocios else 0)
+        aberto = bool(negocios) and negocios[0].get("status") == "open"
 
-        if pedidos:
-            valor, origem = sum(pedidos), "pedido"
-        else:
-            valor, origem = max(orcamentos, default=0.0), "orcamento"
-
-        self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {"value": valor})
-        return valor, origem
+        pedidos = self._tabela(
+            "deal_budgets",
+            f"select=id&deal_id=eq.{negocio_id}&tipo=eq.pedido&substituido_em=is.null",
+        )
+        return valor, ("pedido" if pedidos else "orcamento"), aberto
 
     def marcar_feito(self, negocio, materiais):
         """Marca como feitos os orcamentos que esta proposta cobre.
@@ -640,71 +695,109 @@ class CRM:
             )
         return negocio
 
-    @staticmethod
-    def _nome_livre_pedido(existentes):
-        """"Pedido" quando ainda nao tem nenhum; senao "Pedido 2", "Pedido 3"...
+    def composicao_herdada(self, negocio_id, valor):
+        """Composicao do pedido, copiada do orcamento quando nao ha duvida.
 
-        Um contrato pode receber mais de um pedido, e nenhum pode tomar o
-        lugar do outro.
+        O PDF do pedido nao diz de que material ele e. Quando todos os
+        orcamentos do negocio sao de UM material so, o pedido e daquele
+        material e o valor inteiro vai nele. Quando misturam materiais nao da
+        pra dividir -- o pedido costuma vir negociado, e chutar a divisao
+        seria pior do que deixar pendente pra alguem preencher.
         """
-        usados = {normalizar(b.get("name")) for b in existentes}
-        if normalizar(NOME_LINHA_PEDIDO) not in usados:
-            return NOME_LINHA_PEDIDO
-        n = 2
-        while normalizar(f"{NOME_LINHA_PEDIDO} {n}") in usados:
-            n += 1
-        return f"{NOME_LINHA_PEDIDO} {n}"
+        if valor <= 0:
+            return []
+        linhas = self._tabela(
+            "deal_budgets",
+            f"select=id&deal_id=eq.{negocio_id}&tipo=eq.orcamento",
+        )
+        if not linhas:
+            return []
+        ids = ",".join(l["id"] for l in linhas)
+        itens = self._tabela("deal_budget_items",
+                             f"select=material&budget_id=in.({ids})")
+        materiais = {i.get("material") for i in itens if i.get("material")}
+        materiais.discard(MATERIAL_MISTO)
+        if len(materiais) == 1:
+            return [(materiais.pop(), valor)]
+        return []
 
-    def enviar_pedido(self, negocio, pdf_path, valor, arquivo_antigo=None):
-        """Acrescenta o pedido na lista de orcamentos do contrato.
+    def enviar_pedido(self, negocio, pdf_path, valor, arquivo_antigo=None,
+                      composicao=None):
+        """Poe o pedido de fabrica no card, no lugar proprio dele.
 
-        NUNCA tira o que ja esta la: a proposta anexada quando o orcamento
-        saiu continua no lugar dela. A unica linha que este metodo substitui
-        e a do PROPRIO pedido -- quando o mesmo arquivo e salvo de novo
-        depois de editado, ou quando ele so foi renomeado.
+        NUNCA tira os orcamentos: a proposta anexada quando o orcamento saiu
+        continua onde estava. So mexe na linha do PROPRIO pedido.
 
-        Retorna (nome_da_linha, atualizou, quantas_ficaram_intactas).
+        O CRM so aceita UM pedido vigente por negocio (indice unico no banco).
+        Entao, quando chega um pedido novo e ja existe outro vigente, o
+        anterior e marcado como substituido -- ele nao some, fica guardado em
+        "Ver pedidos anteriores" no card. E o mesmo que a tela do CRM faz.
+
+        Retorna (nome_da_linha, atualizou, orcamentos_intactos, substituiu).
         """
         negocio_id = negocio["id"]
         arquivo = Path(pdf_path).name
 
         existentes = self._tabela(
             "deal_budgets",
-            f"select=id,name,value,file_url,file_name&deal_id=eq.{negocio_id}",
+            "select=id,name,value,file_url,file_name,tipo,substituido_em"
+            f"&deal_id=eq.{negocio_id}",
         )
+        pedidos = [b for b in existentes if b.get("tipo") == "pedido"]
+        orcamentos = [b for b in existentes if b.get("tipo") != "pedido"]
 
         # A linha do pedido e reconhecida pelo nome do arquivo, e nao pelo
         # nome da linha: assim o mesmo pedido editado de novo cai na mesma
-        # linha, em vez de virar "Pedido 2".
+        # linha, em vez de virar um pedido novo.
         nomes = {arquivo.strip().lower()}
         if arquivo_antigo:
             nomes.add(Path(arquivo_antigo).name.strip().lower())
         anterior = next(
-            (b for b in existentes
+            (b for b in pedidos
              if (b.get("file_name") or "").strip().lower() in nomes),
             None,
         )
+        vigente = next((b for b in pedidos if not b.get("substituido_em")), None)
 
         caminho = self._subir_pdf(negocio_id, pdf_path)
         registro = {
+            "name": NOME_LINHA_PEDIDO,
             "value": valor,
             "file_url": caminho,
             "file_name": arquivo,
+            "tipo": "pedido",
             "created_by": self.user_id,
         }
+        if composicao:
+            registro["material"] = self._material_da_linha(composicao)
 
+        # O card mostra "feito a partir de <orcamento>". Quando o negocio tem
+        # um orcamento so, nao ha duvida de qual e; com varios, quem escolhe e
+        # quem sabe -- o monitor nao chuta.
+        if len(orcamentos) == 1:
+            registro["orcamento_base_id"] = orcamentos[0]["id"]
+
+        substituiu = False
         if anterior:
-            # Mantem o nome que a linha ja tinha: "Pedido 2" continua "Pedido 2"
             registro["name"] = anterior.get("name") or NOME_LINHA_PEDIDO
             self._tabela("deal_budgets", f"id=eq.{anterior['id']}", "PATCH", registro)
+            linha_id = anterior["id"]
             velho = anterior.get("file_url")
             if velho and velho != caminho and not str(velho).startswith("http"):
                 self._apagar_pdf(velho)
         else:
-            registro["name"] = self._nome_livre_pedido(existentes)
-            self._tabela("deal_budgets", "", "POST", {**registro, "deal_id": negocio_id})
+            if vigente:
+                self._tabela("deal_budgets", f"id=eq.{vigente['id']}", "PATCH",
+                             {"substituido_em": _agora()})
+                substituiu = True
+            criada = self._tabela("deal_budgets", "select=id", "POST",
+                                  {**registro, "deal_id": negocio_id}, retornar=True)
+            linha_id = criada[0]["id"] if criada else None
 
-        return registro["name"], bool(anterior), len(existentes) - (1 if anterior else 0)
+        if linha_id:
+            self._trocar_composicao(linha_id, composicao)
+
+        return registro["name"], bool(anterior), len(orcamentos), substituiu
 
 
 # ── Ponto de entrada usado pelo monitor ───────────────────────────────────────
@@ -745,7 +838,8 @@ def materiais_do_nome(nome):
 
 
 def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
-                    nome_linha=None, nome_antigo=None, parcial=False):
+                    nome_linha=None, nome_antigo=None, parcial=False,
+                    composicao=None):
     """Faz o fluxo inteiro no CRM. Nunca levanta excecao: registra no log.
 
     pdf_path    -- proposta comercial ja pronta (com Capa e Pagina Final)
@@ -775,16 +869,19 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
         # 1. O PDF mais novo sempre fica no orcamento, em qualquer etapa --
         #    e assim que o vendedor pega a proposta atual sozinho.
         substituidos = crm.enviar_orcamento(negocio, pdf_path, nome_linha,
-                                            materiais, valor, nome_antigo)
+                                            materiais, valor, nome_antigo,
+                                            composicao=composicao)
         acao = "Atualizado" if substituidos else "Lancado"
         log(f"[{cliente}] CRM: {acao} '{nome_linha}' em '{titulo}' "
             f"({_nome_etapa(negocio)}) — {_reais(valor)}")
 
-        # 2. Valor do negocio: atualizado em qualquer etapa. Se o pedido de
-        #    fabrica ja entrou no card, quem manda e ele -- o negocio fechou
-        #    naquele numero, e a proposta nao mexe mais nisso.
-        total, origem = crm.atualizar_valor(negocio["id"])
-        if origem == "pedido":
+        # 2. Valor do negocio: quem faz agora e o proprio CRM, assim que a
+        #    linha entra. O monitor so le e conta no log.
+        total, origem, aberto = crm.valor_do_negocio(negocio["id"])
+        if not aberto:
+            log(f"[{cliente}] CRM: valor do negocio continua {_reais(total)} "
+                f"— negocio ja fechado, o CRM trava o valor.")
+        elif origem == "pedido":
             log(f"[{cliente}] CRM: valor do negocio continua {_reais(total)} "
                 f"— e o do pedido, que ja fechou.")
         elif total > valor:
@@ -822,7 +919,8 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
     return False
 
 
-def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None):
+def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None,
+                  composicao=None):
     """Poe o PDF do pedido no card do cliente. Nunca levanta excecao.
 
     E o passo depois da proposta: contrato fechado, o pedido de fabrica entra
@@ -844,19 +942,30 @@ def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None):
         crm = CRM().entrar()
         negocio = crm.encontrar_contrato(cliente)
 
-        nome, atualizou, intactas = crm.enviar_pedido(
-            negocio, pdf_path, valor, arquivo_antigo)
+        if not composicao:
+            composicao = crm.composicao_herdada(negocio["id"], valor)
+
+        nome, atualizou, intactas, substituiu = crm.enviar_pedido(
+            negocio, pdf_path, valor, arquivo_antigo, composicao=composicao)
 
         acao = "Atualizado" if atualizou else "Lancado"
-        junto = f", junto das {intactas} linha(s) que ja estavam la" if intactas else ""
+        junto = f", junto dos {intactas} orcamento(s) que ja estavam la" if intactas else ""
         log(f"[{cliente}] CRM: {acao} '{nome}' em '{negocio.get('title')}' "
             f"({ETAPA_PEDIDO}) — {_reais(valor)}{junto}")
+        if substituiu:
+            log(f"[{cliente}] CRM: o pedido anterior virou historico "
+                f"('Ver pedidos anteriores' no card).")
+        if not composicao:
+            log(f"[{cliente}] CRM: nao da pra saber o material do pedido — "
+                f"a composicao dele fica pendente no card.")
 
-        # O pedido e o numero fechado: passa a ser o valor do negocio, no
-        # lugar do orcamento que estava la.
-        total, _ = crm.atualizar_valor(negocio["id"])
-        log(f"[{cliente}] CRM: valor do negocio agora e {_reais(total)} "
-            f"— pelo pedido.")
+        total, _, aberto = crm.valor_do_negocio(negocio["id"])
+        if aberto:
+            log(f"[{cliente}] CRM: valor do negocio agora e {_reais(total)} "
+                f"— pelo pedido.")
+        else:
+            log(f"[{cliente}] CRM: valor do negocio continua {_reais(total)} "
+                f"— negocio ja fechado, o CRM trava o valor.")
         return True
 
     except ClienteNaoEncontrado as e:
