@@ -1125,6 +1125,8 @@ def _descreve_vidro(spec):
     """Descricao amigavel do vidro para o preview. Detecta nome/cor
     (incolor por padrao), espessura e tipo (temperado/comum/laminado)."""
     low = spec.lower()
+    if "sem vidro" in low or _sem_acento(low).strip() in ("sem", "nao", "n/a", "na", "sv"):
+        return "SEM VIDRO"
     nome = None
     for k, v in NOMES_VIDRO:
         if k in low:
