@@ -534,10 +534,30 @@ A ordem importa: a conferência do nome fraco vem **antes** do empate. Ao
 contrário, "Leticia Borges Nedel" sairia do empate escolhendo a "Leticia"
 aberta, que é outra pessoa.
 
+Depois o Natanael lembrou que **às vezes o cliente tem um nome só mesmo** —
+e que nome repetido é raro, porque o sistema de orçamentos também não aceita.
+Isso me fez testar os dois extremos e achar mais dois buracos:
+
+- **Nome único funciona, desde que case com o TÍTULO do card.** Os 20 clientes
+  de uma palavra só ("Adriana", "Kawue", "Marcelo") caem certo, porque
+  igualdade com o título conta como reconhecimento forte. Já uma igualdade só
+  com o **contato** não conta: o contato do card "Matheus Gobbo Darolt" está
+  gravado como "Matheus", e quatro cards têm esse nome — ali é dúvida.
+- **Zero palavras em comum nunca é o cliente.** "Marco" caía no card "Marcio"
+  (0,909 de parecença de letras, nenhuma palavra igual). Letra trocada é outro
+  cliente — a mesma regra do Bitencourt x Bitencurt.
+
+O reconhecimento é considerado **forte** quando o nome da pasta é igual ao
+título do card, ou quando os dois nomes têm **duas palavras** em comum. Fora
+disso, a semelhança só vale se nenhum outro card tiver a mesma palavra.
+
 Resultado da varredura com os 228 cards reais, usando o nome de cada um como
 se fosse o nome da pasta:
 
     certo = 222    dúvida = 6    errado = 0
+
+Mais duas varreduras: os 20 clientes de nome único caem 20/20 no card certo, e
+nenhum dos 208 nomes completos vai parar em card de outra pessoa.
 
 As 6 dúvidas são duplicidades de verdade no CRM (Completa Saúde x Completa
 Trabalho, Paula Bez x Paula BEz, Valdir Coppini duplicado, Cristiano Paulo de

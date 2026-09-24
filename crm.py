@@ -409,7 +409,12 @@ class CRM:
 
     @staticmethod
     def _nomes_do_negocio(negocio):
-        nomes = [negocio.get("title") or ""]
+        """[(nome, e_o_titulo?)] do card: o titulo e o nome do contato.
+
+        Saber qual dos dois casou importa: o titulo e o nome do negocio, e o
+        contato as vezes esta gravado so com o primeiro nome.
+        """
+        nomes = [(negocio.get("title") or "", True)]
         contato = negocio.get("contacts") or {}
         if isinstance(contato, list):
             contato = contato[0] if contato else {}
@@ -417,22 +422,20 @@ class CRM:
             p for p in [contato.get("first_name"), contato.get("last_name")] if p
         )
         if nome_contato:
-            nomes.append(nome_contato)
-        return [n for n in nomes if n]
+            nomes.append((nome_contato, False))
+        return [(n, e_titulo) for n, e_titulo in nomes if n]
 
     def _ranquear(self, cliente, candidatos):
-        """[(nota, palavras_em_comum, negocio)], do mais parecido pro menos."""
+        """[(nota, palavras_em_comum, e_titulo, negocio)], do melhor pro pior."""
         notas = []
         for neg in candidatos:
-            nomes = self._nomes_do_negocio(neg)
-            if not nomes:
-                continue
-            nota, comuns = max(
-                ((_semelhanca(cliente, n), _palavras_em_comum(cliente, n))
-                 for n in nomes),
-                key=lambda par: par[0],
-            )
-            notas.append((nota, comuns, neg))
+            melhor = (0.0, set(), False)
+            for nome, e_titulo in self._nomes_do_negocio(neg):
+                nota = _semelhanca(cliente, nome)
+                if nota > melhor[0]:
+                    melhor = (nota, _palavras_em_comum(cliente, nome), e_titulo)
+            if melhor[0] > 0:
+                notas.append((*melhor, neg))
         notas.sort(key=lambda x: x[0], reverse=True)
         return notas
 
@@ -441,24 +444,37 @@ class CRM:
         """Retorna (negocio, duvida). negocio None se nao deu pra decidir."""
         if not notas:
             return None, None
-        melhor, comuns, negocio = notas[0]
+        melhor, comuns, e_titulo, negocio = notas[0]
         if melhor < LIMITE_SEMELHANCA:
             return None, None
 
-        # Um primeiro nome sozinho nao identifica ninguem. Quase metade dos
-        # cards tem o contato gravado so com o primeiro nome ("Alexandre"),
-        # e o nome da pasta cai dentro dele com nota alta. Foi assim que a
-        # proposta do "Alexandre Fernandes Pereira" entrou no card do
-        # "Alexandre Chistiano de Oliveira" em 24/09/2026.
-        #
-        # So vale quando nenhum outro card do CRM tem esse mesmo nome -- ai
-        # nao ha com quem confundir. Esta conferencia vem ANTES do empate:
-        # senao "Leticia Borges Nedel" sairia do empate escolhendo a
-        # "Leticia" aberta, que e outra pessoa.
-        if len(comuns) <= 1 and melhor < 1.0:
+        # Quando o reconhecimento e FORTE, a nota vale sozinha:
+        #   - o nome da pasta e igualzinho ao TITULO do card (cliente de um
+        #     nome so, como "Adriana" ou "Kawue", cai aqui); ou
+        #   - os dois nomes tem duas palavras em comum -- nome e sobrenome
+        #     ja reconhecem uma pessoa.
+        forte = (melhor >= 1.0 and e_titulo) or len(comuns) >= 2
+
+        if not forte:
+            # Nenhuma palavra inteira em comum: e so parecenca de letras, e
+            # letra trocada e outro cliente ("Marco" x "Marcio", "Bitencourt"
+            # x "Bitencurt"). Nao lanca.
+            if not comuns:
+                return None, None
+
+            # Um primeiro nome sozinho nao identifica ninguem. Quase metade
+            # dos cards tem o contato gravado so com o primeiro nome
+            # ("Alexandre"), e o nome da pasta cai dentro dele com nota alta.
+            # Foi assim que a proposta do "Alexandre Fernandes Pereira" entrou
+            # no card do "Alexandre Chistiano de Oliveira" em 24/09/2026.
+            #
+            # So vale quando nenhum outro card tem esse mesmo nome -- ai nao
+            # ha com quem confundir. Esta conferencia vem ANTES do empate:
+            # senao "Leticia Borges Nedel" sairia do empate escolhendo a
+            # "Leticia" aberta, que e outra pessoa.
             outro = next((n for n in notas[1:] if n[1] & comuns), None)
             if outro:
-                return None, (negocio, outro[2])
+                return None, (negocio, outro[3])
 
         empatados = [n for n in notas if melhor - n[0] < MARGEM_DESEMPATE]
         if len(empatados) > 1:
@@ -470,10 +486,10 @@ class CRM:
             # Paulo de Matos" e "Cristiano Mat" quase empatam e sao duas
             # pessoas -- ali o card aberto nao pode ganhar do exato.
             abertos = [n for n in empatados
-                       if n[0] >= melhor - 1e-9 and n[2].get("status") == "open"]
+                       if n[0] >= melhor - 1e-9 and n[3].get("status") == "open"]
             if len(abertos) == 1:
-                return abertos[0][2], None
-            return None, (negocio, empatados[1][2])
+                return abertos[0][3], None
+            return None, (negocio, empatados[1][3])
 
         return negocio, None
 
