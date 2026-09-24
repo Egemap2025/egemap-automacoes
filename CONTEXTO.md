@@ -499,6 +499,54 @@ frentes no mesmo arquivo custam caro.
 
 ## Armadilhas conhecidas (todas já custaram caro uma vez)
 
+### Um primeiro nome sozinho não identifica cliente nenhum
+
+O pior erro até hoje. Em 24/09/2026 a proposta do **Alexandre Fernandes
+Pereira** foi lançada no card do **Alexandre Chistiano de Oliveira** — outro
+cliente — e substituiu o orçamento que estava lá.
+
+Por quê: o card do Chistiano tem o contato gravado só como **"Alexandre"**. A
+regra do `_semelhanca` dava nota 0,90 para "nome contido no outro" ("Lara"
+dentro de "Lara Castilho"), e 0,90 passa do limite de 0,82. Não havia empate
+para segurar, porque os outros dois Alexandres do CRM estavam **ganhos** e a
+busca só olhava os abertos.
+
+Não é um caso isolado: **98 dos 228 cards** têm o contato só com o primeiro
+nome, e 20 cards têm o título de uma palavra só. Na varredura, "Marcelo
+Correia Coelho" também caía no card "Marcelo".
+
+Três mudanças, validadas contra uma cópia real dos 228 cards:
+
+1. **Nome fraco não decide.** Quando a nota veio de **uma palavra só** em
+   comum e não é igualdade exata, só vale se nenhum outro card tiver essa
+   mesma palavra. Senão é dúvida, e o monitor não lança.
+2. **A busca passou a incluir os ganhos** (`negocios_que_valem`). Não é para
+   lançar em negócio fechado — é para o homônimo aparecer e disputar. Sem
+   isso, o "Alexandre" errado ganhava sozinho.
+3. **Empate exato prefere o card aberto.** Cliente que volta às vezes tem dois
+   cards com o mesmo nome (Luciano Sonneborn, Construtora Pepe, Paula Bez):
+   o orçamento novo é do aberto. Exige nota **igual**, não parecida — senão
+   "Cristiano Paulo de Matos" (ganho) perderia para "Cristiano Mat" (aberto),
+   que é outra pessoa. Esse caso apareceu na varredura e me fez apertar a
+   regra.
+
+A ordem importa: a conferência do nome fraco vem **antes** do empate. Ao
+contrário, "Leticia Borges Nedel" sairia do empate escolhendo a "Leticia"
+aberta, que é outra pessoa.
+
+Resultado da varredura com os 228 cards reais, usando o nome de cada um como
+se fosse o nome da pasta:
+
+    certo = 222    dúvida = 6    errado = 0
+
+As 6 dúvidas são duplicidades de verdade no CRM (Completa Saúde x Completa
+Trabalho, Paula Bez x Paula BEz, Valdir Coppini duplicado, Cristiano Paulo de
+Matos x Cristiano Mat). Nesses o monitor diz no log quais são os dois cards.
+
+**A lição:** errar para o lado de não lançar custa uma linha no log. Errar
+para o lado de lançar apaga o orçamento de outro cliente.
+
+
 ### OneDrive travando arquivo
 
 A pasta fica dentro do OneDrive, que **segura o arquivo enquanto sincroniza**.

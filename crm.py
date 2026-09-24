@@ -250,6 +250,15 @@ def _semelhanca(a, b):
     return min(base, 1.0)
 
 
+def _palavras_em_comum(a, b):
+    """Palavras que os dois nomes tem em comum, sem acento nem maiuscula.
+
+    E o que diz o quanto a semelhanca vale: dois nomes em comum reconhecem
+    uma pessoa, um so ("Alexandre") nao reconhece ninguem.
+    """
+    return set(normalizar(a).split()) & set(normalizar(b).split())
+
+
 def _sanitizar_arquivo(nome):
     """Nome do arquivo dentro do storage do CRM. Sai SO com ASCII.
 
@@ -412,10 +421,18 @@ class CRM:
         return [n for n in nomes if n]
 
     def _ranquear(self, cliente, candidatos):
-        notas = [
-            (max(_semelhanca(cliente, n) for n in self._nomes_do_negocio(neg)), neg)
-            for neg in candidatos if self._nomes_do_negocio(neg)
-        ]
+        """[(nota, palavras_em_comum, negocio)], do mais parecido pro menos."""
+        notas = []
+        for neg in candidatos:
+            nomes = self._nomes_do_negocio(neg)
+            if not nomes:
+                continue
+            nota, comuns = max(
+                ((_semelhanca(cliente, n), _palavras_em_comum(cliente, n))
+                 for n in nomes),
+                key=lambda par: par[0],
+            )
+            notas.append((nota, comuns, neg))
         notas.sort(key=lambda x: x[0], reverse=True)
         return notas
 
@@ -424,21 +441,56 @@ class CRM:
         """Retorna (negocio, duvida). negocio None se nao deu pra decidir."""
         if not notas:
             return None, None
-        melhor, negocio = notas[0]
+        melhor, comuns, negocio = notas[0]
         if melhor < LIMITE_SEMELHANCA:
             return None, None
-        if len(notas) > 1 and melhor - notas[1][0] < MARGEM_DESEMPATE:
-            return None, (negocio, notas[1][1])
+
+        # Um primeiro nome sozinho nao identifica ninguem. Quase metade dos
+        # cards tem o contato gravado so com o primeiro nome ("Alexandre"),
+        # e o nome da pasta cai dentro dele com nota alta. Foi assim que a
+        # proposta do "Alexandre Fernandes Pereira" entrou no card do
+        # "Alexandre Chistiano de Oliveira" em 24/09/2026.
+        #
+        # So vale quando nenhum outro card do CRM tem esse mesmo nome -- ai
+        # nao ha com quem confundir. Esta conferencia vem ANTES do empate:
+        # senao "Leticia Borges Nedel" sairia do empate escolhendo a
+        # "Leticia" aberta, que e outra pessoa.
+        if len(comuns) <= 1 and melhor < 1.0:
+            outro = next((n for n in notas[1:] if n[1] & comuns), None)
+            if outro:
+                return None, (negocio, outro[2])
+
+        empatados = [n for n in notas if melhor - n[0] < MARGEM_DESEMPATE]
+        if len(empatados) > 1:
+            # Mesmo nome em dois cards, um aberto e um ja ganho (acontece
+            # quando o cliente volta e alguem refaz o card): o orcamento novo
+            # e do aberto. Com dois abertos parecidos nao da pra decidir.
+            #
+            # Exige nota IGUAL a do primeiro, nao so parecida: "Cristiano
+            # Paulo de Matos" e "Cristiano Mat" quase empatam e sao duas
+            # pessoas -- ali o card aberto nao pode ganhar do exato.
+            abertos = [n for n in empatados
+                       if n[0] >= melhor - 1e-9 and n[2].get("status") == "open"]
+            if len(abertos) == 1:
+                return abertos[0][2], None
+            return None, (negocio, empatados[1][2])
+
         return negocio, None
 
     def encontrar_negocio(self, cliente):
-        """Acha o card do cliente entre todos os negocios abertos.
+        """Acha o card do cliente entre os negocios que ainda valem.
 
         Procura em todas as etapas (e nao so na fila) porque o cliente certo
         pode ja ter passado: olhar so a coluna faria uma pasta "Samuel Neotti"
         cair no card "Samuel".
+
+        Olha tambem os ja GANHOS, desde 24/09/2026. Nao e pra lancar proposta
+        em negocio fechado -- e pra o homonimo aparecer. O card certo do
+        "Alexandre Fernandes Pereira" estava ganho, ficava de fora da busca, e
+        sem ele o "Alexandre" do card errado ganhava sozinho.
         """
-        negocio, duvida = self._escolher(self._ranquear(cliente, self.negocios_abertos()))
+        negocio, duvida = self._escolher(
+            self._ranquear(cliente, self.negocios_que_valem()))
 
         if duvida:
             raise ClienteNaoEncontrado(
