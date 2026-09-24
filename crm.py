@@ -259,6 +259,50 @@ def _palavras_em_comum(a, b):
     return set(normalizar(a).split()) & set(normalizar(b).split())
 
 
+# Palavras que nao dizem de quem e o nome. As ligacoes nunca identificam
+# ninguem, e as genericas aparecem em dezenas de cards de empresa -- duas
+# delas em comum nao podem valer como reconhecimento.
+LIGACOES = {"de", "da", "do", "das", "dos", "e", "di", "du", "del", "y"}
+
+
+def _compativel(cliente, nome, palavras_do_card=None):
+    """Os dois nomes podem ser da mesma pessoa (ou da mesma empresa)?
+
+    Duas exigencias, as duas aprendidas errando:
+
+    1. O PRIMEIRO NOME tem que bater. Sem isso, "Jose Santos" casava com
+       "Nestor Jose Toigo dos Santos" (nome do meio + sobrenome comum) e
+       "Marcelo Silva" casava com "Evandro Marcelo Flores da Silva".
+
+    2. Nao pode haver CONTRADICAO: se a pasta tem sobrenome que o card nao tem
+       E o card tem sobrenome que a pasta nao tem, sao duas pessoas. Sem isso,
+       "Lara Menezes Duarte" casava com "Lara Castilho" (contato gravado so
+       como "Lara") e "Casa de Repouso Bem Estar" casava com "Casa De Repouso
+       Bem Viver".
+
+    Sobrar nome de um lado so esta liberado: "Lara" e "Lara Castilho" podem
+    ser a mesma pessoa, e "Silvana Pires da Silva" e "Silvana Pires da
+    Silva/Deivede" tambem.
+
+    A contradicao e conferida contra TODAS as palavras do card (titulo mais
+    contato), nao so contra o nome que casou. O card tem dois nomes e o
+    contato as vezes esta gravado so com o primeiro nome: olhando so pra ele,
+    "Lara Menezes Duarte" parecia compativel com "Lara" e o titulo "Lara
+    Castilho" -- o unico que dizia que era outra pessoa -- ficava de fora.
+    """
+    p, q = normalizar(cliente).split(), normalizar(nome).split()
+    if not p or not q:
+        return False
+    if p == q:
+        return True
+    if p[0] != q[0]:
+        return False
+    do_card = set(q) if palavras_do_card is None else set(palavras_do_card)
+    sobra_pasta = set(p[1:]) - do_card - LIGACOES
+    sobra_card = do_card - set(p) - LIGACOES
+    return not (sobra_pasta and sobra_card)
+
+
 def _sanitizar_arquivo(nome):
     """Nome do arquivo dentro do storage do CRM. Sai SO com ASCII.
 
@@ -425,12 +469,31 @@ class CRM:
             nomes.append((nome_contato, False))
         return [(n, e_titulo) for n, e_titulo in nomes if n]
 
+    @classmethod
+    def _palavras_do_card(cls, negocio):
+        """Todas as palavras do card: as do titulo e as do contato."""
+        palavras = set()
+        for nome, _ in cls._nomes_do_negocio(negocio):
+            palavras |= set(normalizar(nome).split())
+        return palavras
+
     def _ranquear(self, cliente, candidatos):
-        """[(nota, palavras_em_comum, e_titulo, negocio)], do melhor pro pior."""
+        """[(nota, palavras_em_comum, e_titulo, negocio)], do melhor pro pior.
+
+        Nome do card que nao e COMPATIVEL com o da pasta nem entra na conta.
+        Isso importa porque o card tem dois nomes (o titulo e o contato) e
+        antes valia o melhor dos dois: o contato do card "Lara Castilho" esta
+        gravado so como "Lara", tirava 0,90 contra a pasta "Lara Menezes
+        Duarte", e o titulo -- o unico que dizia "Castilho", ou seja, que era
+        outra pessoa -- era jogado fora.
+        """
         notas = []
         for neg in candidatos:
+            do_card = self._palavras_do_card(neg)
             melhor = (0.0, set(), False)
             for nome, e_titulo in self._nomes_do_negocio(neg):
+                if not _compativel(cliente, nome, do_card):
+                    continue
                 nota = _semelhanca(cliente, nome)
                 if nota > melhor[0]:
                     melhor = (nota, _palavras_em_comum(cliente, nome), e_titulo)
@@ -439,8 +502,7 @@ class CRM:
         notas.sort(key=lambda x: x[0], reverse=True)
         return notas
 
-    @staticmethod
-    def _escolher(notas):
+    def _escolher(self, notas, candidatos=()):
         """Retorna (negocio, duvida). negocio None se nao deu pra decidir."""
         if not notas:
             return None, None
@@ -472,9 +534,22 @@ class CRM:
             # ha com quem confundir. Esta conferencia vem ANTES do empate:
             # senao "Leticia Borges Nedel" sairia do empate escolhendo a
             # "Leticia" aberta, que e outra pessoa.
-            outro = next((n for n in notas[1:] if n[1] & comuns), None)
-            if outro:
-                return None, (negocio, outro[3])
+            #
+            # Procura em TODOS os cards, nao so nos que sobraram no ranking.
+            # Quem foi cortado por incompatibilidade e justamente quem torna o
+            # nome ambiguo: "Marcelo Silva" cortava "Marcelo Borges" e
+            # "Marcelo Correia Coelho" e depois se achava sozinho.
+            outro = next(
+                (n for n in candidatos
+                 if n.get("id") != negocio.get("id")
+                 and self._palavras_do_card(n) & comuns),
+                None,
+            )
+            if outro is None:
+                outro_nota = next((n for n in notas[1:] if n[1] & comuns), None)
+                outro = outro_nota[3] if outro_nota else None
+            if outro is not None:
+                return None, (negocio, outro)
 
         empatados = [n for n in notas if melhor - n[0] < MARGEM_DESEMPATE]
         if len(empatados) > 1:
@@ -505,8 +580,9 @@ class CRM:
         "Alexandre Fernandes Pereira" estava ganho, ficava de fora da busca, e
         sem ele o "Alexandre" do card errado ganhava sozinho.
         """
+        candidatos = self.negocios_que_valem()
         negocio, duvida = self._escolher(
-            self._ranquear(cliente, self.negocios_que_valem()))
+            self._ranquear(cliente, candidatos), candidatos)
 
         if duvida:
             raise ClienteNaoEncontrado(
@@ -746,7 +822,8 @@ class CRM:
         """
         if negocios is None:
             negocios = self.negocios_que_valem()
-        negocio, duvida = self._escolher(self._ranquear(cliente, negocios))
+        negocio, duvida = self._escolher(
+            self._ranquear(cliente, negocios), negocios)
 
         if duvida:
             raise ClienteNaoEncontrado(

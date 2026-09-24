@@ -547,14 +547,64 @@ Isso me fez testar os dois extremos e achar mais dois buracos:
   (0,909 de parecença de letras, nenhuma palavra igual). Letra trocada é outro
   cliente — a mesma regra do Bitencourt x Bitencurt.
 
+Depois soltei quatro auditores independentes contra a cópia real dos 228
+cards, cada um com uma lente diferente (primeiro nome, letra trocada, empresa,
+nome único), com ordem de **tentar fazer a função errar**. Cada caso que eles
+acharam foi re-executado por um verificador cético antes de virar defeito.
+Resultado: **12 falhas reais**, em três famílias — nenhuma delas eu tinha
+enxergado sozinho:
+
+**1. O contato mutilado escondia a contradição.** O card guarda dois nomes (o
+título e o contato) e valia o melhor dos dois. O contato do card "Lara
+Castilho" está gravado só como "Lara": contra a pasta "Lara Menezes Duarte"
+ele tirava 0,90, e o título — o único que dizia "Castilho", ou seja, que era
+outra pessoa — era jogado fora. Qualquer "Lara ‹sobrenome›" substituiria o
+orçamento da Lara Castilho. Mesmo caso em "Alex Souza Ferreira" → card
+"Alexsandro Bratti Machado" (contato "Alex").
+
+**2. Duas palavras genéricas bastavam.** `ENGENHARIA` + `LTDA` já davam duas
+palavras em comum, então "Samara Engenharia LTDA" entrava no card da "Sumara
+LTDA" — inclusive furando a proteção de letra trocada, porque ela só rodava
+quando o casamento não era forte. Igual com `CONSTRUÇÕES + LTDA`,
+`PRESTADORA + DE + SERVIÇOS + LTDA`, `CASA + DE + REPOUSO + BEM` e
+`RESIDENCIAL + COSTA`. Justamente o pedaço que identifica o cliente era o
+único que divergia, e ele não tinha peso nenhum.
+
+**3. Casamento pelo meio do nome.** "Jose Santos" casava com "Nestor José
+Toigo dos Santos" e "Marcelo Silva" com "Evandro Marcelo Flores da Silva" —
+nome do meio mais o sobrenome mais comum do Brasil.
+
+As três morrem com duas exigências novas, no `_compativel`:
+
+- **O primeiro nome tem que bater.** Mata a família 3 inteira e boa parte da 2.
+- **Não pode haver contradição**: se a pasta tem sobrenome que o card não tem
+  **e** o card tem sobrenome que a pasta não tem, são duas pessoas. Sobrar
+  nome de um lado só continua liberado ("Lara" × "Lara Castilho", "Silvana
+  Pires da Silva" × "Silvana Pires da Silva/Deivede").
+
+A contradição é conferida contra **todas as palavras do card** (título +
+contato), não contra o nome que casou — é o que fecha a família 1.
+
+E a conferência de homônimo passou a varrer **todos os cards**, não só os que
+sobraram no ranking: quem foi cortado por incompatibilidade é justamente quem
+torna o nome ambíguo. Sem isso, "Marcelo Silva" cortava "Marcelo Borges" e
+"Marcelo Correia Coelho" e depois se achava sozinho no card "Marcelo".
+
 O reconhecimento é considerado **forte** quando o nome da pasta é igual ao
-título do card, ou quando os dois nomes têm **duas palavras** em comum. Fora
-disso, a semelhança só vale se nenhum outro card tiver a mesma palavra.
+título do card, ou quando os dois nomes têm **duas palavras** em comum (já
+passando pelo filtro de compatibilidade). Fora disso, a semelhança só vale se
+nenhum outro card tiver a mesma palavra.
+
+**Lição do método:** eu tinha testado a minha própria correção contra os 228
+cards e dado 0 erros — mas só com nomes que EXISTEM no CRM. As 12 falhas só
+aparecem com nomes de clientes **novos**, que é justamente quando o monitor
+mais erra. Testar com os dados que já estão lá não prova nada sobre o que
+ainda vai chegar.
 
 Resultado da varredura com os 228 cards reais, usando o nome de cada um como
 se fosse o nome da pasta:
 
-    certo = 222    dúvida = 6    errado = 0
+    certo = 224    dúvida = 4    errado = 0
 
 Mais duas varreduras: os 20 clientes de nome único caem 20/20 no card certo, e
 nenhum dos 208 nomes completos vai parar em card de outra pessoa.
