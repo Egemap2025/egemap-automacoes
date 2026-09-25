@@ -1307,6 +1307,13 @@ def _eh_madeira(low):
             and "aluminio" not in low)
 
 
+def _eh_pvc(low):
+    """low = descricao SEM acento, minuscula. True se e esquadria de PVC
+    (linhas CONFORT / ELEGANCE). PVC NAO e feito por este robo -- e outro
+    sistema -- entao esses itens sao PULADOS."""
+    return ("pvc" in low or "confort" in low or "elegance" in low)
+
+
 def _spec_item_novo(descricao):
     """Le UMA linha de item novo (montar do zero) e devolve um 'mud'.
     Formato: '[codigo] descricao do modelo - cor - vidro - ambiente - ...'
@@ -1317,6 +1324,9 @@ def _spec_item_novo(descricao):
     Os demais pedacos (separados por ' - ') sao classificados: cor, vidro,
     medida, quantidade, ambiente."""
     mud, ambiente = {}, []
+    # PVC (linhas Confort/Elegance) NAO e feito por este robo (outro sistema).
+    # Marca o item p/ ser PULADO na montagem, mas ainda le o resto (pro preview).
+    _pvc = _eh_pvc(_sem_acento(descricao.lower()))
     partes = [p.strip() for p in _re.split(r"\s+[-–]\s+", descricao) if p.strip()]
     if not partes:
         return None
@@ -1424,6 +1434,8 @@ def _spec_item_novo(descricao):
     # QUANTIDADE e obrigatoria no W-Vetro -- padrao 1 se nao vier na mensagem
     # (o vendedor ajusta depois se precisar de mais de 1).
     mud.setdefault("qtde", "1")
+    if _pvc:
+        mud["pvc"] = True
     return mud
 
 
@@ -3027,6 +3039,9 @@ def montar_item_novo(page, num, mud):
     NAO apaga nada: so ADICIONA um item ao orcamento."""
     modelo = mud.get("modelo", "")
     linha = mud.get("linha", "")
+    if mud.get("pvc"):
+        print(f"\n  >> Item {num}: PVC (Confort/Elegance) -- feito em OUTRO sistema, PULANDO.")
+        return "pvc"
     print(f"\n  >> Item {num}: MONTAR '{modelo}'"
           + (f" (linha {linha})" if linha else ""))
     if not modelo:
@@ -3528,6 +3543,10 @@ def _preview_montar(orc, itens):
     for i, mud in enumerate(itens, 1):
         cod = mud.get("tipo", "")
         print(f"\n  ITEM {i}{(' [' + cod + ']') if cod else ''}:")
+        if mud.get("pvc"):
+            print(f"     modelo      -> {mud.get('modelo') or ''}")
+            print("     >>> PVC (Confort/Elegance) -- NAO sera feito (outro sistema).")
+            continue
         print(f"     modelo      -> {mud.get('modelo') or '(nao informado!)'}")
         print(f"     linha       -> {mud.get('linha','(padrao da tela)')}")
         if "acionamento" in mud:
@@ -3619,7 +3638,7 @@ def modo_montar(page):
         # pro proximo (bem mais rapido).
         try:
             ok = montar_item_novo(page, i, mud)
-            resultados[i] = "ok" if ok else "falhou"
+            resultados[i] = ("pvc" if ok == "pvc" else ("ok" if ok else "falhou"))
         except Exception as e:
             print(f"  [!] erro inesperado ao montar o item {i}: {e}")
             print_tela(page, f"mon_erro_{i}")
@@ -3640,7 +3659,8 @@ def modo_montar(page):
     for i, mud in enumerate(itens, 1):
         st = resultados.get(i, "?")
         marca = {"ok": "✔", "falhou": "✘", "erro": "‼",
-                 "sem_medida": "⚠ falta medida"}.get(st, "?")
+                 "sem_medida": "⚠ falta medida",
+                 "pvc": "⊘ PVC (outro sistema)"}.get(st, "?")
         print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
     print("  " + "=" * 56)
 
@@ -3796,7 +3816,7 @@ def modo_novo(page):
             continue
         try:
             ok = montar_item_novo(page, i, mud)
-            resultados[i] = "ok" if ok else "falhou"
+            resultados[i] = ("pvc" if ok == "pvc" else ("ok" if ok else "falhou"))
         except Exception as e:
             print(f"  [!] erro inesperado ao montar o item {i}: {e}")
             print_tela(page, f"novo_erro_{i}")
@@ -3816,7 +3836,8 @@ def modo_novo(page):
     for i, mud in enumerate(itens, 1):
         st = resultados.get(i, "?")
         marca = {"ok": "✔", "falhou": "✘", "erro": "‼",
-                 "sem_medida": "⚠ falta medida"}.get(st, "?")
+                 "sem_medida": "⚠ falta medida",
+                 "pvc": "⊘ PVC (outro sistema)"}.get(st, "?")
         print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
     print("  " + "=" * 56)
     print("  (As portas de giro voce adiciona manualmente, como combinamos.)")
@@ -3866,7 +3887,7 @@ def modo_montar_aberto(page):
             continue
         try:
             ok = montar_item_novo(page, i, mud)
-            resultados[i] = "ok" if ok else "falhou"
+            resultados[i] = ("pvc" if ok == "pvc" else ("ok" if ok else "falhou"))
         except Exception as e:
             print(f"  [!] erro inesperado ao montar o item {i}: {e}")
             print_tela(page, f"aberto_erro_{i}")
@@ -3885,7 +3906,8 @@ def modo_montar_aberto(page):
     for i, mud in enumerate(itens, 1):
         st = resultados.get(i, "?")
         marca = {"ok": "✔", "falhou": "✘", "erro": "‼",
-                 "sem_medida": "⚠ falta medida"}.get(st, "?")
+                 "sem_medida": "⚠ falta medida",
+                 "pvc": "⊘ PVC (outro sistema)"}.get(st, "?")
         print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}")
     print("  " + "=" * 56)
     print("  (As portas de giro voce adiciona manualmente.)")
