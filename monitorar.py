@@ -1203,7 +1203,7 @@ def material_do_item(item):
     return None
 
 
-def composicao_da_proposta(pdf_path, materiais, valor):
+def composicao_da_proposta(pdf_path, materiais, valor, cliente=""):
     """Quanto da proposta e de cada material, pro CRM preencher a composicao.
 
     Desde 23/09/2026 cada linha do CRM mostra a divisao por material. Linha
@@ -1232,7 +1232,7 @@ def composicao_da_proposta(pdf_path, materiais, valor):
         # nao fechar, fica pendente: cair na regra antiga aqui seria mandar uma
         # divisao que eu ja sei que esta errada (o arquivo se chama "ALM" mas
         # tem porta de madeira dentro).
-        return _somar_por_material(itens, pdf_path, valor)
+        return _somar_por_material(itens, pdf_path, valor, cliente)
 
     if len(materiais) == 1:
         material = crm_egemap.MATERIAL_NA_COMPOSICAO.get(next(iter(materiais)))
@@ -1248,7 +1248,7 @@ def composicao_da_proposta(pdf_path, materiais, valor):
     return []
 
 
-def _somar_por_material(itens, pdf_path, valor):
+def _somar_por_material(itens, pdf_path, valor, cliente=""):
     """Soma as esquadrias por material. Vazio se ficar qualquer duvida.
 
     O PVC vem de outro sistema e nao tem esse quadro de itens, entao entra
@@ -1258,7 +1258,7 @@ def _somar_por_material(itens, pdf_path, valor):
     for item in itens:
         material = material_do_item(item)
         if material is None:
-            log(f"  Composicao: nao sei de que material e o item "
+            log(f"[{cliente}] Composicao: nao sei de que material e o item "
                 f"{item['tipo'] or '?'} ({item['linha']}) — deixei pendente.")
             return []
         soma[material] = soma.get(material, 0.0) + item["valor"]
@@ -1269,8 +1269,8 @@ def _somar_por_material(itens, pdf_path, valor):
 
     total = sum(soma.values())
     if abs(total - valor) > 0.02:
-        log(f"  Composicao: as esquadrias somam {format_brl(total)} e a proposta "
-            f"e de {format_brl(valor)} — deixei pendente.")
+        log(f"[{cliente}] Composicao: as esquadrias somam {format_brl(total)} "
+            f"e a proposta e de {format_brl(valor)} — deixei pendente.")
         return []
 
     return [(crm_egemap.MATERIAL_NA_COMPOSICAO[m], round(soma[m], 2))
@@ -1355,7 +1355,7 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
         nome_antigo = nome_da_linha(
             origem_antiga, materiais_do_nome_do_arquivo(origem_antiga) or materiais)
 
-    composicao = composicao_da_proposta(pdf_path, materiais, valor)
+    composicao = composicao_da_proposta(pdf_path, materiais, valor, client)
     if not composicao:
         log(f"[{client}] CRM: nao sei dividir {arquivo} por material — "
             f"a composicao vai ficar pendente no card.")
