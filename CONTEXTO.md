@@ -249,8 +249,12 @@ de R$ 21.744,00).
    propósito: perfil de alumínio pintado de **AMADEIRADO** continua alumínio, e
    a busca por "MADEIRA" casaria com "aMADEIRAdo".
 2. `PORTÃO` ou `FERRO` → **Outro** (portão de rolo de ferro conta separado).
-3. Descrição com **MDF ULTRA, RHODEN ou WPC** → **Madeira**. São madeira mesmo
-   pintadas de branco, e por isso não dá para reconhecer pela cor do perfil.
+3. **MDF ULTRA, RHODEN ou WPC** no quadro do item → **Madeira**. As portas
+   internas são madeira mesmo com a cor do perfil em "BRANCO", e por isso não
+   dá para reconhecê-las pela cor. Aqui vale o quadro inteiro, **com as
+   observações**: o nome da esquadria é texto livre que o orçamentista digita,
+   mas as observações do projeto repetem o material ("BATENTE E VISTAS EM MDF
+   ULTRA RU"), então a regra sobrevive a um item renomeado.
 4. Cor do perfil **AMADEIRADO** ou **ROVERE** → **Alumínio**. São acabamentos
    que imitam madeira num perfil de alumínio.
 5. Cor do perfil (ou a descrição) com a palavra **MADEIRA** → **Madeira**.
@@ -266,9 +270,10 @@ A ordem entre a 3 e a 4 importa: **o produto decide antes do acabamento**. Uma
 porta de MDF com acabamento "ROVERE" continua sendo madeira; um perfil de
 alumínio com o mesmo acabamento continua sendo alumínio.
 
-A busca por "FERRO" olha só a descrição da esquadria, nunca as observações: a
-porta colonial de madeira maciça tem "FECHADURA, PUXADOR, FERRO DECORATIVO E
-VIDRO NÃO ESTÃO INCLUSOS" nas observações, e isso a classificava como portão.
+A busca por "FERRO" é a exceção: olha **só a descrição**, nunca as
+observações. A porta colonial de madeira maciça tem "FECHADURA, PUXADOR, FERRO
+DECORATIVO E VIDRO NÃO ESTÃO INCLUSOS" nas observações, e isso a classificava
+como portão.
 
 O PVC vem de outro sistema e não tem esse quadro: entra inteiro pelo total dele
 (`TOTAL GERAL (R$)`). É assim que o COMPLETO também sai dividido.

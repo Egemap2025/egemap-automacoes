@@ -1115,6 +1115,7 @@ def itens_do_orcamento(pdf_path):
                 "cor_perfil": campos.get("COR PERFIL", ""),
                 "linha": campos["LINHA"],
                 "descricao": descricao,
+                "quadro": " ".join(t for _, _, t in bloco),
                 "valor": _valor(bruto),
             })
     return achados
@@ -1128,15 +1129,23 @@ def material_do_item(item):
     """
     linha = _sem_acento(item.get("linha"))
     descricao = _sem_acento(item.get("descricao"))
+    quadro = _sem_acento(item.get("quadro")) or descricao
     cor = _sem_acento(item.get("cor_perfil"))
 
     if any(p in linha for p in LINHAS_DE_ALUMINIO):
         return "aluminio"
+    # "FERRO" so vale na descricao da esquadria. Nas OBSERVACOES de uma porta
+    # de madeira aparece "FERRO DECORATIVO", e isso a classificava como portao.
     if any(p in linha or p in descricao for p in SINAIS_DE_OUTRO):
         return "outro"
     # O PRODUTO decide antes do acabamento: uma porta de MDF com acabamento
     # "ROVERE" continua sendo madeira.
-    if any(p in descricao for p in PRODUTOS_DE_MADEIRA):
+    #
+    # Aqui vale o quadro inteiro, com as observacoes: o nome da esquadria e
+    # texto livre que o orcamentista digita, mas as observacoes do projeto
+    # repetem o material ("BATENTE E VISTAS EM MDF ULTRA RU"). Assim a regra
+    # sobrevive a um item renomeado.
+    if any(p in quadro for p in PRODUTOS_DE_MADEIRA):
         return "madeira"
     if any(p in cor for p in ACABAMENTOS_DE_ALUMINIO):
         return "aluminio"
