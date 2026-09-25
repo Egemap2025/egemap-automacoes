@@ -50,6 +50,11 @@ PERFIL_DIR = Path.home() / ".egemap_wvetro_perfil"
 # Pasta onde o robo salva prints de cada passo (para depurar juntos).
 PRINTS_DIR = Path.home() / "EGEMAP_robo_prints"
 
+# ── CRM (FlowCRM) -- leitura dos negocios/levantamentos (so GET) ──────────────
+CRM_BASE = "https://wmxrporvjizjikmzvnna.supabase.co/functions/v1/api-orcamento"
+# arquivo local com os ids de negocios que o robo JA montou (pra nao repetir).
+CRM_VISTOS = Path.home() / ".egemap_crm_feitos.txt"
+
 
 # ── Utilidades ──────────────────────────────────────────────────────────────────
 
@@ -3913,6 +3918,322 @@ def modo_montar_aberto(page):
     print("  (As portas de giro voce adiciona manualmente.)")
 
 
+# ── MODO CRM ─────────────────────────────────────────────────────────────────
+
+def _crm_chave():
+    """Le a chave da API do CRM. Procura na variavel de ambiente CRM_API_KEY e,
+    se nao achar, num arquivo 'crm_api_key.txt' ao lado do robo. NUNCA no codigo."""
+    import os
+    ch = (os.environ.get("CRM_API_KEY") or "").strip()
+    if ch:
+        return ch
+    for nome in ("crm_api_key.txt", "CRM_API_KEY.txt"):
+        try:
+            f = Path(nome)
+            if f.exists():
+                return f.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _crm_get(path, params=None):
+    """GET na API do CRM (Bearer). Devolve o JSON (dict). Levanta RuntimeError
+    com mensagem amigavel em caso de erro."""
+    import json as _json
+    import urllib.request as _rq
+    import urllib.parse as _up
+    import urllib.error as _ue
+    chave = _crm_chave()
+    if not chave:
+        raise RuntimeError("CRM_API_KEY nao configurada (variavel de ambiente ou crm_api_key.txt).")
+    url = CRM_BASE + path
+    if params:
+        url += "?" + _up.urlencode(params)
+    req = _rq.Request(url, headers={"Authorization": f"Bearer {chave}"})
+    try:
+        with _rq.urlopen(req, timeout=30) as r:
+            return _json.loads(r.read().decode("utf-8"))
+    except _ue.HTTPError as e:
+        corpo = ""
+        try:
+            corpo = e.read().decode("utf-8")
+        except Exception:
+            pass
+        raise RuntimeError(f"HTTP {e.code} - {corpo or e.reason}")
+    except Exception as e:
+        raise RuntimeError(str(e))
+
+
+def crm_listar(etapa="orcamentos-a-fazer"):
+    return _crm_get("/negocios", {"etapa": etapa})
+
+
+def crm_negocio(nid):
+    return _crm_get(f"/negocios/{nid}")
+
+
+def crm_levantamento(nid):
+    return _crm_get(f"/negocios/{nid}/levantamento")
+
+
+def _crm_ler_vistos():
+    try:
+        return set(CRM_VISTOS.read_text(encoding="utf-8").split())
+    except Exception:
+        return set()
+
+
+def _crm_marcar_visto(nid):
+    try:
+        with CRM_VISTOS.open("a", encoding="utf-8") as f:
+            f.write(str(nid) + "\n")
+    except Exception:
+        pass
+
+
+def _crm_cliente(det):
+    """Monta o dict do cliente (pro cadastro no W-Vetro) a partir do detalhe do
+    negocio do CRM."""
+    c = det.get("cliente") or {}
+    o = det.get("obra") or {}
+    v = det.get("vendedor") or {}
+    cli = {}
+    if c.get("nome"):
+        cli["nome"] = str(c["nome"]).strip()
+    if c.get("telefone"):
+        cli["celular"] = str(c["telefone"]).strip()
+    if c.get("email"):
+        cli["email"] = str(c["email"]).strip()
+    cidade = (o.get("cidade") or "").strip()
+    uf = (o.get("uf") or "").strip()
+    if cidade:
+        cli["cidade"] = cidade + (f"/{uf}" if uf else "")
+    if o.get("endereco"):
+        cli["rua"] = str(o["endereco"]).strip()
+    if o.get("numero"):
+        cli["numero"] = str(o["numero"]).strip()
+    if o.get("bairro"):
+        cli["bairro"] = str(o["bairro"]).strip()
+    if o.get("cep"):
+        cli["cep"] = str(o["cep"]).strip()
+    if v.get("nome"):
+        cli["vendedor"] = str(v["nome"]).strip()
+    return cli
+
+
+def _crm_tipo_diverge(it):
+    """True se o tipo (J/PJ/P/PE) do nosso codigo NAO bate com a 1a letra do
+    codigo do projeto -- sinal de item pra conferir (ex.: porta que entrou como
+    janela)."""
+    cp = (it.get("codigo_projeto") or "").strip()
+    tp = (it.get("tipo") or "").strip()
+    return bool(cp and tp and cp[0].upper() != tp[0].upper())
+
+
+def _crm_item_para_linha(item, unidade="cm"):
+    """Converte 1 item do levantamento do CRM numa LINHA da mensagem do robo,
+    pra reaproveitar _spec_item_novo (todas as regras de modelo/cor/vidro/etc).
+    Medidas em cm viram mm (x10)."""
+    cod = (item.get("codigo") or "").strip()
+    tip = (item.get("esquadria") or "").strip()          # tipologia
+    tipo = (item.get("tipo") or "").strip().upper()      # J / PJ / P / PE
+    material = (item.get("material") or "").strip()
+    linha = (item.get("linha") or "").strip()
+    cor = (item.get("cor") or "").strip()
+    vidro = (item.get("vidro") or "").strip()
+    tela = (item.get("tela") or "").strip().lower()
+    persiana = (item.get("persiana") or "").strip().lower()
+    acion = _sem_acento((item.get("acionamento") or "").strip().lower())
+    amb = (item.get("ambiente") or "").strip()
+
+    desc = tip
+    low_desc = _sem_acento(desc.lower())
+    # TIPO do codigo garante o grupo certo mesmo se a descricao vier 'crua':
+    #  PJ = porta-janela (porta de correr); P = porta; J = janela.
+    if tipo == "PJ" and "porta" not in low_desc:
+        desc = "porta janela " + desc
+    elif tipo == "P" and "porta" not in low_desc:
+        desc = "porta " + desc
+    # material ajuda a detectar madeira/pvc (o _eh_madeira/_eh_pvc olham o texto)
+    if material and material.lower() not in _sem_acento(desc.lower()):
+        desc += " " + material
+    # linha 'L.25'/'L.32'/'L.30' -> 'l25'/... ; se for texto (MDF Ultra/Colonial/
+    # Ripados), passa como esta (vira palavra do card).
+    ml = _re.search(r"(\d{2})", linha)
+    if ml:
+        desc += f" l{ml.group(1)}"
+    elif linha and "aplica" not in linha.lower():
+        desc += " " + linha
+    low_desc = _sem_acento(desc.lower())
+    if tela in ("sim", "s", "true", "1") and "tela" not in low_desc:
+        desc += " com tela"
+    if persiana in ("sim", "s", "true", "1"):
+        if "persiana" not in low_desc:
+            desc += " com persiana"
+        if "motor" in acion or "automat" in acion:
+            desc += " motor"
+        elif "manual" in acion or "recolhedor" in acion:
+            desc += " manual"
+
+    partes = [f"{cod} {desc}".strip()]
+    if cor and "aplica" not in cor.lower():
+        partes.append(cor)
+    if vidro and "aplica" not in vidro.lower():
+        partes.append(vidro)          # ex.: 'Temperado 6mm incolor' / 'Sem vidro'
+    larg, alt = item.get("largura"), item.get("altura")
+    if larg not in (None, "") and alt not in (None, ""):
+        fator = 10 if (unidade or "cm").lower().startswith("cm") else 1
+        try:
+            partes.append(f"{int(round(float(larg) * fator))}x{int(round(float(alt) * fator))}")
+        except Exception:
+            pass
+    if amb:
+        partes.append(amb)
+    try:
+        q = int(item.get("quantidade") or 1)
+    except Exception:
+        q = 1
+    if q > 1:
+        partes.append(f"{q}un")
+    return " - ".join(partes)
+
+
+def _crm_alternativa_aluminio(lev):
+    """Das 'alternativas' do levantamento (uma por material quando o cliente pede
+    o mesmo projeto em 2 materiais), escolhe a de ALUMINIO -- a que o robo faz.
+    A de PVC fica de fora INTEIRA. Regra: a alternativa com MENOS itens de PVC.
+    Com uma alternativa so, usa ela."""
+    alts = lev.get("alternativas") or []
+    if not alts:
+        return None
+    if len(alts) == 1:
+        return alts[0]
+
+    def _pvc_qtd(a):
+        n = 0
+        for it in a.get("itens", []):
+            txt = _sem_acento(((it.get("material") or "") + " " + (it.get("linha") or "")).lower())
+            if _eh_pvc(txt):
+                n += 1
+        return n
+    return min(alts, key=_pvc_qtd)
+
+
+def _crm_processar_negocio(page, nid):
+    """Le 1 negocio do CRM, monta a alternativa de ALUMINIO no W-Vetro (sem
+    calcular) e marca como feito. Supervisionado: mostra o preview e confirma."""
+    global MODO_AUTO
+    try:
+        det = crm_negocio(nid)
+        lev = crm_levantamento(nid)
+    except Exception as e:
+        print(f"  [!] erro lendo o negocio no CRM: {e}")
+        return
+    cli = _crm_cliente(det)
+    alt = _crm_alternativa_aluminio(lev)
+    if not alt or not alt.get("itens"):
+        print("  [!] esse negocio nao tem itens no levantamento.")
+        return
+    unidade = lev.get("unidade_medida", "cm")
+    print(f"\n  Alternativa escolhida (aluminio): {alt.get('nome', '?')}"
+          f"  [{len(lev.get('alternativas', []))} alternativa(s) no total]")
+
+    itens = []
+    for it in alt.get("itens", []):
+        if (it.get("tipo") or "").strip().upper() == "PE":
+            print(f"  >> {it.get('codigo','PE')}: portao de enrolar -- outro sistema, pulando.")
+            continue
+        linha = _crm_item_para_linha(it, unidade)
+        mud = _spec_item_novo(linha)
+        if mud and mud.get("modelo"):
+            mud["_conferir"] = bool(it.get("pendencias")) or _crm_tipo_diverge(it)
+            itens.append(mud)
+
+    if not cli.get("nome"):
+        print("  [!] negocio sem nome de cliente -- nao da pra cadastrar.")
+        return
+    if not itens:
+        print("  [!] nenhum item de W-Vetro pra montar (so PVC ou vazio).")
+        return
+
+    # preview
+    print(f"\n  CLIENTE: {cli.get('nome')}  |  {cli.get('cidade','')}  |  vend: {cli.get('vendedor','')}")
+    _preview_montar("(CRM)", itens)
+    conf = [i + 1 for i, m in enumerate(itens) if m.get("_conferir")]
+    if conf:
+        print(f"\n  [!] CONFERIR depois os itens {conf} (tipo divergente/pendencia no CRM).")
+    r = input("\n  Montar este orcamento (SEM calcular)? ENTER = sim  |  N = nao: ").strip().lower()
+    if r == "n":
+        print("  Cancelado.")
+        return
+
+    MODO_AUTO = True
+    resultados = {}
+    try:
+        if not cadastrar_cliente(page, cli):
+            print("  [!] parei: nao consegui cadastrar o cliente.")
+            return
+        if not criar_orcamento_novo(page, cli):
+            print("  [!] parei: nao consegui criar o orcamento.")
+            return
+        for i, mud in enumerate(itens, 1):
+            if "largura" not in mud or "altura" not in mud:
+                print(f"\n  >> Item {i}: falta medida -- pulando.")
+                resultados[i] = "sem_medida"
+                continue
+            try:
+                ok = montar_item_novo(page, i, mud)
+                resultados[i] = ("pvc" if ok == "pvc" else ("ok" if ok else "falhou"))
+            except Exception as e:
+                print(f"  [!] erro no item {i}: {e}")
+                print_tela(page, f"crm_erro_{i}")
+                resultados[i] = "erro"
+            page.wait_for_timeout(1000)
+    finally:
+        MODO_AUTO = False
+
+    # NAO calcula (voce inclui madeira que faltou/PVC e calcula). Marca como feito.
+    _crm_marcar_visto(nid)
+    print("\n  " + "=" * 56)
+    print("  ✔ Orcamento de ALUMINIO montado (SEM calcular). Confira e finalize.")
+    for i, mud in enumerate(itens, 1):
+        st = resultados.get(i, "?")
+        marca = {"ok": "✔", "falhou": "✘", "erro": "‼", "sem_medida": "⚠ falta medida",
+                 "pvc": "⊘ PVC (outro sistema)"}.get(st, "?")
+        flag = "  (CONFERIR)" if mud.get("_conferir") else ""
+        print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}{flag}")
+    print("  " + "=" * 56)
+
+
+def modo_crm(page):
+    """Le a etapa 'Orcamentos a Fazer' do CRM e deixa voce escolher um negocio
+    pra montar o orcamento de ALUMINIO no W-Vetro (supervisionado). PVC fica de
+    fora e nao calcula -- voce valida, inclui o que faltar e calcula."""
+    print()
+    print("MODO CRM -- lendo 'Orcamentos a Fazer'...")
+    try:
+        lista = crm_listar("orcamentos-a-fazer")
+    except Exception as e:
+        print(f"  [!] nao consegui falar com a API do CRM: {e}")
+        print("  Confira a CRM_API_KEY (variavel de ambiente ou arquivo crm_api_key.txt).")
+        return
+    negocios = [n for n in lista.get("negocios", []) if n.get("levantamento")]
+    if not negocios:
+        print("  Nenhum negocio COM levantamento em 'Orcamentos a Fazer'.")
+        return
+    vistos = _crm_ler_vistos()
+    print(f"\n  Total na etapa: {lista.get('total', '?')}  |  Com levantamento: {len(negocios)}")
+    for i, n in enumerate(negocios, 1):
+        feito = "  (ja feito)" if n["id"] in vistos else ""
+        print(f"    {i:2d}) {n.get('cliente', '?')}  -- vend: {n.get('vendedor', '?')}{feito}")
+    esc = input("\n  Numero do negocio pra montar (Enter cancela): ").strip()
+    if not esc.isdigit() or not (1 <= int(esc) <= len(negocios)):
+        print("  Cancelado.")
+        return
+    _crm_processar_negocio(page, negocios[int(esc) - 1]["id"])
+
+
 def menu_alteracoes(page):
     """Depois de abrir o orcamento, oferece editar um item."""
     while True:
@@ -3975,11 +4296,14 @@ def main():
                 print("  4) CADASTRAR um cliente NOVO")
                 print("  5) ORCAMENTO NOVO COMPLETO (cliente + itens)")
                 print("  6) MONTAR itens (orcamento ja aberto na tela 'Escolha o desenho')")
+                print("  7) CRM -- montar a partir de 'Orcamentos a Fazer' (so aluminio)")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
                 if op in ("0", "sair", "s", "exit", "q"):
                     break
+                elif op == "7":
+                    modo_crm(page)
                 elif op == "1":
                     modo_mensagem(page)
                 elif op == "3":
