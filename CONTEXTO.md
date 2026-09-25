@@ -253,8 +253,12 @@ de R$ 21.744,00).
    pintadas de branco, e por isso não dá para reconhecer pela cor do perfil.
 4. Cor do perfil **AMADEIRADO** ou **ROVERE** → **Alumínio**. São acabamentos
    que imitam madeira num perfil de alumínio.
-5. Cor do perfil (ou a descrição) com nome de madeira — grápia, cedro,
-   cumaru... — → **Madeira**. Palavra inteira.
+5. Cor do perfil (ou a descrição) com a palavra **MADEIRA** → **Madeira**.
+   Na lista de cores do orçamento a madeira sempre começa com essa palavra
+   (MADEIRA GRÁPIA, MADEIRA ITAÚBA, MADEIRA TAUARI) — conferido com o Natanael
+   na tela. Os outros nomes de madeira da mesma lista, como **LOURO FREIJÓ**,
+   são acabamento imitando madeira e não contam. Eu tinha chutado uma lista de
+   espécies (cedro, cumaru, freijó...) e teria errado justamente nesse.
 6. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
    dizendo qual item não foi reconhecido.
 

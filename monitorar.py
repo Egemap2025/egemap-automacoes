@@ -1014,11 +1014,13 @@ SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
 PRODUTOS_DE_MADEIRA = ("MDF ULTRA", "RHODEN", "WPC")
 # Acabamentos que IMITAM madeira num perfil de aluminio. Nao sao madeira.
 ACABAMENTOS_DE_ALUMINIO = ("AMADEIRADO", "ROVERE")
-# Madeira macica aparece na COR DO PERFIL ("MADEIRA GRAPIA"). Palavra inteira,
-# senao "AMADEIRADO" contaria como madeira.
-_COR_DE_MADEIRA = re.compile(
-    r"\b(MADEIRA|GRAPIA|CEDRO|ANGELIM|IPE|CUMARU|ITAUBA|JATOBA|PEROBA|"
-    r"TAUARI|EUCALIPTO|PINUS|GARAPEIRA|CANELA|IMBUIA|FREIJO|MARFIM)\b")
+# Madeira macica aparece na COR DO PERFIL, e na lista de cores do orcamento ela
+# SEMPRE comeca com a palavra "MADEIRA": MADEIRA GRAPIA, MADEIRA ITAUBA,
+# MADEIRA TAUARI. Os outros nomes de madeira da mesma lista -- LOURO FREIJO,
+# por exemplo -- sao acabamento imitando madeira, e nao madeira.
+#
+# Palavra inteira, senao "AMADEIRADO" contaria como madeira.
+_COR_DE_MADEIRA = re.compile(r"\bMADEIRA\b")
 
 _VALOR_NO_PDF = re.compile(r"^\d{1,3}(?:\.\d{3})*,\d{2}$")
 
