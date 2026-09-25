@@ -3927,11 +3927,20 @@ def _crm_chave():
     ch = (os.environ.get("CRM_API_KEY") or "").strip()
     if ch:
         return ch
-    for nome in ("crm_api_key.txt", "CRM_API_KEY.txt"):
+    # procura o arquivo crm_api_key.txt em varios lugares sensatos:
+    #  - pasta do robo (~/EGEMAP_robo, onde o EGEMAP_ROBO.bat roda)
+    #  - home do usuario
+    #  - pasta onde o robo foi chamado (cwd)
+    candidatos = []
+    for base in (Path.home() / "EGEMAP_robo", Path.home(), Path(".")):
+        for nome in ("crm_api_key.txt", "CRM_API_KEY.txt"):
+            candidatos.append(base / nome)
+    for f in candidatos:
         try:
-            f = Path(nome)
             if f.exists():
-                return f.read_text(encoding="utf-8").strip()
+                val = f.read_text(encoding="utf-8").strip()
+                if val:
+                    return val
         except Exception:
             pass
     return ""
