@@ -37,6 +37,12 @@ URL_LOGIN    = "https://sistema.wvetro.com.br/concept/app.wvetro.login"
 URL_HOME     = "https://sistema.wvetro.com.br/concept/app.wvetro.home"
 URL_CONSULTA = "https://sistema.wvetro.com.br/concept/app.core.wworcamento"
 
+# MODO AUTOMATICO (vigia do CRM): quando True, o robo NUNCA para pra perguntar.
+# Em qualquer duvida ele escolhe o MELHOR PALPITE e segue ('melhor palpite e
+# seguir', decidido pelo usuario). No modo normal (menu), fica False e o robo
+# pergunta como sempre.
+MODO_AUTO = False
+
 # Perfil dedicado do robo. O login fica salvo aqui, entao voce so loga uma vez.
 # (Nao usamos o seu Chrome normal para nao dar conflito de "perfil em uso".)
 PERFIL_DIR = Path.home() / ".egemap_wvetro_perfil"
@@ -1632,14 +1638,20 @@ def _set_select_auto(frame, rotulo, esperado, termo, nome):
         return False
     escolha, claro = _melhor_opcao(opcoes, termo, esperado)
     if escolha is None or not claro:
-        print(f"\n     Em duvida no {nome} para '{termo}'. Escolha:")
-        for i, o in enumerate(opcoes, 1):
-            print(f"       {i:2d}) {o}")
-        r = input("       Numero (Enter pula): ").strip()
-        if not r.isdigit() or not (1 <= int(r) <= len(opcoes)):
-            print(f"     ({nome} nao alterado)")
-            return False
-        escolha = opcoes[int(r) - 1]
+        if MODO_AUTO:
+            # melhor palpite: usa a melhor opcao encontrada (ou a 1a) e segue,
+            # sem perguntar. Deixa registrado que foi um palpite.
+            escolha = escolha or opcoes[0]
+            print(f"     (auto) {nome} em duvida p/ '{termo}' -> palpite: {escolha}")
+        else:
+            print(f"\n     Em duvida no {nome} para '{termo}'. Escolha:")
+            for i, o in enumerate(opcoes, 1):
+                print(f"       {i:2d}) {o}")
+            r = input("       Numero (Enter pula): ").strip()
+            if not r.isdigit() or not (1 <= int(r) <= len(opcoes)):
+                print(f"     ({nome} nao alterado)")
+                return False
+            escolha = opcoes[int(r) - 1]
     try:
         sel.select_option(label=escolha)
     except Exception as e:
@@ -2500,7 +2512,10 @@ _JS_MARCAR_CARD = r"""
       best=b; bestScore=s; bestLen=t.length;
     }
   }
-  if (!best || bestScore <= 0) return null;
+  // Normalmente exige nota > 0. No modo 'forcar' (automatico: melhor palpite),
+  // aceita o melhor card mesmo com nota baixa/negativa -- desde que exista algum
+  // card validado (*EGE) na tela.
+  if (!best || (bestScore <= 0 && !args.forcar)) return null;
   cands.sort((a,b)=>b.s-a.s);
   const topo = cands.slice(0, 8);
   // O texto que casou costuma ser o '.card-body' (so titulo + 'Mais opcoes'),
@@ -2610,11 +2625,13 @@ def _escolher_card_auto(page, modelo, num=""):
             pass
         page.wait_for_timeout(500)
     try:
-        res = page.evaluate(_JS_MARCAR_CARD, {"palavras": palavras})
+        res = page.evaluate(_JS_MARCAR_CARD, {"palavras": palavras, "forcar": MODO_AUTO})
     except Exception:
         res = None
-    if not res or res.get("score", 0) <= 0:
+    if not res or (res.get("score", 0) <= 0 and not MODO_AUTO):
         return False
+    if res.get("score", 0) <= 0:
+        print("     (auto) nenhum card com nota boa -- indo no melhor palpite.")
     print(f"     card escolhido -> {res.get('titulo','?')}")
     cands = res.get("candidatos") or []
     if len(cands) > 1:
@@ -2863,6 +2880,10 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         # desenho e o robo continua sozinho (preenche, inclui, variaveis, salva).
         print("     [!] nao consegui abrir o desenho sozinho (essa tela tem varias opcoes).")
         print_tela(page, f"{prefixo}_sem_card_{num}")
+        if MODO_AUTO:
+            # modo automatico: nao pode parar pra perguntar. Registra e segue.
+            print("     (auto) nao abri o desenho -- pulando este item (anotado).")
+            return False
         print("     " + "=" * 54)
         print("     >> CLIQUE no desenho que voce quer, NA TELA do W-Vetro")
         print("        (na FOTO grande do desenho certo).")
@@ -3205,6 +3226,20 @@ def _escolher_vendedor(page, valor):
         print(f"\n     [!] AVISO: nao achei o vendedor '{valor}' na lista do W-Vetro.")
     else:
         print("\n     [!] AVISO: voce NAO informou o VENDEDOR (e obrigatorio).")
+
+    # MODO AUTOMATICO: nao pode parar pra perguntar. Melhor palpite -> usa o
+    # melhor match (ou o 1o vendedor da lista) e segue.
+    if MODO_AUTO:
+        escolha = (_melhor_opcao_texto(opcoes, valor) if valor else None) or (opcoes[0] if opcoes else None)
+        if escolha:
+            try:
+                loc.select_option(label=escolha)
+                page.wait_for_timeout(500)
+                print(f"     (auto) vendedor -> {escolha} (palpite)")
+                return True
+            except Exception:
+                pass
+        return False
 
     # 2) PLANO B (so cai aqui se esqueceu ou digitou errado): mostra a lista
     #    pra escolher agora. Se preferir, aperte ENTER pra cancelar e informar
