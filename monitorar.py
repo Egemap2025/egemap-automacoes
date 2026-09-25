@@ -1376,7 +1376,8 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
                 "nome_antigo": nome_antigo,
                 "parcial": e_peca_de_completo(pdf_path),
                 "composicao": composicao,
-                "materiais_reais": materiais_reais},
+                "materiais_reais": materiais_reais,
+                "detalhe": detalhe_do_nome(pdf_path)},
         daemon=True,
     ).start()
 

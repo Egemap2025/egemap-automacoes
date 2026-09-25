@@ -449,6 +449,17 @@ O `marcar_feito` também passou a receber **o material que está dentro do PDF**
 sempre tem alumínio junto, e é isso que faz ele casar com o orçamento
 cadastrado como Alumínio.
 
+E, quando os dois orçamentos são do mesmo material, quem decide é a **linha do
+perfil**. O CRM guarda a linha de cada orçamento cadastrado em dois lugares —
+`materiais[].linhas` (`"L.25"`) e `tipos.J.linha` / `tipos.PJ.linha` — e o
+`_linhas_do_orcamento` tira dali só os números, porque o mesmo perfil aparece
+escrito de vários jeitos ("L.25", "L. 25", "Solene 25").
+
+A escolha prefere **linha exata** antes de linha parecida: na Projetar Studio o
+Orçamento 1 é só L.25 e o Orçamento 2 cita L.32 **e** L.25, então a proposta
+"25" é do primeiro. Testado nas duas ordens de salvamento, e sem escrever a
+linha no nome (aí volta a valer a ordem do cadastro).
+
 ### Quantos orçamentos ficam feitos = quantas propostas estão no card
 
 25/09/2026, card da **Projetar Studio**: dois orçamentos cadastrados, os dois

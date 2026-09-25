@@ -739,7 +739,27 @@ class CRM:
         )
         return valor, ("pedido" if pedidos else "orcamento"), aberto
 
-    def marcar_feito(self, negocio, materiais):
+    @staticmethod
+    def _linhas_do_orcamento(item):
+        """Os numeros das linhas de perfil que o orcamento cadastrado pede.
+
+        O CRM guarda a linha em dois lugares: em materiais[].linhas ("L.25")
+        e em tipos.J.linha / tipos.PJ.linha. Devolve so os numeros ({"25"}),
+        porque o mesmo perfil aparece escrito de varios jeitos -- "L.25",
+        "L. 25", "Solene 25".
+        """
+        linhas = set()
+        for material in (item.get("materiais") or []):
+            if isinstance(material, dict):
+                linhas |= {str(l) for l in (material.get("linhas") or [])}
+        tipos = item.get("tipos")
+        if isinstance(tipos, dict):
+            for tipo in tipos.values():
+                if isinstance(tipo, dict) and tipo.get("linha"):
+                    linhas.add(str(tipo["linha"]))
+        return {n for linha in linhas for n in re.findall(r"\d+", linha)}
+
+    def marcar_feito(self, negocio, materiais, detalhe=""):
         """Marca feitos tantos orcamentos quantas PROPOSTAS ja estao no card.
 
         Um orcamento cadastrado = uma proposta. Com dois orcamentos, o card so
@@ -755,9 +775,15 @@ class CRM:
             marcava os dois e mandava o card pra "Orcamento Pronto" sem o
             segundo orcamento ter saido.
 
-        O material da proposta ainda serve pra escolher QUAL pendente marcar
-        primeiro, quando da pra saber. Nao serve pra decidir quantos: o
-        orcamento da Leticia pede Madeira + PVC e veio num arquivo "ALM".
+        Pra escolher QUAL pendente marcar primeiro valem, nesta ordem:
+
+          1. a LINHA DO PERFIL, quando voce escreveu ela no nome do arquivo
+             ("... alm 25"). E o que resolve o caso de dois orcamentos do
+             mesmo material: a Projetar Studio tem um na L.25 e outro na L.32;
+          2. o material da proposta.
+
+        Nenhum dos dois decide QUANTOS: o orcamento da Leticia pede
+        Madeira + PVC e veio num arquivo "ALM".
 
         Retorna a lista do que ainda falta (vazia se nao falta nada).
         """
@@ -796,9 +822,19 @@ class CRM:
             do_item.discard("")
             return bool(do_item & materiais)
 
-        # Os que casam pelo material vem primeiro; entre iguais, a ordem do
-        # cadastro (sorted e estavel).
-        for item in sorted(pendentes, key=lambda i: not casa_pelo_material(i))[:max(0, faltam_marcar)]:
+        numeros = set(re.findall(r"\d+", detalhe or ""))
+
+        def prioridade(item):
+            linhas = self._linhas_do_orcamento(item)
+            # Linha exata na frente da parecida: a Projetar Studio tem um
+            # orcamento so na L.25 e outro que cita L.32 e L.25 -- a proposta
+            # "25" e do primeiro.
+            exato = bool(numeros) and linhas == numeros
+            parcial = bool(numeros) and bool(linhas & numeros)
+            return (not exato, not parcial, not casa_pelo_material(item))
+
+        # Entre iguais vale a ordem do cadastro (sorted e estavel).
+        for item in sorted(pendentes, key=prioridade)[:max(0, faltam_marcar)]:
             item["feito"] = True
 
         self._tabela("deals", f"id=eq.{negocio['id']}", "PATCH",
@@ -1013,7 +1049,7 @@ def materiais_do_nome(nome):
 
 def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
                     nome_linha=None, nome_antigo=None, parcial=False,
-                    composicao=None, materiais_reais=None):
+                    composicao=None, materiais_reais=None, detalhe=""):
     """Faz o fluxo inteiro no CRM. Nunca levanta excecao: registra no log.
 
     pdf_path    -- proposta comercial ja pronta (com Capa e Pagina Final)
@@ -1075,7 +1111,8 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
 
         # Pra escolher QUAL orcamento marcar, vale o que o PDF tem dentro; o
         # nome do arquivo so diz de que sistema a proposta veio.
-        faltando = crm.marcar_feito(negocio, materiais_reais or materiais)
+        faltando = crm.marcar_feito(negocio, materiais_reais or materiais,
+                                    detalhe=detalhe)
         if faltando:
             log(f"[{cliente}] CRM: card fica em '{_nome_etapa(negocio)}' — "
                 f"ainda falta: {', '.join(faltando)}")
