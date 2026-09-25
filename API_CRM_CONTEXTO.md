@@ -176,17 +176,26 @@ Diga **em qual unidade** as medidas vêm (centímetros ou milímetros). Hoje a t
 Levantamento mostra em **centímetros**. O robô converte pra mm internamente — só
 precisamos saber a unidade certa pra não errar por 10x.
 
-### IMPORTANTE: precisamos de TODAS as esquadrias do negócio
-O robô decide o que fazer **item por item, pelo campo `material`**:
-- **Alumínio** e **Madeira** (inclui portas internas de madeira e portinholas) → o robô faz.
-- **PVC** (linhas **Confort** / **Elegance**) → o robô **NÃO faz** (é feito em outro sistema),
-  ele só ignora esses itens.
+### IMPORTANTE: o robô faz SÓ o orçamento de ALUMÍNIO (não o de PVC)
+Um mesmo negócio pode ter **mais de um orçamento** (ex.: um de **Alumínio** e um de
+**PVC** — linhas Confort/Elegance). O PVC é feito em **outro sistema**, então o robô
+**só monta o orçamento de ALUMÍNIO**.
 
-Por isso precisamos que a API devolva **todas as esquadrias do negócio**, inclusive as
-que o vendedor eventualmente agrupou como "PVC" — porque no meio delas costuma ter
-**portas internas de madeira e portinholas que SÃO do W-Vetro** e o robô precisa fazer.
-Se um mesmo negócio tiver **mais de um levantamento** (ex.: um de PVC e um de alumínio),
-precisamos de **todos**, com o `material` de cada item, pra o robô filtrar sozinho.
+A regra é **pelo ORÇAMENTO a que o item pertence, NÃO pelo material do item**:
+- Item do orçamento de **Alumínio** → o robô faz (mesmo que seja madeira ou portinhola).
+- Item do orçamento de **PVC** → o robô **NÃO faz** — mesmo que seja porta de madeira
+  ou portinhola que "normalmente" seria W-Vetro. Se está ligado ao orçamento de PVC,
+  fica fora.
+
+**Por isso, o mais importante:** a API precisa deixar claro **a qual orçamento cada
+esquadria pertence** (Alumínio × PVC). Pode ser de dois jeitos, o que for mais fácil:
+1. **Levantamentos separados por orçamento** — então o robô lê só o levantamento do
+   orçamento de Alumínio; ou
+2. **Um campo por item** dizendo o orçamento/grupo dele (ex.: `orcamento: "Aluminio"`
+   ou `"PVC"`), pra o robô pegar só os de Alumínio.
+
+(O campo `material` de cada item continua útil, mas sozinho **não** decide — o que
+decide é o orçamento a que o item está ligado.)
 
 ---
 
