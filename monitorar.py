@@ -1018,6 +1018,10 @@ SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
 PRODUTOS_DE_MADEIRA = ("MDF", "RHODEN", "WPC", "W P C")
 # Acabamentos que IMITAM madeira num perfil de aluminio. Nao sao madeira.
 ACABAMENTOS_DE_ALUMINIO = ("AMADEIRADO", "ROVERE")
+# Produtos de aluminio que nem sempre trazem uma linha conhecida no orcamento.
+# A pontuacao some na comparacao, entao "GUARDA CORPO" pega "guarda-corpo".
+PRODUTOS_DE_ALUMINIO = ("GUARDA CORPO", "BRISE", "RIPADO",
+                        "SANFONADO", "SANFONADA", "ALUMINIO")
 # Madeira macica aparece na COR DO PERFIL, e na lista de cores do orcamento ela
 # SEMPRE comeca com a palavra "MADEIRA": MADEIRA GRAPIA, MADEIRA ITAUBA,
 # MADEIRA TAUARI. Os outros nomes de madeira da mesma lista -- LOURO FREIJO,
@@ -1157,10 +1161,17 @@ def material_do_item(item):
     # sobrevive a um item renomeado.
     if any(p in quadro for p in PRODUTOS_DE_MADEIRA):
         return "madeira"
-    if any(p in cor for p in ACABAMENTOS_DE_ALUMINIO):
-        return "aluminio"
+
+    # A cor de madeira vem ANTES dos produtos de aluminio de proposito: o
+    # ripado existe nos dois materiais, e num ripado de madeira e a cor que
+    # diz isso. "AMADEIRADO" nao cai aqui porque a busca e por palavra inteira.
     if _COR_DE_MADEIRA.search(cor) or _COR_DE_MADEIRA.search(descricao):
         return "madeira"
+
+    if any(p in cor for p in ACABAMENTOS_DE_ALUMINIO):
+        return "aluminio"
+    if any(p in descricao for p in PRODUTOS_DE_ALUMINIO):
+        return "aluminio"
     return None
 
 

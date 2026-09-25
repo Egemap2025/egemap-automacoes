@@ -255,20 +255,27 @@ de R$ 21.744,00).
    observações**: o nome da esquadria é texto livre que o orçamentista digita,
    mas as observações do projeto repetem o material ("BATENTE E VISTAS EM MDF
    ULTRA RU"), então a regra sobrevive a um item renomeado.
-4. Cor do perfil **AMADEIRADO** ou **ROVERE** → **Alumínio**. São acabamentos
-   que imitam madeira num perfil de alumínio.
-5. Cor do perfil (ou a descrição) com a palavra **MADEIRA** → **Madeira**.
+4. Cor do perfil (ou a descrição) com a palavra **MADEIRA** → **Madeira**.
    Na lista de cores do orçamento a madeira sempre começa com essa palavra
    (MADEIRA GRÁPIA, MADEIRA ITAÚBA, MADEIRA TAUARI) — conferido com o Natanael
    na tela. Os outros nomes de madeira da mesma lista, como **LOURO FREIJÓ**,
    são acabamento imitando madeira e não contam. Eu tinha chutado uma lista de
    espécies (cedro, cumaru, freijó...) e teria errado justamente nesse.
-6. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
+5. Cor do perfil **AMADEIRADO** ou **ROVERE** → **Alumínio**. São acabamentos
+   que imitam madeira num perfil de alumínio.
+6. Descrição com **GUARDA-CORPO, BRISE, RIPADO, SANFONADO ou ALUMÍNIO** →
+   **Alumínio**. Esses nem sempre trazem uma linha conhecida no orçamento.
+7. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
    dizendo qual item não foi reconhecido.
 
-A ordem entre a 3 e a 4 importa: **o produto decide antes do acabamento**. Uma
-porta de MDF com acabamento "ROVERE" continua sendo madeira; um perfil de
-alumínio com o mesmo acabamento continua sendo alumínio.
+Duas ordens que importam:
+
+- **O produto decide antes do acabamento** (3 antes de 5): uma porta de MDF com
+  acabamento "ROVERE" continua sendo madeira.
+- **A cor de madeira decide antes dos produtos de alumínio** (4 antes de 6):
+  o **ripado existe nos dois materiais** — o CRM tem tabela de cores de ripado
+  de alumínio e tabela de madeiras de ripado. Num ripado de madeira é a cor que
+  diz isso, e sem essa ordem ele iria pro alumínio.
 
 A busca por "FERRO" é a exceção: olha **só a descrição**, nunca as
 observações. A porta colonial de madeira maciça tem "FECHADURA, PUXADOR, FERRO
