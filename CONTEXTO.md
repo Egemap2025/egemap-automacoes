@@ -222,6 +222,61 @@ Essas ficam "Composição pendente" e o monitor diz isso no log.
 Teresa tinha R$ 113.711 e R$ 162.717; somar daria R$ 276.428 e inflaria a
 previsão de vendas. Na mão, o Natanael preenchia com a maior.
 
+### A composição por material é lida esquadria por esquadria
+
+Um orçamento de alumínio quase sempre tem porta de madeira dentro, e o de PVC
+costuma ter alumínio e madeira junto. Somar por arquivo não resolvia: o nome
+diz "ALM" e o conteúdo é misto. Desde 25/09/2026 o monitor lê **cada
+esquadria** do orçamento do W-Vetro e soma por material.
+
+**A leitura é por posição no papel, não pela ordem do texto.** O PDF é um
+formulário: na ordem do texto os rótulos e os valores vêm embaralhados. O
+valor de um campo é o texto **na mesma altura, logo à direita** do rótulo
+(`_valor_do_campo`).
+
+Cada quadro começa no `*LOCAL/AMBIENTE:` — **não** no `TIPO:`. Os dois ficam na
+mesma linha, mas o ambiente vem antes na folha; começando pelo `TIPO:`, a
+descrição da esquadria ficava fora do quadro e nada era reconhecido.
+
+O valor do item é o número **logo abaixo do rótulo `VLR. TOTAL`, na mesma
+coluna**. Pegar "o último número do quadro" parecia funcionar até o último item
+da página, onde isso pegava o TOTAL do orçamento inteiro (R$ 105.466,06 em vez
+de R$ 21.744,00).
+
+**As regras, na ordem (conferidas com o Natanael em cima do orçamento 2587):**
+
+1. `LINHA` contém PERFISUD / VERSATIC / DELUXE → **Alumínio**. Vem primeiro de
+   propósito: perfil de alumínio pintado de **AMADEIRADO** continua alumínio, e
+   a busca por "MADEIRA" casaria com "aMADEIRAdo".
+2. `PORTÃO` ou `FERRO` → **Outro** (portão de rolo de ferro conta separado).
+3. Descrição com **MDF ULTRA, RHODEN ou WPC** → **Madeira**. São madeira mesmo
+   pintadas de branco, e por isso não dá para reconhecer pela cor do perfil.
+4. Cor do perfil (ou a descrição) com nome de madeira — grápia, cedro,
+   cumaru... — → **Madeira**. Palavra inteira.
+5. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
+   dizendo qual item não foi reconhecido.
+
+A busca por "FERRO" olha só a descrição da esquadria, nunca as observações: a
+porta colonial de madeira maciça tem "FECHADURA, PUXADOR, FERRO DECORATIVO E
+VIDRO NÃO ESTÃO INCLUSOS" nas observações, e isso a classificava como portão.
+
+O PVC vem de outro sistema e não tem esse quadro: entra inteiro pelo total dele
+(`TOTAL GERAL (R$)`). É assim que o COMPLETO também sai dividido.
+
+**Quando o PDF TEM o quadro de esquadrias, é ele que manda** — se a divisão não
+fechar com o total, fica pendente. Cair na regra antiga ali seria mandar uma
+divisão que já se sabe errada (o arquivo se chama "ALM" mas tem madeira
+dentro). A regra antiga só vale para PDF sem quadro nenhum.
+
+Conferido no orçamento 2587 (Uillian Lamark), que tem os três tipos no mesmo
+arquivo:
+
+    Alumínio  R$ 52.520,41   (8 esquadrias PERFISUD)
+    Madeira   R$ 31.201,65   (4 portas MDF ULTRA + 1 colonial grápia)
+    Outro     R$ 21.744,00   (portão de rolo de ferro)
+    ---------------------------------------------
+    total     R$ 105.466,06  = TOTAL impresso no PDF
+
 ### Com pedido, o valor do negócio é o do PEDIDO
 
 **Por quê:** o pedido de fábrica é o número que fechou. Enquanto é orçamento

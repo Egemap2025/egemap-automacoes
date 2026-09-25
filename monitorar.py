@@ -997,6 +997,147 @@ def materiais_da_proposta(pdf_path):
     return materiais
 
 
+# ── Ler o orcamento item a item, pra saber o material de cada um ─────────────
+#
+# O W-Vetro imprime um quadro por esquadria, com os campos "*COR PERFIL:",
+# "LINHA:" e a coluna "VLR. TOTAL". A leitura e por POSICAO no papel: o valor
+# de um campo e o texto na mesma altura, logo a direita do rotulo. Ler pela
+# ordem do texto nao funciona -- o PDF e um formulario e a ordem embaralha.
+
+# O que cada coisa e, pro CRM. Conferido com o Natanael em 25/09/2026, em cima
+# do orcamento 2587 (Uillian Lamark), que tem os tres tipos no mesmo arquivo.
+LINHAS_DE_ALUMINIO = ("PERFISUD", "VERSATIC", "DELUXE")
+# Portao de rolo de ferro: nao e esquadria de nenhum dos tres materiais.
+SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
+# Portas de madeira industrializada. Sao madeira mesmo pintadas de branco, e
+# por isso nao dao pra reconhecer pela cor do perfil.
+PRODUTOS_DE_MADEIRA = ("MDF ULTRA", "RHODEN", "WPC")
+# Madeira macica aparece na COR DO PERFIL ("MADEIRA GRAPIA"). Palavra inteira,
+# senao "AMADEIRADO" -- que e pintura imitando madeira em perfil de aluminio --
+# contaria como madeira.
+_COR_DE_MADEIRA = re.compile(
+    r"\b(MADEIRA|GRAPIA|CEDRO|ANGELIM|IPE|CUMARU|ITAUBA|JATOBA|PEROBA|"
+    r"TAUARI|EUCALIPTO|PINUS|GARAPEIRA|CANELA|IMBUIA|FREIJO|MARFIM)\b")
+
+_VALOR_NO_PDF = re.compile(r"^\d{1,3}(?:\.\d{3})*,\d{2}$")
+
+
+def _sem_acento(texto):
+    t = unicodedata.normalize("NFKD", texto or "")
+    return "".join(c for c in t if not unicodedata.combining(c)).upper()
+
+
+def _linhas_com_posicao(page):
+    """[(altura, esquerda, texto)] da pagina, de cima pra baixo."""
+    saida = []
+    for b in page.get_text("dict")["blocks"]:
+        if b.get("type") != 0:
+            continue
+        for line in b["lines"]:
+            texto = "".join(s["text"] for s in line["spans"]).strip()
+            if texto:
+                saida.append((round(line["bbox"][1]), round(line["bbox"][0]), texto))
+    return sorted(saida)
+
+
+def _valor_do_campo(bloco, i):
+    """O texto na mesma altura do rotulo, logo a direita dele."""
+    y, x, _ = bloco[i]
+    for yy, xx, t in bloco:
+        if abs(yy - y) <= 3 and xx > x and not t.startswith("*") and not t.endswith(":"):
+            return t
+    return ""
+
+
+def itens_do_orcamento(pdf_path):
+    """Cada esquadria do orcamento: tipo, cor do perfil, linha e valor.
+
+    Vazio quando o PDF nao tem esse quadro (ex.: orcamento de PVC, que vem de
+    outro sistema) -- ai quem chama usa o total, como antes.
+    """
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception:
+        return []
+    try:
+        paginas = [_linhas_com_posicao(p) for p in doc]
+    except Exception:
+        return []
+    finally:
+        doc.close()
+
+    achados = []
+    for linhas in paginas:
+        # O quadro comeca no "*LOCAL/AMBIENTE:", e nao no "TIPO:": os dois
+        # ficam na mesma altura, mas o ambiente vem antes na folha. Comecando
+        # pelo TIPO, a descricao da esquadria ficava de fora do quadro.
+        marcos = [i for i, (_, _, t) in enumerate(linhas) if t == "*LOCAL/AMBIENTE:"]
+        for n, ini in enumerate(marcos):
+            bloco = linhas[ini:(marcos[n + 1] if n + 1 < len(marcos) else len(linhas))]
+
+            campos, altura = {}, {}
+            for i, (y, _, t) in enumerate(bloco):
+                if t in ("TIPO:", "*COR PERFIL:", "LINHA:", "*LOCAL/AMBIENTE:"):
+                    campos[t.strip("*:")] = _valor_do_campo(bloco, i)
+                    altura[t.strip("*:")] = y
+            if "LINHA" not in campos:
+                continue
+
+            # O que a esquadria e ("PORTA DE GIRO MDF ULTRA | GRANDO") fica
+            # entre o ambiente e a cor do perfil. Nao da pra usar o quadro
+            # inteiro: as OBSERVACOES falam de "FERRO DECORATIVO" numa porta de
+            # madeira, e isso a classificava como portao.
+            de = altura.get("LOCAL/AMBIENTE", -1)
+            ate = altura.get("COR PERFIL", -1)
+            descricao = " ".join(
+                t for y, _, t in bloco
+                if de < y < ate and not t.endswith(":") and not t.startswith("*")
+            ) if ate > de >= 0 else ""
+
+            # O valor do item e o numero logo ABAIXO do rotulo "VLR. TOTAL", na
+            # mesma coluna. Pegar o ultimo numero do quadro nao serve: no ultimo
+            # item da pagina isso pegaria o TOTAL do orcamento inteiro.
+            rotulo = next(((y, x) for y, x, t in bloco if t == "VLR. TOTAL"), None)
+            if rotulo is None:
+                continue
+            ry, rx = rotulo
+            abaixo = [(y, abs(x - rx), t) for y, x, t in bloco
+                      if y > ry and _VALOR_NO_PDF.fullmatch(t)]
+            if not abaixo:
+                continue
+            _, _, bruto = min(abaixo)
+
+            achados.append({
+                "tipo": campos.get("TIPO", ""),
+                "cor_perfil": campos.get("COR PERFIL", ""),
+                "linha": campos["LINHA"],
+                "descricao": descricao,
+                "valor": _valor(bruto),
+            })
+    return achados
+
+
+def material_do_item(item):
+    """"pvc", "aluminio", "madeira", "outro" -- ou None quando nao reconheco.
+
+    A ordem importa. A linha manda primeiro: perfil de aluminio pintado de
+    "AMADEIRADO" continua sendo aluminio.
+    """
+    linha = _sem_acento(item.get("linha"))
+    descricao = _sem_acento(item.get("descricao"))
+    cor = _sem_acento(item.get("cor_perfil"))
+
+    if any(p in linha for p in LINHAS_DE_ALUMINIO):
+        return "aluminio"
+    if any(p in linha or p in descricao for p in SINAIS_DE_OUTRO):
+        return "outro"
+    if any(p in descricao for p in PRODUTOS_DE_MADEIRA):
+        return "madeira"
+    if _COR_DE_MADEIRA.search(cor) or _COR_DE_MADEIRA.search(descricao):
+        return "madeira"
+    return None
+
+
 def composicao_da_proposta(pdf_path, materiais, valor):
     """Quanto da proposta e de cada material, pro CRM preencher a composicao.
 
@@ -1005,20 +1146,28 @@ def composicao_da_proposta(pdf_path, materiais, valor):
     que preencher na mao -- era o que estava acontecendo com tudo o que o
     monitor mandava.
 
-    So devolve quando tem CERTEZA da divisao:
-      - proposta de um material so: o valor inteiro vai nele;
-      - COMPLETO de PVC + aluminio: os dois totais que ja estao dentro do PDF
-        montado, e so se eles somarem exatamente o total da Pagina Final.
+    Primeiro tenta ler ESQUADRIA POR ESQUADRIA: e assim que um orcamento de
+    aluminio que tem porta de madeira dentro sai dividido certo. Se o PDF nao
+    tiver esse quadro, ou tiver uma esquadria que o monitor nao sabe
+    classificar, cai nas regras antigas (proposta de um material so, ou
+    COMPLETO de PVC + aluminio pelos dois totais).
 
     A conferencia da soma nao e frescura: o gatilho do banco recalcula o valor
     da linha somando a composicao, entao uma divisao errada mudaria o valor da
-    proposta no CRM.
-
-    Um W-Vetro que traz madeira e aluminio no mesmo PDF sai com um total so:
-    nao da pra dividir, entao devolve vazio e a composicao fica pendente.
+    proposta no CRM. Quando nao fecha, devolve vazio e a composicao fica
+    pendente -- errar pra menos custa um preenchimento na mao; errar pra mais
+    muda o valor do orcamento do cliente.
     """
     if crm_egemap is None or valor <= 0:
         return []
+
+    itens = itens_do_orcamento(pdf_path)
+    if itens:
+        # O PDF tem o quadro de esquadrias, entao e ele que manda. Se a divisao
+        # nao fechar, fica pendente: cair na regra antiga aqui seria mandar uma
+        # divisao que eu ja sei que esta errada (o arquivo se chama "ALM" mas
+        # tem porta de madeira dentro).
+        return _somar_por_material(itens, pdf_path, valor)
 
     if len(materiais) == 1:
         material = crm_egemap.MATERIAL_NA_COMPOSICAO.get(next(iter(materiais)))
@@ -1032,6 +1181,35 @@ def composicao_da_proposta(pdf_path, materiais, valor):
                     (crm_egemap.MATERIAL_NA_COMPOSICAO["aluminio"], alm)]
 
     return []
+
+
+def _somar_por_material(itens, pdf_path, valor):
+    """Soma as esquadrias por material. Vazio se ficar qualquer duvida.
+
+    O PVC vem de outro sistema e nao tem esse quadro de itens, entao entra
+    inteiro pelo total dele -- e assim o COMPLETO tambem sai dividido.
+    """
+    soma = {}
+    for item in itens:
+        material = material_do_item(item)
+        if material is None:
+            log(f"  Composicao: nao sei de que material e o item "
+                f"{item['tipo'] or '?'} ({item['linha']}) — deixei pendente.")
+            return []
+        soma[material] = soma.get(material, 0.0) + item["valor"]
+
+    pvc = _valor(extract_total_pvc(pdf_path))
+    if pvc > 0:
+        soma["pvc"] = soma.get("pvc", 0.0) + pvc
+
+    total = sum(soma.values())
+    if abs(total - valor) > 0.02:
+        log(f"  Composicao: as esquadrias somam {format_brl(total)} e a proposta "
+            f"e de {format_brl(valor)} — deixei pendente.")
+        return []
+
+    return [(crm_egemap.MATERIAL_NA_COMPOSICAO[m], round(soma[m], 2))
+            for m in crm_egemap.ORDEM_DA_COMPOSICAO if soma.get(m)]
 
 
 # Proposta ja mandada ao CRM: caminho -> (mtime, tamanho)

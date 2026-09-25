@@ -113,7 +113,11 @@ MATERIAL_NA_COMPOSICAO = {
     "pvc": "PVC",
     "aluminio": "Alumínio",
     "madeira": "Madeira",
+    # Portao de rolo de ferro e o que mais nao for esquadria dos tres.
+    "outro": "Outro",
 }
+# A ordem em que as linhas aparecem no card.
+ORDEM_DA_COMPOSICAO = ("pvc", "aluminio", "madeira", "outro")
 MATERIAL_MISTO = "Misto"
 
 
