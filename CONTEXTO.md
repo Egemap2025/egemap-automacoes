@@ -265,8 +265,17 @@ de R$ 21.744,00).
    que imitam madeira num perfil de alumínio.
 6. Descrição com **GUARDA-CORPO, BRISE, RIPADO, SANFONADO ou ALUMÍNIO** →
    **Alumínio**. Esses nem sempre trazem uma linha conhecida no orçamento.
-7. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
-   dizendo qual item não foi reconhecido.
+7. **O que sobrar → Alumínio**, pela cor do perfil. No orçamento esse campo se
+   chama literalmente **"COR ALUMÍNIO | PERFIL"** e é obrigatório, então uma
+   esquadria com cor preenchida que não é madeira nem portão é de alumínio.
+   Veio do item **PA1** do Airton Maciel (linha L. 30, perfil preto), que tinha
+   ficado pendente.
+8. **Sem nem a cor do perfil → não sei**, e a composição fica pendente.
+
+Como a regra 7 é palpite por eliminação, o monitor **diz no log** quais itens
+caíram nela: `contei como aluminio, pela cor do perfil: PA1 (L. 30)`. Assim um
+produto de madeira com nome novo não entra no alumínio calado — se aparecer um
+item errado nessa lista, é só mandar o nome que vira regra própria.
 
 Duas ordens que importam:
 

@@ -1164,10 +1164,19 @@ def itens_do_orcamento(pdf_path):
 
 
 def material_do_item(item):
-    """"pvc", "aluminio", "madeira", "outro" -- ou None quando nao reconheco.
+    """(material, como_eu_soube). material None quando nao da pra saber.
 
     A ordem importa. A linha manda primeiro: perfil de aluminio pintado de
     "AMADEIRADO" continua sendo aluminio.
+
+    No fim, o que sobra conta como ALUMINIO pela cor do perfil -- no orcamento
+    esse campo se chama "COR ALUMINIO | PERFIL" e e obrigatorio, entao uma
+    esquadria com cor preenchida e que nao e madeira nem portao e de aluminio.
+    Foi o caso do item PA1 do Airton Maciel (linha L. 30, perfil preto).
+
+    Como esse ultimo caso e um palpite pela eliminacao, quem chama avisa no log
+    quais itens cairam nele -- assim um produto de madeira com nome novo nao
+    entra no aluminio calado.
     """
     linha = _sem_acento(item.get("linha"))
     descricao = _sem_acento(item.get("descricao"))
@@ -1175,11 +1184,11 @@ def material_do_item(item):
     cor = _sem_acento(item.get("cor_perfil"))
 
     if any(p in linha for p in LINHAS_DE_ALUMINIO):
-        return "aluminio"
+        return "aluminio", "linha"
     # "FERRO" so vale na descricao da esquadria. Nas OBSERVACOES de uma porta
     # de madeira aparece "FERRO DECORATIVO", e isso a classificava como portao.
     if any(p in linha or p in descricao for p in SINAIS_DE_OUTRO):
-        return "outro"
+        return "outro", "portao"
     # O PRODUTO decide antes do acabamento: uma porta de MDF com acabamento
     # "ROVERE" continua sendo madeira.
     #
@@ -1188,19 +1197,22 @@ def material_do_item(item):
     # repetem o material ("BATENTE E VISTAS EM MDF ULTRA RU"). Assim a regra
     # sobrevive a um item renomeado.
     if any(p in quadro for p in PRODUTOS_DE_MADEIRA):
-        return "madeira"
+        return "madeira", "produto"
 
     # A cor de madeira vem ANTES dos produtos de aluminio de proposito: o
     # ripado existe nos dois materiais, e num ripado de madeira e a cor que
     # diz isso. "AMADEIRADO" nao cai aqui porque a busca e por palavra inteira.
     if _COR_DE_MADEIRA.search(cor) or _COR_DE_MADEIRA.search(descricao):
-        return "madeira"
+        return "madeira", "cor"
 
     if any(p in cor for p in ACABAMENTOS_DE_ALUMINIO):
-        return "aluminio"
+        return "aluminio", "acabamento"
     if any(p in descricao for p in PRODUTOS_DE_ALUMINIO):
-        return "aluminio"
-    return None
+        return "aluminio", "produto"
+
+    if cor:
+        return "aluminio", "padrao"
+    return None, ""
 
 
 def composicao_da_proposta(pdf_path, materiais, valor, cliente=""):
@@ -1254,14 +1266,20 @@ def _somar_por_material(itens, pdf_path, valor, cliente=""):
     O PVC vem de outro sistema e nao tem esse quadro de itens, entao entra
     inteiro pelo total dele -- e assim o COMPLETO tambem sai dividido.
     """
-    soma = {}
+    soma, por_eliminacao = {}, []
     for item in itens:
-        material = material_do_item(item)
+        material, como = material_do_item(item)
         if material is None:
             log(f"[{cliente}] Composicao: nao sei de que material e o item "
                 f"{item['tipo'] or '?'} ({item['linha']}) — deixei pendente.")
             return []
+        if como == "padrao":
+            por_eliminacao.append(f"{item['tipo'] or '?'} ({item['linha']})")
         soma[material] = soma.get(material, 0.0) + item["valor"]
+
+    if por_eliminacao:
+        log(f"[{cliente}] Composicao: contei como aluminio, pela cor do perfil: "
+            + ", ".join(por_eliminacao))
 
     pvc = _valor(extract_total_pvc(pdf_path))
     if pvc > 0:
