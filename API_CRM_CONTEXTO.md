@@ -176,6 +176,18 @@ Diga **em qual unidade** as medidas vêm (centímetros ou milímetros). Hoje a t
 Levantamento mostra em **centímetros**. O robô converte pra mm internamente — só
 precisamos saber a unidade certa pra não errar por 10x.
 
+### IMPORTANTE: precisamos de TODAS as esquadrias do negócio
+O robô decide o que fazer **item por item, pelo campo `material`**:
+- **Alumínio** e **Madeira** (inclui portas internas de madeira e portinholas) → o robô faz.
+- **PVC** (linhas **Confort** / **Elegance**) → o robô **NÃO faz** (é feito em outro sistema),
+  ele só ignora esses itens.
+
+Por isso precisamos que a API devolva **todas as esquadrias do negócio**, inclusive as
+que o vendedor eventualmente agrupou como "PVC" — porque no meio delas costuma ter
+**portas internas de madeira e portinholas que SÃO do W-Vetro** e o robô precisa fazer.
+Se um mesmo negócio tiver **mais de um levantamento** (ex.: um de PVC e um de alumínio),
+precisamos de **todos**, com o `material` de cada item, pra o robô filtrar sozinho.
+
 ---
 
 ## Resumo do que precisamos do colega
