@@ -925,11 +925,18 @@ monitor subiu o `MAD` às 18:44:44 e apagou o `ALM`; ele repôs o `ALM` na mão
 às 18:45:25. No log aparecia `removi versao anterior de hoje`.
 
 Hoje a regra é: substitui só quando os materiais são **exatamente os mesmos**
-(`_mesma_opcao`). E nome **sem** código de material nunca conta como igual —
+**e** o detalhe depois do código é o mesmo (`_mesma_opcao`, que compara os dois
+nomes de arquivo). E nome **sem** código de material nunca conta como igual —
 proposta renomeada para `BRANCO`/`CINZA`, ou a final do `COMPLETO`. É o mesmo
 espírito do CRM, onde duas opções viram duas linhas que convivem. Se for mesmo
 a mesma proposta refeita, o nome do arquivo é o mesmo e o envio passa por cima
 dela, sem precisar apagar nada antes.
+
+**Só a proposta do MESMO DIA é substituída.** A de outro dia fica guardada na
+pasta do cliente — confirmado de novo pelo Natanael em 25/09/2026, com o
+motivo: *"posso precisar da proposta antiga para comparar com a nova"*. Quem
+garante isso é o `_lancar_no_drive`, que recusa proposta cuja data no nome não
+é a de hoje, e o nome do arquivo, que carrega a data.
 
 Regra geral que vale a pena manter: **na dúvida, não apague.** Acumular um PDF
 a mais é barato; perder a proposta do cliente não.
