@@ -1012,9 +1012,10 @@ SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
 # Portas de madeira industrializada. Sao madeira mesmo pintadas de branco, e
 # por isso nao dao pra reconhecer pela cor do perfil.
 PRODUTOS_DE_MADEIRA = ("MDF ULTRA", "RHODEN", "WPC")
+# Acabamentos que IMITAM madeira num perfil de aluminio. Nao sao madeira.
+ACABAMENTOS_DE_ALUMINIO = ("AMADEIRADO", "ROVERE")
 # Madeira macica aparece na COR DO PERFIL ("MADEIRA GRAPIA"). Palavra inteira,
-# senao "AMADEIRADO" -- que e pintura imitando madeira em perfil de aluminio --
-# contaria como madeira.
+# senao "AMADEIRADO" contaria como madeira.
 _COR_DE_MADEIRA = re.compile(
     r"\b(MADEIRA|GRAPIA|CEDRO|ANGELIM|IPE|CUMARU|ITAUBA|JATOBA|PEROBA|"
     r"TAUARI|EUCALIPTO|PINUS|GARAPEIRA|CANELA|IMBUIA|FREIJO|MARFIM)\b")
@@ -1131,8 +1132,12 @@ def material_do_item(item):
         return "aluminio"
     if any(p in linha or p in descricao for p in SINAIS_DE_OUTRO):
         return "outro"
+    # O PRODUTO decide antes do acabamento: uma porta de MDF com acabamento
+    # "ROVERE" continua sendo madeira.
     if any(p in descricao for p in PRODUTOS_DE_MADEIRA):
         return "madeira"
+    if any(p in cor for p in ACABAMENTOS_DE_ALUMINIO):
+        return "aluminio"
     if _COR_DE_MADEIRA.search(cor) or _COR_DE_MADEIRA.search(descricao):
         return "madeira"
     return None

@@ -251,10 +251,16 @@ de R$ 21.744,00).
 2. `PORTÃO` ou `FERRO` → **Outro** (portão de rolo de ferro conta separado).
 3. Descrição com **MDF ULTRA, RHODEN ou WPC** → **Madeira**. São madeira mesmo
    pintadas de branco, e por isso não dá para reconhecer pela cor do perfil.
-4. Cor do perfil (ou a descrição) com nome de madeira — grápia, cedro,
+4. Cor do perfil **AMADEIRADO** ou **ROVERE** → **Alumínio**. São acabamentos
+   que imitam madeira num perfil de alumínio.
+5. Cor do perfil (ou a descrição) com nome de madeira — grápia, cedro,
    cumaru... — → **Madeira**. Palavra inteira.
-5. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
+6. **Qualquer outra coisa → não sei**, e a composição fica pendente, com o log
    dizendo qual item não foi reconhecido.
+
+A ordem entre a 3 e a 4 importa: **o produto decide antes do acabamento**. Uma
+porta de MDF com acabamento "ROVERE" continua sendo madeira; um perfil de
+alumínio com o mesmo acabamento continua sendo alumínio.
 
 A busca por "FERRO" olha só a descrição da esquadria, nunca as observações: a
 porta colonial de madeira maciça tem "FECHADURA, PUXADOR, FERRO DECORATIVO E
