@@ -1006,7 +1006,7 @@ def materiais_da_proposta(pdf_path):
 
 # O que cada coisa e, pro CRM. Conferido com o Natanael em 25/09/2026, em cima
 # do orcamento 2587 (Uillian Lamark), que tem os tres tipos no mesmo arquivo.
-LINHAS_DE_ALUMINIO = ("PERFISUD", "VERSATIC", "DELUXE")
+LINHAS_DE_ALUMINIO = ("PERFISUD", "VERSATIC", "DELUXE", "SOLENE")
 # Portao de rolo de ferro: nao e esquadria de nenhum dos tres materiais.
 SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
 # Portas de madeira industrializada. Sao madeira mesmo pintadas de branco, e

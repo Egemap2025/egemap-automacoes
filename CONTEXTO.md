@@ -245,7 +245,7 @@ de R$ 21.744,00).
 
 **As regras, na ordem (conferidas com o Natanael em cima do orçamento 2587):**
 
-1. `LINHA` contém PERFISUD / VERSATIC / DELUXE → **Alumínio**. Vem primeiro de
+1. `LINHA` contém PERFISUD / VERSATIC / DELUXE / SOLENE → **Alumínio**. Vem primeiro de
    propósito: perfil de alumínio pintado de **AMADEIRADO** continua alumínio, e
    a busca por "MADEIRA" casaria com "aMADEIRAdo".
 2. `PORTÃO` ou `FERRO` → **Outro** (portão de rolo de ferro conta separado).
