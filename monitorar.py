@@ -1011,7 +1011,11 @@ LINHAS_DE_ALUMINIO = ("PERFISUD", "VERSATIC", "DELUXE")
 SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
 # Portas de madeira industrializada. Sao madeira mesmo pintadas de branco, e
 # por isso nao dao pra reconhecer pela cor do perfil.
-PRODUTOS_DE_MADEIRA = ("MDF ULTRA", "RHODEN", "WPC")
+#
+# So o pedaco que nunca muda: "MDF" pega "MDF ULTRA", "MDF ULTRA RU" e
+# "MDFULTRA", que e como o codigo do produto escreve.
+# "W P C" cobre a grafia com ponto ("W.P.C."), que a normalizacao separa.
+PRODUTOS_DE_MADEIRA = ("MDF", "RHODEN", "WPC", "W P C")
 # Acabamentos que IMITAM madeira num perfil de aluminio. Nao sao madeira.
 ACABAMENTOS_DE_ALUMINIO = ("AMADEIRADO", "ROVERE")
 # Madeira macica aparece na COR DO PERFIL, e na lista de cores do orcamento ela
@@ -1026,8 +1030,14 @@ _VALOR_NO_PDF = re.compile(r"^\d{1,3}(?:\.\d{3})*,\d{2}$")
 
 
 def _sem_acento(texto):
+    """MAIUSCULA, sem acento e sem pontuacao, pra comparar texto de PDF.
+
+    A pontuacao vira espaco porque o mesmo produto aparece escrito de varios
+    jeitos: "MDF ULTRA", "MDF-ULTRA", 'MDF ULTRA RU"'.
+    """
     t = unicodedata.normalize("NFKD", texto or "")
-    return "".join(c for c in t if not unicodedata.combining(c)).upper()
+    t = "".join(c for c in t if not unicodedata.combining(c)).upper()
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", t).split())
 
 
 def _linhas_com_posicao(page):
