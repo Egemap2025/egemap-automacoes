@@ -395,6 +395,31 @@ Hoje o `COMPLETO` só roda quando não há nada da mesma pasta na fila de
 envolver (com teto de 2 minutos, pra nunca ficar preso), e o que ele consome
 sai da fila (`_descartar_single`).
 
+### Quantos orçamentos ficam feitos = quantas propostas estão no card
+
+25/09/2026, card da **Projetar Studio**: dois orçamentos cadastrados, os dois
+em Alumínio (L.25 e L.32), e dois PDFs salvos. O Natanael tirou print entre um
+PDF e o outro e viu "2 orçamentos · 0 feitos". Conferi no banco: no fim os dois
+ficaram feitos e o card andou para "Orçamento Pronto" — funcionou. Mas o código
+ao lado estava errado.
+
+A regra antiga marcava **todos** os pendentes cujo material batesse. Com os dois
+orçamentos em alumínio, o PDF "ALM" **sozinho** marcava os dois e mandava o card
+para "Orçamento Pronto" sem o segundo orçamento ter saído. E o PDF "MAD" não
+marcava nenhum, porque material nenhum batia.
+
+Hoje a conta é pelo **número de propostas anexadas** no card (linhas com
+`tipo='orcamento'`): ficam feitos tantos orçamentos quantas propostas existirem,
+no máximo o total cadastrado. Isso resolve as duas pontas de uma vez:
+
+- uma proposta nunca marca mais de um orçamento;
+- a mesma proposta salva de novo, corrigida, **substitui** a linha que já
+  existia — o total de linhas não muda, então nada é marcado a mais.
+
+O material continua servindo para escolher **qual** pendente marcar primeiro,
+nunca para decidir **quantos** — o orçamento da Letícia pede Madeira + PVC e
+veio num arquivo "ALM".
+
 ### Um orçamento cadastrado = uma proposta
 
 **Por quê:** a primeira versão exigia que a proposta cobrisse todos os

@@ -739,7 +739,24 @@ class CRM:
         return valor, ("pedido" if pedidos else "orcamento"), aberto
 
     def marcar_feito(self, negocio, materiais):
-        """Marca como feitos os orcamentos que esta proposta cobre.
+        """Marca feitos tantos orcamentos quantas PROPOSTAS ja estao no card.
+
+        Um orcamento cadastrado = uma proposta. Com dois orcamentos, o card so
+        anda quando os dois PDFs sairem -- e e por isso que a conta e feita
+        pelo NUMERO de propostas anexadas, e nao marcando um a cada envio:
+
+          - a mesma proposta salva de novo, depois de corrigida, substitui a
+            linha que ja existia. O total de linhas nao muda, entao nada e
+            marcado a mais;
+          - uma proposta nao marca mais de um orcamento. Antes, ela marcava
+            TODOS os pendentes do mesmo material: no card da Projetar Studio,
+            com dois orcamentos os dois em aluminio, o PDF "ALM" sozinho
+            marcava os dois e mandava o card pra "Orcamento Pronto" sem o
+            segundo orcamento ter saido.
+
+        O material da proposta ainda serve pra escolher QUAL pendente marcar
+        primeiro, quando da pra saber. Nao serve pra decidir quantos: o
+        orcamento da Leticia pede Madeira + PVC e veio num arquivo "ALM".
 
         Retorna a lista do que ainda falta (vazia se nao falta nada).
         """
@@ -750,42 +767,36 @@ class CRM:
             except ValueError:
                 detalhes = []
 
-        if isinstance(detalhes, list) and detalhes:
-            pendentes = [i for i in detalhes if isinstance(i, dict) and not i.get("feito")]
+        if not (isinstance(detalhes, list) and detalhes):
+            return []
 
-            # Um orcamento cadastrado = uma proposta. O material do nome do
-            # arquivo (ALM/PVC/MAD) nao serve pra conferir: o orcamento da
-            # Leticia pede Madeira + PVC e veio num arquivo "ALM"; o do
-            # Dionatan pedia Alumínio + Madeira + PVC e saiu num "Pvc" so.
-            if len(detalhes) == 1:
-                detalhes[0]["feito"] = True
+        propostas = self._tabela(
+            "deal_budgets",
+            f"select=id&deal_id=eq.{negocio['id']}&tipo=eq.orcamento",
+        )
+        quantos_feitos = min(len(propostas), len(detalhes))
 
-            else:
-                # Varios orcamentos no mesmo negocio sao opcoes separadas (ex.:
-                # uma em PVC e outra em Aluminio). Ai o material ajuda a saber
-                # qual delas acabou de sair.
-                marcou = False
-                for item in pendentes:
-                    do_item = {
-                        normalizar(m.get("material"))
-                        for m in (item.get("materiais") or []) if isinstance(m, dict)
-                    }
-                    do_item.discard("")
-                    if do_item & materiais:
-                        item["feito"] = True
-                        marcou = True
+        itens = [i for i in detalhes if isinstance(i, dict)]
+        pendentes = [i for i in itens if not i.get("feito")]
+        faltam_marcar = quantos_feitos - (len(itens) - len(pendentes))
 
-                # Nenhum casou pelo material, mas so falta um: e esse.
-                if not marcou and len(pendentes) == 1:
-                    pendentes[0]["feito"] = True
+        def casa_pelo_material(item):
+            do_item = {
+                normalizar(m.get("material"))
+                for m in (item.get("materiais") or []) if isinstance(m, dict)
+            }
+            do_item.discard("")
+            return bool(do_item & materiais)
 
-            self._tabela("deals", f"id=eq.{negocio['id']}", "PATCH",
-                         {"orcamento_detalhes": detalhes})
+        # Os que casam pelo material vem primeiro; entre iguais, a ordem do
+        # cadastro (sorted e estavel).
+        for item in sorted(pendentes, key=lambda i: not casa_pelo_material(i))[:max(0, faltam_marcar)]:
+            item["feito"] = True
 
-            return [i.get("nome") or "orcamento"
-                    for i in detalhes if isinstance(i, dict) and not i.get("feito")]
+        self._tabela("deals", f"id=eq.{negocio['id']}", "PATCH",
+                     {"orcamento_detalhes": detalhes})
 
-        return []
+        return [i.get("nome") or "orcamento" for i in itens if not i.get("feito")]
 
     def mover_para_pronto(self, negocio_id):
         self._tabela("deals", f"id=eq.{negocio_id}", "PATCH", {
