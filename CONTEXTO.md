@@ -395,6 +395,33 @@ Hoje o `COMPLETO` só roda quando não há nada da mesma pasta na fila de
 envolver (com teto de 2 minutos, pra nunca ficar preso), e o que ele consome
 sai da fila (`_descartar_single`).
 
+### Um campo esquecido no SELECT desligou a trava do "Orçamento Pronto"
+
+Em 24/09/2026 mudei o `encontrar_negocio` para procurar em `negocios_que_valem`
+(abertos + ganhos), para o homônimo aparecer. Não percebi que essa consulta
+**não trazia o `orcamento_detalhes`** — só a `negocios_abertos` trazia.
+
+Sem esse campo, o `marcar_feito` recebia lista vazia, devolvia "não falta
+nada", e o monitor mandava o card para **"Orçamento Pronto" já na primeira
+proposta**, mesmo com outro orçamento pendente. E não marcava nenhum como
+feito: foi isso que o Natanael viu no card da Projetar Studio, "2 orçamentos ·
+0 feitos".
+
+Conferi os cards que andaram para "Orçamento Pronto" nesses dois dias: todos os
+outros tinham **um orçamento só**, então nenhum andou errado. Deu sorte.
+
+Duas correções:
+
+1. `negocios_que_valem` passou a trazer o `orcamento_detalhes`.
+2. O `marcar_feito` agora **falha travando**: se o campo não veio na consulta,
+   ele devolve "(não consegui ler os orçamentos cadastrados)" e o card não anda.
+   Antes, campo faltando parecia "não falta nada" — o silêncio empurrava o card.
+
+**A lição:** uma regra de negócio que depende de um campo do banco precisa
+reclamar quando o campo não chega. Lista vazia e campo ausente são coisas
+diferentes, e tratá-los igual transformou um esquecimento num card andando
+sozinho.
+
 ### Quantos orçamentos ficam feitos = quantas propostas estão no card
 
 25/09/2026, card da **Projetar Studio**: dois orçamentos cadastrados, os dois

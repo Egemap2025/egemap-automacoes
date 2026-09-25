@@ -760,6 +760,13 @@ class CRM:
 
         Retorna a lista do que ainda falta (vazia se nao falta nada).
         """
+        # Se a consulta que trouxe o negocio esqueceu esse campo, nao da pra
+        # saber se falta orcamento -- e ai o card NAO pode andar. Falhar assim,
+        # travando, e o contrario do que acontecia: com a lista vazia o monitor
+        # achava que nao faltava nada e movia na primeira proposta.
+        if "orcamento_detalhes" not in negocio:
+            return ["(nao consegui ler os orcamentos cadastrados)"]
+
         detalhes = negocio.get("orcamento_detalhes") or []
         if isinstance(detalhes, str):
             try:
@@ -812,10 +819,16 @@ class CRM:
         O pedido chega depois do contrato assinado, e nessa altura o card
         costuma estar marcado como ganho. Se olhasse so os abertos, quase
         todo contrato ficaria de fora.
+
+        O "orcamento_detalhes" tem que vir junto: e dele que o marcar_feito
+        sabe quantos orcamentos o cliente pediu. Sem esse campo a lista chega
+        vazia, o monitor acha que nao falta nada e manda o card pra "Orcamento
+        Pronto" na PRIMEIRA proposta. Foi o que aconteceu de 24 a 25/09/2026,
+        quando a busca da proposta passou a usar esta funcao.
         """
         return self._tabela(
             "deals",
-            "select=id,title,value,status,stage_id,contact_id,"
+            "select=id,title,value,status,orcamento_detalhes,stage_id,contact_id,"
             "pipeline_stages(name),contacts(first_name,last_name)"
             f"&org_id=eq.{self.org_id}&status=in.({','.join(STATUS_QUE_VALEM)})",
         )
