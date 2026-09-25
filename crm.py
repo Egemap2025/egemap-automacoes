@@ -118,6 +118,7 @@ MATERIAL_NA_COMPOSICAO = {
 }
 # A ordem em que as linhas aparecem no card.
 ORDEM_DA_COMPOSICAO = ("pvc", "aluminio", "madeira", "outro")
+MATERIAL_DA_COMPOSICAO = {v: k for k, v in MATERIAL_NA_COMPOSICAO.items()}
 MATERIAL_MISTO = "Misto"
 
 
@@ -1012,7 +1013,7 @@ def materiais_do_nome(nome):
 
 def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
                     nome_linha=None, nome_antigo=None, parcial=False,
-                    composicao=None):
+                    composicao=None, materiais_reais=None):
     """Faz o fluxo inteiro no CRM. Nunca levanta excecao: registra no log.
 
     pdf_path    -- proposta comercial ja pronta (com Capa e Pagina Final)
@@ -1072,7 +1073,9 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
         if not na_fila:
             return True
 
-        faltando = crm.marcar_feito(negocio, materiais)
+        # Pra escolher QUAL orcamento marcar, vale o que o PDF tem dentro; o
+        # nome do arquivo so diz de que sistema a proposta veio.
+        faltando = crm.marcar_feito(negocio, materiais_reais or materiais)
         if faltando:
             log(f"[{cliente}] CRM: card fica em '{_nome_etapa(negocio)}' — "
                 f"ainda falta: {', '.join(faltando)}")

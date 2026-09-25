@@ -96,6 +96,25 @@ def _sufixo_do_nome(pdf_path):
     return stem[m.end():] if m else stem
 
 
+def detalhe_do_nome(pdf_path):
+    """O que voce escreveu DEPOIS do codigo do material, no nome do arquivo.
+
+    "UILLIAN LAMARK-2587 alm 25" -> "25". E o que separa duas propostas do
+    mesmo material: a linha 25 e a linha 32 sao duas opcoes da mesma obra, e
+    nenhuma pode tomar o lugar da outra -- nem na pasta, nem no Drive, nem no
+    CRM. Sem isso as duas viravam "... 25-09 ALM.pdf" e a segunda apagava a
+    primeira.
+
+    Vazio quando o nome nao tem codigo de material nenhum.
+    """
+    palavras = [p for p in re.split(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+", _sufixo_do_nome(pdf_path)) if p]
+    ultimo = max((i for i, p in enumerate(palavras)
+                  if p.upper() in CODIGOS_DE_MATERIAL), default=-1)
+    if ultimo < 0:
+        return ""
+    return " ".join(palavras[ultimo + 1:]).upper()
+
+
 def codigos_no_nome(pdf_path):
     """Codigos de material no nome do arquivo, comparados por palavra inteira."""
     palavras = re.split(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+", _sufixo_do_nome(pdf_path).upper())
@@ -917,9 +936,18 @@ def nome_da_linha(pdf_path, materiais=None):
     sufixo = stem[m.end():].strip(" -_") if m else ""
     palavras = sufixo.split()
 
-    so_codigo = not palavras or all(p.upper() in CODIGOS_DE_MATERIAL for p in palavras)
-    if so_codigo and materiais and crm_egemap is not None:
-        return crm_egemap.nome_do_orcamento(materiais)
+    # Separa os codigos do comeco ("ALM") do que voce escreveu depois ("25").
+    i = 0
+    while i < len(palavras) and palavras[i].upper() in CODIGOS_DE_MATERIAL:
+        i += 1
+    codigos, extras = palavras[:i], palavras[i:]
+
+    if (codigos or not extras) and materiais and crm_egemap is not None:
+        # Nome bonito do material, mantendo a linha do perfil quando tem:
+        # "ALM 25" vira "Aluminio 25", que e o que separa as duas opcoes.
+        bonito = crm_egemap.nome_do_orcamento(materiais)
+        return (f"{bonito} {' '.join(e.capitalize() for e in extras)}"
+                if extras else bonito)
 
     if not palavras:
         return "Orcamento"
@@ -1332,6 +1360,14 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
         log(f"[{client}] CRM: nao sei dividir {arquivo} por material — "
             f"a composicao vai ficar pendente no card.")
 
+    # O que o PDF REALMENTE tem dentro, pra escolher qual orcamento cadastrado
+    # marcar como feito. O nome do arquivo so diz de onde a proposta veio: um
+    # "MAD" do W-Vetro costuma ter aluminio dentro tambem.
+    materiais_reais = {crm_egemap.MATERIAL_DA_COMPOSICAO[nome]
+                       for nome, _ in composicao
+                       if nome in crm_egemap.MATERIAL_DA_COMPOSICAO}
+    materiais_reais.discard("outro")
+
     threading.Thread(
         target=crm_egemap.lancar_proposta,
         args=(pdf_path, client, valor, materiais),
@@ -1339,7 +1375,8 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
                 "nome_linha": nome_da_linha(pdf_path, materiais),
                 "nome_antigo": nome_antigo,
                 "parcial": e_peca_de_completo(pdf_path),
-                "composicao": composicao},
+                "composicao": composicao,
+                "materiais_reais": materiais_reais},
         daemon=True,
     ).start()
 
@@ -1722,6 +1759,11 @@ class PropostaHandler(FileSystemEventHandler):
         client = suggest_client_name(folder)
         today  = date.today().strftime("%d-%m")
 
+        # O que voce escreveu depois do codigo ("alm 25") vai junto pro nome da
+        # proposta pronta: e o que faz a 25 e a 32 conviverem em vez de uma
+        # apagar a outra.
+        detalhe = detalhe_do_nome(src_path)
+
         if tipo == "pvc":
             vendedor = extrair_vendedor_do_nome_arquivo(src_path)
             cliente_capa = client
@@ -1729,12 +1771,14 @@ class PropostaHandler(FileSystemEventHandler):
             start_tmp = 1 if _has_system_capa(doc_tmp) else 0
             pedido = extrair_pedido_pvc(doc_tmp, start_tmp, len(doc_tmp) - 1)
             total_str = extract_total_pvc(src_path)
-            sufixo = f"PVC {vendedor}" if vendedor else "PVC"
+            sufixo = " ".join(p for p in ("PVC", detalhe, vendedor) if p)
         else:
             # Preserva MAD/ALM do nome original no arquivo renomeado, senao a
             # informacao de madeira+aluminio se perde e o COMPLETO usa so "ALM"
             subtipo = detect_alm_subtipo(src_path)
             sufixo = {"mad": "MAD", "alm": "ALM", "alm_mad": "MAD ALM"}[subtipo]
+            if detalhe:
+                sufixo = f"{sufixo} {detalhe}"
             doc_tmp = fitz.open(src_path)
             start_tmp, _end_tmp = _alm_range(doc_tmp, src_path)
             vendedor = extrair_vendedor_alm(doc_tmp, start_tmp)

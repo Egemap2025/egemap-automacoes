@@ -236,13 +236,30 @@ def _materiais_do_nome(nome_arquivo):
             if c in palavras}
 
 
-def _mesma_opcao(materiais_novos, materiais_antigos):
+def _detalhe_do_nome(nome_arquivo):
+    """O que vem DEPOIS do codigo do material, no nome do arquivo.
+
+    "... 25-09 ALM 25" -> "25". Copia minima da regra do monitor.
+    """
+    stem = Path(nome_arquivo).stem
+    m = _DATA_NO_NOME.search(stem)
+    palavras = [p for p in re.split(r"[^0-9A-Za-zÀ-ÖØ-öø-ÿ]+",
+                                    stem[m.end():] if m else stem) if p]
+    ultimo = max((i for i, p in enumerate(palavras)
+                  if p.upper() in ("PVC", "ALM", "MAD")), default=-1)
+    return " ".join(palavras[ultimo + 1:]).upper() if ultimo >= 0 else ""
+
+
+def _mesma_opcao(nome_novo, nome_antigo):
     """As duas propostas do mesmo dia sao a MESMA coisa refeita?
 
-    So quando cobrem exatamente os mesmos materiais. Antes, aluminio e
-    madeira caiam numa "categoria" so, entao uma proposta so de ALM e uma so
-    de MAD do mesmo cliente no mesmo dia se apagavam -- a segunda a subir
-    levava a primeira embora. Sao obras diferentes e tem que conviver.
+    So quando cobrem exatamente os mesmos materiais E tem o mesmo detalhe
+    depois do codigo. Duas coisas diferentes ja quebraram isso:
+
+    - aluminio e madeira caiam numa "categoria" so, entao uma proposta so de
+      ALM e uma so de MAD do mesmo cliente no mesmo dia se apagavam;
+    - "ALM 25" e "ALM 32" sao a mesma obra em duas linhas de perfil, e
+      contavam como a mesma proposta -- a segunda a subir levava a primeira.
 
     Nome sem codigo de material (proposta que voce renomeou pra BRANCO ou
     CINZA, ou a final que sai do COMPLETO) nunca conta como igual: nao da
@@ -251,18 +268,25 @@ def _mesma_opcao(materiais_novos, materiais_antigos):
     refeita, o nome do arquivo e o mesmo e o envio ja passa por cima dela,
     sem precisar apagar nada antes.
     """
-    return bool(materiais_novos) and materiais_novos == materiais_antigos
+    materiais = _materiais_do_nome(nome_novo)
+    return (bool(materiais)
+            and materiais == _materiais_do_nome(nome_antigo)
+            and _detalhe_do_nome(nome_novo) == _detalhe_do_nome(nome_antigo))
 
 
-def enviar(pdf_path, destino, materiais, client="", log=None):
+def enviar(pdf_path, destino, materiais=None, client="", log=None):
     """Sobe a proposta pronta para o Drive, dentro de 'destino' (caminho
     relativo a pasta raiz da Egemap no Drive, espelhando a pasta local).
 
-    Antes de enviar, apaga a versao de hoje da MESMA proposta (mesmos
-    materiais) que ja esteja na pasta -- assim refazer uma proposta no mesmo
-    dia substitui a anterior em vez de acumular. Proposta de outro material,
-    ou renomeada por voce, nunca e apagada: ALM e MAD sao obras diferentes e
-    convivem.
+    Antes de enviar, apaga a versao de hoje da MESMA proposta que ja esteja na
+    pasta -- assim refazer uma proposta no mesmo dia substitui a anterior em
+    vez de acumular. Proposta de outro material, de outra linha de perfil
+    ("ALM 25" x "ALM 32") ou renomeada por voce nunca e apagada: sao opcoes
+    diferentes e tem que conviver.
+
+    'materiais' nao e mais usado -- a comparacao e feita pelo nome dos dois
+    arquivos, que tambem carrega a linha do perfil. O parametro continua
+    aceito para nao quebrar quem ja chama assim.
     """
     def _log(msg):
         if log:
@@ -290,7 +314,7 @@ def enviar(pdf_path, destino, materiais, client="", log=None):
                     continue
                 if (f.get("ModTime") or "")[:10] != hoje:
                     continue
-                if not _mesma_opcao(materiais, _materiais_do_nome(fname)):
+                if not _mesma_opcao(nome, fname):
                     continue
                 _rclone("deletefile", _remote(destino, fname))
                 _log(f"removi versao anterior de hoje ({fname})")

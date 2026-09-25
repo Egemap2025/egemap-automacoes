@@ -422,6 +422,33 @@ reclamar quando o campo não chega. Lista vazia e campo ausente são coisas
 diferentes, e tratá-los igual transformou um esquecimento num card andando
 sozinho.
 
+### Duas linhas de perfil do mesmo material convivem ("ALM 25" e "ALM 32")
+
+A mesma obra sai em duas opções de linha de perfil: o cliente escolhe uma. O
+Natanael salva os dois orçamentos crus com a linha no nome — `... alm 25` e
+`... alm 32` — e **nenhum pode tomar o lugar do outro**, nem na pasta, nem no
+Drive, nem no CRM.
+
+Três lugares apagavam um pelo outro:
+
+1. **A montagem jogava fora o "25".** O `_wrap_individual` refazia o sufixo a
+   partir do tipo detectado (`ALM`), então os dois viravam
+   `... 25-09 ALM.pdf` e o segundo gravava por cima do primeiro. Agora o
+   `detalhe_do_nome` guarda o que vem depois do código e o nome sai
+   `... 25-09 ALM 25.pdf`.
+2. **O Drive comparava só os materiais.** `_mesma_opcao` dizia que duas
+   propostas do mesmo dia com os mesmos materiais eram a mesma coisa refeita —
+   e apagava a anterior. Agora compara os **nomes dos dois arquivos**:
+   materiais iguais **e** mesmo detalhe depois do código.
+3. **O CRM** já convivia (nomes de linha diferentes), mas as linhas saíam feias:
+   "Alm 25". O `nome_da_linha` agora usa o nome bonito do material mais o
+   detalhe: **"Aluminio 25"** e **"Aluminio 32"**.
+
+O `marcar_feito` também passou a receber **o material que está dentro do PDF**
+(o da composição), não o código do nome do arquivo: um "MAD" do W-Vetro quase
+sempre tem alumínio junto, e é isso que faz ele casar com o orçamento
+cadastrado como Alumínio.
+
 ### Quantos orçamentos ficam feitos = quantas propostas estão no card
 
 25/09/2026, card da **Projetar Studio**: dois orçamentos cadastrados, os dois
