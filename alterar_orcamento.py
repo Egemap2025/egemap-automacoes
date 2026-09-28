@@ -4105,6 +4105,10 @@ def _crm_item_para_linha(item, unidade="cm"):
         desc = "porta janela " + desc
     elif tipo == "P" and "porta" not in low_desc:
         desc = "porta " + desc
+    elif tipo == "J" and not any(k in low_desc for k in ("janela", "maxim", "porta")):
+        # item tipo J e SEMPRE janela (ex.: 'pivotante' num J = JANELA pivotante,
+        # nao porta). Sem isso, 'giro pivotante' iria pra PORTA pivotante.
+        desc = "janela " + desc
     # material ajuda a detectar madeira/pvc (o _eh_madeira/_eh_pvc olham o texto)
     if material and material.lower() not in _sem_acento(desc.lower()):
         desc += " " + material
@@ -4216,7 +4220,11 @@ def _crm_processar_negocio(page, nid):
         linha = _crm_item_para_linha(it, unidade)
         mud = _spec_item_novo(linha)
         if mud and mud.get("modelo"):
-            mud["_conferir"] = bool(it.get("pendencias")) or _crm_tipo_diverge(it)
+            # marca p/ CONFERIR: pendencia no CRM, tipo divergente, OU composicao
+            # (esquadria com '+', ex.: 'peitoril + correr + bandeira') -- essas o
+            # robo monta no melhor palpite, mas quase sempre precisam de ajuste.
+            comp = "+" in (it.get("esquadria") or "")
+            mud["_conferir"] = bool(it.get("pendencias")) or _crm_tipo_diverge(it) or comp
             itens.append(mud)
 
     if not cli.get("nome"):
