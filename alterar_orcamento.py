@@ -1436,6 +1436,16 @@ def _spec_item_novo(descricao):
             else:
                 mud["cor"] = "madeira grapia"
 
+    # VIDRO PADRAO por tipo, quando NAO informado (regra EGEMAP):
+    #  porta-janela (PJ) -> 8mm temperado ; janela/maxim/fixo (J) -> 6mm temperado.
+    # (madeira ja recebeu 'sem vidro' acima; portas 'P' nao entram; PVC sai fora)
+    if "vidro" not in mud and not _eh_madeira(low_modelo) and not _pvc:
+        tp = (mud.get("tipo") or "").upper()
+        if tp.startswith("PJ"):
+            mud["vidro"] = "incolor 8mm temperado"
+        elif tp.startswith("J"):
+            mud["vidro"] = "incolor 6mm temperado"
+
     # QUANTIDADE e obrigatoria no W-Vetro -- padrao 1 se nao vier na mensagem
     # (o vendedor ajusta depois se precisar de mais de 1).
     mud.setdefault("qtde", "1")
@@ -2630,6 +2640,18 @@ def _escolher_card_auto(page, modelo, num=""):
     # se chama 'INTEGRADA', nao 'persiana'). Adiciona 'integrad' p/ casar.
     if "persiana" in low_mod and "integrad" not in palavras:
         palavras.append("integrad")
+    # MADEIRA branca (porta interna clara) -> desenho MDF ULTRA por padrao.
+    if _eh_madeira(low_mod) and "branc" in low_mod and not any(
+            k in low_mod for k in ("mdf", "rohden", "semi", "macica", "colonial",
+                                    "pm15", "pm28", "pm33", "lambri", "wpc")):
+        for e in ("mdf", "ultra"):
+            if e not in palavras:
+                palavras.append(e)
+    # PIVOTANTE de madeira sem modelo -> PM15 (o modelo que a EGEMAP usa).
+    if _eh_madeira(low_mod) and ("pivotante" in low_mod or "pivot" in low_mod) and not any(
+            k in low_mod for k in ("pm15", "pm28", "pm33", "lambri", "ripad")):
+        if "pm15" not in palavras:
+            palavras.append("pm15")
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
     import time as _t
     fim = _t.time() + 10
