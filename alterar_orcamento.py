@@ -4062,6 +4062,25 @@ def _crm_tipo_diverge(it):
     return bool(cp and tp and cp[0].upper() != tp[0].upper())
 
 
+def _extrai_vidro_texto(texto):
+    """Acha uma spec de vidro dentro de um texto solto (ex.: a esquadria 'crua'
+    do CRM que traz '...temperado 6mm...', 'comum 4mm' ou 'miniboreal'). Devolve
+    ex.: 'incolor 6mm temperado' / 'mini boreal 4mm' -- ou '' se nao achar."""
+    low = _sem_acento((texto or "").lower())
+    m = _re.search(r"(\d{1,2})\s*mm", low)
+    if not m:
+        if "mini" in low and "boreal" in low:
+            return "mini boreal 4mm"
+        return ""
+    esp = m.group(1)
+    tipo = next((t for t in ("temperado", "comum", "laminado") if t in low), "temperado")
+    nome = next((n for n in ("incolor", "fume", "verde", "bronze", "cinza",
+                             "acidato", "jateado", "boreal") if n in low), "incolor")
+    if "mini" in low and "boreal" in low:
+        nome = "mini boreal"
+    return f"{nome} {esp}mm {tipo}"
+
+
 def _crm_item_para_linha(item, unidade="cm"):
     """Converte 1 item do levantamento do CRM numa LINHA da mensagem do robo,
     pra reaproveitar _spec_item_novo (todas as regras de modelo/cor/vidro/etc).
@@ -4114,12 +4133,23 @@ def _crm_item_para_linha(item, unidade="cm"):
     partes = [f"{cod} {desc}".strip()]
     if cor and "aplica" not in cor.lower() and "definir" not in cor.lower():
         partes.append(cor)
-    # vidro: so adiciona se PARECE mesmo uma spec de vidro (ex.: 'incolor 6mm
-    # temperado', 'sem vidro'). Assim um vidro solto/pendente ('A definir',
-    # 'Mini-Boreal' sem espessura) NAO polui o ambiente.
+    # VIDRO -- em ordem de confianca:
+    #  1) 'sem vidro'
+    #  2) campo do CRM ja completo (tem espessura em mm)
+    #  3) porta-janela (PJ) sem spec -> padrao 8mm temperado (no _spec_item_novo)
+    #  4) janela (J) -> tenta achar a spec no texto da esquadria ('comum 4mm'...)
+    #  5) senao vazio -> padrao por tipo (J 6mm / PJ 8mm) no _spec_item_novo
     vlow = _sem_acento((vidro or "").lower())
-    if vidro and "aplica" not in vlow and ("sem vidro" in vlow or _parece_spec_vidro(vlow)):
-        partes.append(vidro)          # ex.: 'Temperado 6mm incolor' / 'Sem vidro'
+    if "sem vidro" in vlow:
+        partes.append("sem vidro")
+    elif _re.search(r"\d\s*mm", vlow):
+        partes.append(vidro)                 # campo do CRM completo (J ou PJ)
+    elif tipo.startswith("PJ"):
+        pass                                 # PJ sem spec -> padrao 8mm temperado
+    else:
+        ex = _extrai_vidro_texto(tip)        # tenta na descricao da esquadria
+        if ex:
+            partes.append(ex)
     larg, alt = item.get("largura"), item.get("altura")
     if larg not in (None, "") and alt not in (None, ""):
         fator = 10 if (unidade or "cm").lower().startswith("cm") else 1
