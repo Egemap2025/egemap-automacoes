@@ -3075,6 +3075,19 @@ def montar_item_novo(page, num, mud):
         print("     [!] falta o MODELO na descricao (ex.: 'janela 2 folhas') -- pulando.")
         return False
 
+    # RECUPERACAO ANTI-CASCATA: se sobrou uma janela de variaveis/modal PRESA do
+    # item anterior (ex.: uma variavel obrigatoria ficou vazia e o CONFIRMAR nao
+    # fechou), ela bloqueia o 'Inserir Novo Projeto' e derruba TODOS os proximos
+    # itens. Entao, antes de comecar, tenta confirmar de novo e, se ainda estiver
+    # presa, FECHA a janela pra destravar o fluxo.
+    if _janela_variaveis_aberta(page) or _modal_edicao_aberto(page):
+        print("     (limpando uma janela presa do item anterior...)")
+        if not _confirmar_edicao(page, max_tentativas=3):
+            _fechar_modal(page)
+            page.wait_for_timeout(600)
+            _fechar_popup(page)
+            page.wait_for_timeout(600)
+
     # o aviso 'itens com valores zerados' pode estar aberto na tela do orcamento
     _fechar_aviso_valores(page)
 
