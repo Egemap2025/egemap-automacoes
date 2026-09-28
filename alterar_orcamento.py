@@ -4069,11 +4069,15 @@ def _crm_item_para_linha(item, unidade="cm"):
         desc += " " + material
     # linha 'L.25'/'L.32'/'L.30' -> 'l25'/... ; se for texto (MDF Ultra/Colonial/
     # Ripados), passa como esta (vira palavra do card).
+    eh_mad = ("madeira" in _sem_acento(material.lower())) or _eh_madeira(_sem_acento(desc.lower()))
     ml = _re.search(r"(\d{2})", linha)
     if ml:
         desc += f" l{ml.group(1)}"
-    elif linha and "aplica" not in linha.lower():
-        desc += " " + linha
+    else:
+        if linha and "aplica" not in linha.lower() and "definir" not in linha.lower():
+            desc += " " + linha       # ex.: 'MDF Ultra' vira palavra do card
+        if eh_mad:
+            desc += " l30"            # MADEIRA sem linha -> L.30 (padrao EGEMAP)
     low_desc = _sem_acento(desc.lower())
     if tela in ("sim", "s", "true", "1") and "tela" not in low_desc:
         desc += " com tela"
@@ -4086,9 +4090,13 @@ def _crm_item_para_linha(item, unidade="cm"):
             desc += " manual"
 
     partes = [f"{cod} {desc}".strip()]
-    if cor and "aplica" not in cor.lower():
+    if cor and "aplica" not in cor.lower() and "definir" not in cor.lower():
         partes.append(cor)
-    if vidro and "aplica" not in vidro.lower():
+    # vidro: so adiciona se PARECE mesmo uma spec de vidro (ex.: 'incolor 6mm
+    # temperado', 'sem vidro'). Assim um vidro solto/pendente ('A definir',
+    # 'Mini-Boreal' sem espessura) NAO polui o ambiente.
+    vlow = _sem_acento((vidro or "").lower())
+    if vidro and "aplica" not in vlow and ("sem vidro" in vlow or _parece_spec_vidro(vlow)):
         partes.append(vidro)          # ex.: 'Temperado 6mm incolor' / 'Sem vidro'
     larg, alt = item.get("largura"), item.get("altura")
     if larg not in (None, "") and alt not in (None, ""):
