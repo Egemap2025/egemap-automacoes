@@ -206,13 +206,37 @@ def extract_total_pvc(pdf_path):
 
 
 def extract_total_alm(pdf_path):
+    """Total do orcamento do W-Vetro.
+
+    Primeiro procura o "TOTAL:" impresso. Esse texto so e encontrado quando o
+    numero vem DEPOIS do rotulo na ordem do PDF -- e nem sempre vem: o W-Vetro
+    imprime os dois lado a lado, e se o valor cair antes do rotulo (ou se a
+    pagina do total ficar de fora do pedaco aproveitado) a busca volta vazia.
+    Foi o que travou o COMPLETO do Antenor em 05/10/2026: "ALM=N/A".
+
+    Quando isso acontece, soma as esquadrias uma a uma. E a mesma leitura da
+    composicao por material, que bate centavo a centavo com o total impresso.
+    """
     try:
         doc = fitz.open(pdf_path)
         text = "".join(p.get_text() for p in doc)
+        doc.close()
         matches = re.findall(r"TOTAL:\s*([\d.,]+)", text)
-        return matches[-1] if matches else ""
+        if matches:
+            return matches[-1]
+    except Exception:
+        pass
+
+    try:
+        itens = itens_do_orcamento(pdf_path)
     except Exception:
         return ""
+    if not itens:
+        return ""
+    total = format_brl(sum(i["valor"] for i in itens))
+    log(f"  Nao achei o \"TOTAL:\" impresso em {Path(pdf_path).name} — "
+        f"somei as {len(itens)} esquadrias: {total}.")
+    return total
 
 
 def parse_brl(value_str):
@@ -1878,6 +1902,10 @@ class PropostaHandler(FileSystemEventHandler):
 
             if not pvc_total or not alm_total:
                 log(f"[{client}] Nao foi possivel extrair totais. PVC={pvc_total or 'N/A'}  ALM={alm_total or 'N/A'}")
+                if not pvc_total:
+                    log(f"[{client}] O total nao saiu do PVC: {Path(pvc_path).name}")
+                if not alm_total:
+                    log(f"[{client}] O total nao saiu do aluminio: {Path(alm_path).name}")
                 return
 
             # Vendedor/Cliente/Pedido sempre seguem o W-Vetro quando ele existe

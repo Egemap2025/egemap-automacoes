@@ -1102,6 +1102,32 @@ mexer numa proposta antiga.
 Isso vale também depois de trocar de versão: reabrir o monitor não relança
 mais o que já foi lançado nos dias anteriores.
 
+### O "TOTAL:" do W-Vetro nem sempre está onde o programa procurava
+
+05/10, cliente Antenor. O COMPLETO não juntou, não pôs capa e não fez o resumo
+final. O log disse por quê:
+
+    [Antenor] Nao foi possivel extrair totais. PVC=94.582,64  ALM=N/A
+
+O `extract_total_alm` lia o PDF inteiro como um texto só e procurava
+`TOTAL:` seguido do número. Só que o W-Vetro imprime o rótulo e o valor
+**lado a lado**, e o texto do PDF sai na ordem em que foi desenhado — às vezes
+o número vem antes do rótulo. Quando isso acontece a busca volta vazia, o
+total some e o COMPLETO para antes de montar qualquer coisa.
+
+No PDF do Uillian a busca funcionava por acidente: o `TOTAL:` era a última
+coisa da página 4 e o número a primeira da página 5, então na emenda das
+páginas ficou um atrás do outro.
+
+Agora, quando o `TOTAL:` impresso não aparece, o programa **soma as esquadrias
+uma a uma** — a mesma leitura que já é usada para separar os materiais no CRM.
+Conferido no PDF do Uillian: total impresso 105.466,06, soma das 14 esquadrias
+105.466,06. E o log avisa quando usou a soma, com o nome do arquivo.
+
+Se nem assim sair total (PDF que não é orçamento), o COMPLETO continua parando
+— mas agora o log diz **qual dos dois arquivos** não entregou o total, em vez
+de só "N/A".
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
