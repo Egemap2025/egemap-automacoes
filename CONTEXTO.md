@@ -587,16 +587,20 @@ valor) e as palavras do dia a dia (`PEDIDO`, `PVC`, `ASSINADO`...), e o que
 sobra é o nome. As letras soltas também saem (o `J.` de "Ezequiel J. de
 Biasi") — a comparação do CRM casa o nome sem elas, e sozinhas só atrapalham.
 
-### O valor do pedido tem três fontes, nessa ordem
+### O valor do pedido é sempre o último, já com desconto
 
-**Por quê:** o layout do PDF do pedido não é fixo (ele edita o arquivo antes de
-salvar). Então: **1.** valor escrito no nome do arquivo (é escolha dele, então
-manda em tudo); **2.** rótulo dentro do PDF (`VALOR TOTAL:`, `TOTAL GERAL
-(R$)`...), inclusive o que foi digitado em campo de formulário, que não aparece
-no texto normal da página; **3.** o maior valor em reais do documento, que num
-pedido é o total. Não achando nada, **anexa o PDF assim mesmo** e avisa no log
-— o PDF no card é o que mais importa; o valor dá pra escrever no nome do
-arquivo depois.
+**Por quê:** é o valor que fechou. O pedido imprime o valor cheio em cima, o
+desconto no meio e o fechado embaixo — e era o de cima que estava indo pro CRM.
+
+As fontes, nessa ordem: **1.** valor escrito no nome do arquivo (é escolha
+dele, então manda em tudo); **2.** o resumo por material escrito no fim do
+pedido; **3.** os totais impressos, lidos pela posição na folha; **4.** rótulo
+no texto corrido (jeito antigo), inclusive campo de formulário; **5.** o maior
+valor em reais do documento. Não achando nada, **anexa o PDF assim mesmo** e
+avisa no log — o PDF no card é o que mais importa.
+
+Os detalhes de cada formato estão em *"Dois sistemas imprimem o pedido e os
+dois escrevem TOTAL"*, mais abaixo.
 
 ---
 
@@ -1127,6 +1131,120 @@ Conferido no PDF do Uillian: total impresso 105.466,06, soma das 14 esquadrias
 Se nem assim sair total (PDF que não é orçamento), o COMPLETO continua parando
 — mas agora o log diz **qual dos dois arquivos** não entregou o total, em vez
 de só "N/A".
+
+### Dois sistemas imprimem o pedido e os dois escrevem "TOTAL"
+
+05/10, depois de o Natanael dizer que "muitas vezes tá indo o primeiro valor".
+Ele estava certo, e por dois motivos ao mesmo tempo.
+
+**O pedido pode ter duas partes no mesmo PDF.** A de PVC sai do Archicentro e a
+de alumínio/madeira sai do W-Vetro. Cada uma fecha com o seu total. O programa
+procurava os rótulos numa lista de prioridade e `TOTAL GERAL (R$)` era o
+primeiro da lista — então num pedido misto ele pegava **só a parte de PVC** e
+ia embora. Foi o que aconteceu com o pedido do Jardel Pires Coelho em 30/09: o
+CRM recebeu **28.130,67**, que é exatamente o `TOTAL GERAL (R$)` do Archicentro
+daquele pedido; faltavam **10.141,86** de alumínio. O Natanael corrigiu na mão
+para 35.000,00.
+
+**E "TOTAL" quer dizer coisas diferentes nos dois sistemas:**
+
+    Archicentro (PVC) — rótulo com "(R$)":
+        TOTAL DAS ABERTURAS (R$)   17.091,14 (+)    cheio
+        DESCONTO (R$)               1.091,14 (-)
+        TOTAL (R$)                 16.000,00 (=)    <- é este que vale
+
+    W-Vetro (alumínio/madeira) — rótulo com ":":
+        TOTAL:                      8.383,45        cheio
+        DESCONTO:                     383,45
+        TOTAL COM DESCONTO:         8.000,00        <- é este que vale
+
+    e às vezes o W-Vetro chama o fechado de "TOTAL GERAL:", com mais de um
+    desconto:
+        TOTAL:                     32.406,48
+        DESCONTO                    2.685,00
+        DESCONTO                    5.721,48
+        TOTAL GERAL:               24.000,00        <- é este que vale
+
+Ou seja: o mesmo `TOTAL GERAL` é o **cheio** no Archicentro e o **fechado** no
+W-Vetro. É o `(R$)` que diz de que sistema o rótulo é. A regra que vale para os
+dois: **de cada sistema, vale o último total impresso** — a folha fecha de cima
+pra baixo, então o de baixo já tem todos os descontos.
+
+**Por que ler pela posição e não pelo texto corrido.** Nesses PDFs o rótulo
+está numa caixa de texto e o valor em outra, do lado. O texto corrido sai na
+ordem em que as caixas foram desenhadas, que não é a ordem da folha. No pedido
+da COM STEEL o texto sai assim:
+
+    ... Atenciosamente, | TOTAL: | 8.000,00 | EGEMAP ESQUADRIAS | ...
+    ... 383,45 | DESCONTO: | 8.000,00 | TOTAL COM DESCONTO: ...
+
+Quem lê "rótulo e depois o número" acha 8.000,00 ali — e acerta **por sorte**:
+o 8.000,00 que veio depois de `TOTAL:` é o de outro campo. O `TOTAL:` de
+verdade é 8.383,45, o cheio. Agora o valor é procurado **na mesma altura do
+rótulo, do lado direito** (com 3 pontos de folga, porque o número é impresso
+numa fonte menor).
+
+Três casos a mais que apareceram nos pedidos de verdade:
+
+  - **rótulo e valor na mesma caixa**: `TOTAL GERAL: 66.000,00`. Sem tratar
+    isso, o rótulo não era reconhecido e o pedido do Bruno Luiz Salvan ia com
+    60.822,38 (só o PVC) em vez de 66.000,00.
+  - **total geral que já cobre as duas partes**: no mesmo pedido do Bruno,
+    60.822,38 (PVC) + 10.816,76 (alumínio) − 5.639,14 (desconto) = 66.000,00.
+    Quando o total do W-Vetro é **maior** que o cheio dele e há PVC no mesmo
+    PDF, esse total já é do pedido inteiro — somar o PVC de novo dobraria.
+  - **número impresso errado pelo próprio sistema**: `57.600.11 (+)`, com ponto
+    no lugar da vírgula. Esse não vira número nenhum, de propósito; como é o
+    cheio e quem vale é o último, não faz falta.
+
+### A divisão por material do pedido
+
+O Natanael pediu junto: *"deixar organizado por material os valores"*. No card,
+cada linha mostra quanto é de PVC, de alumínio e de madeira; sem isso ela fica
+com a etiqueta "Composição pendente".
+
+Duas fontes, nessa ordem:
+
+**1. O resumo escrito no fim do pedido.** Quando quem fez o pedido já separou,
+nada melhor:
+
+        Alumínio: 70.370,04
+        PVC: 117.969,06
+        Desconto: 28.339,10
+        Total: 160.000,00
+
+Só é aceito quando a conta fecha (soma dos materiais − desconto = total). Texto
+parecido que não fecha é ignorado: melhor não ter resumo do que ter um
+inventado.
+
+**2. As esquadrias uma a uma**, pelo mesmo leitor que a proposta usa — então
+uma porta de madeira dentro de um pedido de alumínio cai no material certo. A
+parte de PVC vem de outro sistema, que não tem esse quadro, e entra inteira
+pelo total dela.
+
+**O desconto entra proporcionalmente.** A divisão é montada com os valores
+cheios (que é o que as esquadrias somam) e encolhida de uma vez para o valor
+fechado. É o que o Natanael faz na mão: no pedido do Jardel ele dividiu
+35.000,00 em PVC 25.500 + alumínio 9.500, e a proporção da proposta era
+28.130,67 / 10.141,86 — bate. Vale também quando o valor fechado foi escrito no
+nome do arquivo.
+
+**Na dúvida, fica pendente.** O banco do CRM recalcula o valor da linha somando
+a composição — uma divisão errada muda o valor do pedido no card. Preencher na
+mão custa um minuto; errar o valor custa mais.
+
+### Dentro do .exe o monitor não se chama "monitorar"
+
+O `pedidos.py` precisa do leitor de esquadrias que mora no `monitorar.py`, e
+não pode importá-lo no topo: o monitor importa o `pedidos` na abertura e os
+dois ficariam se esperando. Até aí, `import monitorar` dentro da função
+resolve.
+
+Só que no `EGEMAP-Monitor.exe` o monitor é o programa principal e se chama
+`__main__` — não existe módulo `monitorar` para importar. Sem tratar isso, a
+divisão por material funcionaria em todo teste aqui e **nunca** no programa que
+ele usa. Por isso a procura começa pelos módulos já carregados (`monitorar` e
+`__main__`, nessa ordem, conferindo se o módulo tem mesmo o leitor dentro).
 
 ### Nunca travar esperando resposta
 
