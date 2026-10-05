@@ -1233,6 +1233,13 @@ nome do arquivo.
 a composição — uma divisão errada muda o valor do pedido no card. Preencher na
 mão custa um minuto; errar o valor custa mais.
 
+### Medida no nome do arquivo não é dinheiro
+
+O valor escrito no nome do arquivo ganha de tudo, porque é escolha dele. Mas
+`1,50m` em `"Pedido - Ana 1,50m x 2,00m.pdf"` tem a mesma cara de dinheiro
+(vírgula e dois dígitos) e virava o valor do pedido. Agora um número com letra
+grudada depois não conta.
+
 ### Dentro do .exe o monitor não se chama "monitorar"
 
 O `pedidos.py` precisa do leitor de esquadrias que mora no `monitorar.py`, e

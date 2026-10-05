@@ -50,8 +50,10 @@ PALAVRAS_DE_SISTEMA = {
 PRIMEIRA_PALAVRA_DE_PEDIDO = {"PEDIDO", "PEDIDOS", "PED"}
 
 # "12.345,67", "1234,56", "R$ 12.345,67" -- exige os centavos com virgula pra
-# nao confundir numero de pedido ou data com dinheiro.
-VALOR_ESCRITO = re.compile(r"R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
+# nao confundir numero de pedido ou data com dinheiro. E nao pode ter letra
+# grudada depois: "Pedido - Ana 1,50m x 2,00m.pdf" e medida, nao dinheiro.
+VALOR_ESCRITO = re.compile(
+    r"R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})(?![\dA-Za-zÀ-ÖØ-öø-ÿ])")
 
 
 def _sem_acento(texto):
