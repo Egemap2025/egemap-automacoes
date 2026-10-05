@@ -206,27 +206,6 @@ FECHAMENTO_ALM = ("VALOR TOTAL DO PEDIDO", "VALOR TOTAL DO ORCAMENTO",
 ROTULOS_PVC = FECHAMENTO_PVC + ("TOTAL DAS ABERTURAS", "DESCONTO")
 ROTULOS_ALM = FECHAMENTO_ALM + ("TOTAL", "DESCONTO")
 
-# O resumo que o vendedor escreve a mao no fim do pedido do W-Vetro:
-#
-#       Alumínio: 70.370,04
-#       PVC: 117.969,06
-#       Desconto: 28.339,10
-#       Total: 160.000,00
-#
-# Quando ele existe, e a melhor fonte que ha: ja traz o valor fechado E a
-# divisao por material, escrita por quem fez o pedido.
-MATERIAL_NO_RESUMO = {
-    "ALUMINIO": "aluminio",
-    "ALUMINO": "aluminio",
-    "PVC": "pvc",
-    "MADEIRA": "madeira",
-    "OUTRO": "outro",
-    "OUTROS": "outro",
-}
-LINHA_DO_RESUMO = re.compile(
-    r"^([A-Za-zÀ-ÖØ-öø-ÿ]+)\s*:?\s*(?:R\$)?\s*"
-    r"(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\s*$")
-
 
 def _limpo(texto):
     """MAIUSCULA, sem acento, sem ":" e sem "(R$)" -- so o rotulo."""
@@ -237,8 +216,12 @@ def _limpo(texto):
 
 
 def _e_do_pvc(texto):
-    """O rotulo veio do sistema de PVC? E o "(R$)" que diz."""
-    return "R$" in (texto or "").upper()
+    """O rotulo veio do sistema de PVC? E o "(R$)" que diz.
+
+    Tem que ser entre parenteses: "Valor Total: R$88.256,07", do resumo
+    escrito a mao, tambem tem "R$" e nao e do Archicentro.
+    """
+    return "(R$)" in (texto or "").upper().replace(" ", "")
 
 
 def _linhas_com_posicao(pagina):
@@ -311,44 +294,153 @@ def _paginas(pdf_path):
         doc.close()
 
 
+# O resumo que a EGEMAP escreve no fim do pedido, separando por material.
+# Aparece de duas formas:
+#
+#       Alumínio: 70.370,04                 RESUMO GERAL
+#       PVC: 117.969,06                     Esquadrias de PVC:        R$61.809,29
+#       Desconto: 28.339,10                 Esquadrias de Alumínio:   R$26.447,41
+#       Total: 160.000,00                   Valor Total:              R$88.256,07
+#                                           Valor Desconto:           R$4.415,07
+#                                           Valor Total Com Desconto: R$83.841,00
+#
+# Quando existe, e a melhor fonte que ha: ja traz o valor fechado E a divisao
+# por material, escritos por quem fechou o negocio. Repare que no da direita o
+# "Valor Total" e o CHEIO -- quem vale e o "Valor Total Com Desconto".
+PALAVRA_DE_MATERIAL = {
+    "ALUMINIO": "aluminio",
+    "ALUMINO": "aluminio",
+    "PVC": "pvc",
+    "MADEIRA": "madeira",
+}
+ROTULOS_DO_RESUMO = {
+    "VALOR TOTAL COM DESCONTO": "fechado",
+    "TOTAL COM DESCONTO": "fechado",
+    "VALOR TOTAL GERAL": "fechado",
+    "TOTAL GERAL": "fechado",
+    "VALOR TOTAL": "cheio",
+    "TOTAL": "cheio",
+    "VALOR DESCONTO": "desconto",
+    "DESCONTO": "desconto",
+}
+
+
+def _materiais_do_rotulo(rotulo):
+    """Os materiais citados num rotulo do resumo.
+
+    "ESQUADRIAS DE PVC" -> {"pvc"};  "ESQUADRIAS DE MADEIRA E ALUMINIO" ->
+    {"madeira", "aluminio"} -- esse nao da pra dividir, e quem chama sabe.
+    """
+    palavras = set(rotulo.split())
+    return {PALAVRA_DE_MATERIAL[p] for p in palavras if p in PALAVRA_DE_MATERIAL}
+
+
+def _e_rotulo(texto):
+    """So conta como rotulo o que termina em ":".
+
+    Sem isso, a descricao de uma esquadria ("SEM TRAVESSA, C/SOLEIRA ALTA DE
+    PVC, SEM ARREMATE...") seria lida como uma linha de PVC do resumo.
+    """
+    limpo = (texto or "").strip()
+    if limpo.upper().endswith("R$"):
+        limpo = limpo[:-2].strip()
+    return limpo.endswith(":")
+
+
 def resumo_do_pedido(pdf_path, paginas=None):
     """O resumo por material escrito no fim do pedido. {} quando nao ha.
 
-        {"materiais": {"aluminio": 70370.04, "pvc": 117969.06},
-         "desconto": 28339.10, "total": 160000.00}
+        {"materiais": {"pvc": 61809.29, "aluminio": 26447.41},
+         "desconto": 4415.07, "total": 83841.00, "divide": True}
 
-    So aceita quando a conta fecha: a soma dos materiais menos o desconto
-    tem que dar o total. Texto parecido que nao fecha e ignorado -- e melhor
-    nao ter resumo do que ter um resumo inventado.
+    "divide" diz se da pra usar a divisao: so quando as linhas de material
+    cobrem o pedido inteiro e cada uma fala de UM material (uma linha
+    "Esquadrias de Madeira e Alumínio" nao separa nada).
+
+    So vale quando a conta fecha, de um dos tres jeitos que aparecem nos
+    pedidos de verdade. Exige pelo menos uma linha de material, senao o
+    proprio quadro de totais da maquina seria lido como resumo.
     """
     if paginas is None:
         paginas = _paginas(pdf_path)
 
-    materiais, desconto, total = {}, 0.0, 0.0
+    materiais, soma_das_linhas, inteiras = {}, 0.0, True
+    cheio = desconto = fechado = 0.0
+    escrito = False          # o valor fechado veio escrito, nao foi calculado
     for linhas in paginas:
         for i, (_, _, texto) in enumerate(linhas):
-            achado = LINHA_DO_RESUMO.match(texto.strip())
-            if achado:
-                rotulo, valor = _limpo(achado.group(1)), para_numero(achado.group(2))
-            else:
-                rotulo = _limpo(texto)
-                if not rotulo or rotulo not in MATERIAL_NO_RESUMO or not texto.rstrip().endswith(":"):
-                    continue
-                valor = _dinheiro_na_mesma_altura(linhas, i)
+            so_rotulo, junto = _rotulo_e_valor(texto)
+            if not _e_rotulo(so_rotulo):
+                continue
+            rotulo = _limpo(so_rotulo)
+            if not rotulo:
+                continue
+            valor = junto or _dinheiro_na_mesma_altura(linhas, i)
             if valor <= 0:
                 continue
-            if rotulo in MATERIAL_NO_RESUMO:
-                materiais[MATERIAL_NO_RESUMO[rotulo]] = valor
-            elif rotulo == "DESCONTO":
-                desconto = valor
-            elif rotulo == "TOTAL":
-                total = valor
 
-    if not materiais or total <= 0:
+            citados = _materiais_do_rotulo(rotulo)
+            if citados:
+                soma_das_linhas += valor
+                if len(citados) == 1:
+                    material = citados.pop()
+                    materiais[material] = materiais.get(material, 0.0) + valor
+                else:
+                    inteiras = False
+                continue
+
+            # O ultimo manda: o resumo fica no fim, depois das folhas das
+            # maquinas, que tambem tem "TOTAL:" e "DESCONTO:".
+            papel = ROTULOS_DO_RESUMO.get(rotulo)
+            if papel == "fechado":
+                fechado, escrito = valor, True
+            elif papel == "cheio":
+                cheio = valor
+            elif papel == "desconto":
+                desconto = valor
+
+    if not materiais and not soma_das_linhas:
         return {}
-    if abs(sum(materiais.values()) - desconto - total) > 0.02:
+
+    if not fechado:
+        # Sem "com desconto" escrito: o "Total" tanto pode ser o cheio quanto
+        # o ja descontado. Quem decide e a conta das linhas de material.
+        if cheio and abs(soma_das_linhas - desconto - cheio) <= 0.02:
+            fechado = cheio
+        elif cheio:
+            fechado = round(cheio - desconto, 2)
+    if fechado <= 0:
         return {}
-    return {"materiais": materiais, "desconto": desconto, "total": total}
+
+    # Tres maneiras de a conta fechar; basta uma, e qual delas foi diz se as
+    # linhas de material cobrem o pedido inteiro:
+    #
+    #   a) as linhas de material sozinhas         -> cobrem tudo
+    #   b) o "Valor Total" escrito menos o desconto -> cobrem se baterem com ele
+    #   c) as linhas MAIS um "TOTAL:" de fora     -> cobrem so uma parte
+    #
+    # A folga de 0,1% e porque o resumo e digitado a mao: no pedido do Diogo o
+    # "Valor Total" saiu 88.256,07 e as linhas somam 88.256,70 -- dois digitos
+    # trocados.
+    #
+    # A (b) so vale quando o valor fechado veio ESCRITO. Se ele foi calculado
+    # a partir do "Total", a (b) seria sempre verdadeira e qualquer pagina com
+    # uma linha de material e um "Total:" passaria -- inclusive a folha da
+    # maquina de um pedido misto, que levaria so uma das duas partes.
+    folga = max(0.02, fechado * 0.001)
+    if abs(soma_das_linhas - desconto - fechado) <= folga:
+        cobre_tudo = True
+    elif escrito and cheio > 0 and abs(cheio - desconto - fechado) <= 0.02:
+        cobre_tudo = abs(soma_das_linhas - cheio) <= folga
+    elif abs(soma_das_linhas + cheio - desconto - fechado) <= folga and cheio > 0:
+        cobre_tudo = False
+    else:
+        return {}
+
+    divide = bool(materiais and inteiras and cobre_tudo
+                  and abs(sum(materiais.values()) - soma_das_linhas) <= 0.02)
+    return {"materiais": materiais if divide else {},
+            "desconto": desconto, "total": fechado, "divide": divide}
 
 
 def totais_do_pedido(pdf_path, paginas=None):
@@ -561,14 +653,13 @@ def composicao_do_pedido(pdf_path, valor, log=print, cliente=""):
 
     paginas = _paginas(pdf_path)
     resumo = resumo_do_pedido(pdf_path, paginas)
-    if resumo:
+    if resumo and resumo.get("divide"):
         soma = dict(resumo["materiais"])
-        cheio = sum(soma.values())
         if resumo["desconto"] > 0:
             log(f"[{cliente}] Pedido: o resumo do pedido ja separa por material "
                 f"— apliquei o desconto de {_reais(resumo['desconto'])} na mesma "
                 f"proporcao.")
-        return _fatiar(monitor, soma, cheio, valor, log, cliente)
+        return _fatiar(monitor, soma, sum(soma.values()), valor, log, cliente)
 
     totais = totais_do_pedido(pdf_path, paginas)
     try:

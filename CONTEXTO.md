@@ -1205,17 +1205,46 @@ com a etiqueta "Composição pendente".
 
 Duas fontes, nessa ordem:
 
-**1. O resumo escrito no fim do pedido.** Quando quem fez o pedido já separou,
-nada melhor:
+**1. O resumo escrito no fim do pedido.** Quando quem fechou o negócio já
+separou, nada melhor — vem o valor fechado **e** a divisão. Aparece de duas
+formas:
 
-        Alumínio: 70.370,04
-        PVC: 117.969,06
-        Desconto: 28.339,10
-        Total: 160.000,00
+        Alumínio: 70.370,04        RESUMO GERAL
+        PVC: 117.969,06            Esquadrias de PVC:        R$61.809,29
+        Desconto: 28.339,10        Esquadrias de Alumínio:   R$26.447,41
+        Total: 160.000,00          Valor Total:              R$88.256,07
+                                   Valor Desconto:           R$4.415,07
+                                   Valor Total Com Desconto: R$83.841,00
 
-Só é aceito quando a conta fecha (soma dos materiais − desconto = total). Texto
-parecido que não fecha é ignorado: melhor não ter resumo do que ter um
-inventado.
+Repare que no da direita o `Valor Total` é o **cheio** — quem vale é o
+`Valor Total Com Desconto`. Esse pedido (o do Diogo) ia pro CRM com 88.256,70,
+R$ 4.415,70 a mais, e o desconto do cliente sumia.
+
+Três cuidados que custaram um susto cada:
+
+  - **só conta como rótulo o que termina em `:`**. Sem isso, a descrição de uma
+    esquadria (`SEM TRAVESSA, C/SOLEIRA ALTA DE PVC, SEM ARREMATE...`) virava
+    uma linha de PVC do resumo.
+  - **o último manda**, não o primeiro: o resumo fica depois das folhas das
+    máquinas, que também têm `TOTAL:` e `DESCONTO:`.
+  - **a conta tem que fechar**, de um destes três jeitos, e qual deles diz se a
+    divisão cobre o pedido inteiro:
+
+        a) linhas de material − desconto = fechado          cobrem tudo
+        b) "Valor Total" escrito − desconto = fechado       cobrem se baterem
+        c) linhas + um "TOTAL:" de fora − desconto = fechado  cobrem só parte
+
+    A (b) só vale quando o fechado veio **escrito**. Se fosse calculado a
+    partir do "Total", a (b) seria sempre verdadeira e qualquer página com uma
+    linha de material e um "Total:" passaria — inclusive a folha da máquina de
+    um pedido misto, que levaria só uma das duas partes. Foi o que quase
+    aconteceu com o pedido do Bruno Luiz Salvan: ia 5.177,62 em vez de
+    66.000,00.
+
+Uma linha que fala de dois materiais de uma vez (`Esquadrias de Madeira e
+Alumínio: R$62.000,00`) serve pra conferir a conta mas não separa nada — aí o
+valor vem do resumo e a divisão vem das esquadrias. Texto parecido que não
+fecha é ignorado: melhor não ter resumo do que ter um inventado.
 
 **2. As esquadrias uma a uma**, pelo mesmo leitor que a proposta usa — então
 uma porta de madeira dentro de um pedido de alumínio cai no material certo. A
