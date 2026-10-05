@@ -312,6 +312,8 @@ PALAVRA_DE_MATERIAL = {
     "ALUMINO": "aluminio",
     "PVC": "pvc",
     "MADEIRA": "madeira",
+    "OUTRO": "outro",
+    "OUTROS": "outro",
 }
 ROTULOS_DO_RESUMO = {
     "VALOR TOTAL COM DESCONTO": "fechado",
@@ -405,7 +407,7 @@ def resumo_do_pedido(pdf_path, paginas=None):
     if not fechado:
         # Sem "com desconto" escrito: o "Total" tanto pode ser o cheio quanto
         # o ja descontado. Quem decide e a conta das linhas de material.
-        if cheio and abs(soma_das_linhas - desconto - cheio) <= 0.02:
+        if cheio and abs(soma_das_linhas - desconto - cheio) <= max(0.02, cheio * 0.001):
             fechado = cheio
         elif cheio:
             fechado = round(cheio - desconto, 2)
@@ -461,7 +463,7 @@ def totais_do_pedido(pdf_path, paginas=None):
     if paginas is None:
         paginas = _paginas(pdf_path)
 
-    achados = []            # (pagina, altura, sistema, rotulo, valor)
+    achados, avisos = [], []   # (pagina, altura, sistema, rotulo, valor)
     for n, linhas in enumerate(paginas):
         for i, (y, _, texto) in enumerate(linhas):
             so_rotulo, junto = _rotulo_e_valor(texto)
@@ -475,6 +477,12 @@ def totais_do_pedido(pdf_path, paginas=None):
             valor = junto or _dinheiro_na_mesma_altura(linhas, i)
             if valor > 0:
                 achados.append((n, y, sistema, rotulo, valor))
+            else:
+                # Rotulo de total conhecido e nenhum numero legivel do lado.
+                # Acontece quando o proprio sistema imprime errado -- o pedido
+                # do Marcelo saiu com "57.600.11 (+)", ponto no lugar da
+                # virgula. Fica no log em vez de sumir calado.
+                avisos.append(f"\"{texto.strip()[:40]}\" na pagina {n + 1}")
 
     totais = {}
     for sistema, fechamento, bruto in (("pvc", FECHAMENTO_PVC, "TOTAL DAS ABERTURAS"),
@@ -494,6 +502,19 @@ def totais_do_pedido(pdf_path, paginas=None):
         if descontos:
             totais.setdefault("desconto", 0.0)
             totais["desconto"] += descontos[-1][4]
+
+        # Duas folhas do mesmo sistema no mesmo PDF fecham duas vezes, em
+        # paginas diferentes. Fica com a ultima, mas avisa: somar as duas
+        # estaria errado numa folha so (o bruto e o liquido sao dois
+        # fechamentos da MESMA conta) e certo em duas folhas.
+        paginas_que_fecham = {a[0] for a in fecha}
+        if len(paginas_que_fecham) > 1 and len({a[4] for a in fecha}) > 1:
+            avisos.append(f"o PDF fecha o total de {sistema.upper()} em mais de "
+                          f"uma pagina ({sorted(p + 1 for p in paginas_que_fecham)}) "
+                          f"— usei o ultimo")
+
+    if avisos:
+        totais["avisos"] = avisos
     return totais
 
 
@@ -520,7 +541,15 @@ def _fechamento(totais, resumo=None, bruto_alm=0.0):
     alm = totais.get("alm", 0.0)
     com_desconto = totais.get("desconto", 0.0) > 0
 
-    cheio_alm = totais.get("alm_bruto") or bruto_alm or 0.0
+    # O cheio da parte do W-Vetro. Quando o PDF nao imprime um bruto proprio
+    # (o "TOTAL:" que ele achou e a propria linha de fechamento), quem diz
+    # quanto vale essa parte sao as esquadrias. Sem isso, um "Total:" escrito
+    # a mao no fim da folha -- que ja e o pedido inteiro -- seria lido como o
+    # bruto do aluminio e o PVC entraria duas vezes.
+    cheio_alm = totais.get("alm_bruto") or 0.0
+    if bruto_alm and (not cheio_alm or abs(cheio_alm - alm) <= 0.02):
+        cheio_alm = min(bruto_alm, cheio_alm) if cheio_alm else bruto_alm
+
     if pvc > 0 and alm > cheio_alm + 0.02 > 0:
         return alm, "total geral do pedido, ja com desconto"
 
@@ -678,18 +707,29 @@ def composicao_do_pedido(pdf_path, valor, log=print, cliente=""):
             por_eliminacao.append(f"{item['tipo'] or '?'} ({item['linha']})")
         soma[material] = soma.get(material, 0.0) + item["valor"]
 
-    # A divisao e montada com os valores CHEIOS (antes do desconto), que e o
-    # que as esquadrias somam, e depois encolhida de uma vez pro valor
-    # fechado. Assim o desconto cai em cada material na mesma proporcao.
+    # Cada folha fecha com o TOTAL DELA. O desconto (ou o acrescimo, tipo a
+    # INSTALACAO que o Archicentro cobra) e da folha onde foi dado, entao nao
+    # pode ser espalhado sobre a outra: no pedido da EDI/Adonis a instalacao
+    # de 10.500,00 e da parte de PVC, e espalhando ela R$ 805,36 saiam do PVC
+    # pro aluminio e pra madeira.
     cheio_alm = sum(soma.values())
-    if cheio_alm > 0:
-        impresso = totais.get("alm_bruto") or totais.get("alm") or 0.0
-        if impresso > 0 and abs(cheio_alm - impresso) > 0.02 and impresso >= cheio_alm:
-            log(f"[{cliente}] Pedido: as esquadrias somam {_reais(cheio_alm)} e o "
-                f"total impresso e {_reais(impresso)} — composicao pendente.")
-            return []
+    pvc = totais.get("pvc", 0.0) or totais.get("pvc_bruto", 0.0)
+    fechado_alm = totais.get("alm", 0.0)
+    impresso_alm = totais.get("alm_bruto") or 0.0
 
-    pvc = totais.get("pvc_bruto") or totais.get("pvc") or 0.0
+    if cheio_alm > 0:
+        if impresso_alm > cheio_alm + 0.02:
+            log(f"[{cliente}] Pedido: as esquadrias somam {_reais(cheio_alm)} e o "
+                f"total impresso e {_reais(impresso_alm)} — composicao pendente.")
+            return []
+        # Um total do W-Vetro MAIOR que as esquadrias dele, havendo PVC no
+        # mesmo PDF, e o total do pedido inteiro -- esse nao encolhe a parte
+        # do aluminio, ele fecha tudo (e o _fatiar encolhe de uma vez so).
+        e_do_pedido_inteiro = pvc > 0 and fechado_alm > max(cheio_alm, impresso_alm) + 0.02
+        if fechado_alm > 0 and not e_do_pedido_inteiro and abs(fechado_alm - cheio_alm) > 0.02:
+            ajuste = fechado_alm / cheio_alm
+            soma = {m: v * ajuste for m, v in soma.items()}
+
     if pvc > 0:
         soma["pvc"] = soma.get("pvc", 0.0) + pvc
 
@@ -781,6 +821,9 @@ def enviar(pdf_path, log=print, arquivo_antigo=None):
         log(f"[{cliente}] Pedido: nao achei o valor em {arquivo} — vou anexar o PDF "
             f"assim mesmo. Pra ir com valor, escreva ele no nome do arquivo "
             f"(ex.: '... R$ 12.345,67').")
+
+    for aviso in totais_do_pedido(pdf_path).get("avisos", []):
+        log(f"[{cliente}] Pedido: nao consegui ler um total — {aviso}.")
 
     composicao = composicao_do_pedido(pdf_path, valor, log=log, cliente=cliente)
     if composicao:

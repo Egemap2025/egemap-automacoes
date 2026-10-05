@@ -1269,6 +1269,33 @@ O valor escrito no nome do arquivo ganha de tudo, porque é escolha dele. Mas
 (vírgula e dois dígitos) e virava o valor do pedido. Agora um número com letra
 grudada depois não conta.
 
+### O desconto de cada folha fica na folha dele
+
+No pedido da EDI/Adonis a folha do Archicentro não tem desconto, tem um
+**acréscimo**: `TOTAL DAS ABERTURAS 164.158,00 (+)` / `INSTALAÇÃO 10.500,00
+(+)` / `TOTAL GERAL 174.658,00 (=)`. A divisão era montada com o valor das
+aberturas e depois tudo era esticado proporcionalmente até o valor do pedido —
+então R$ 805,36 da instalação do PVC iam parar no alumínio e na madeira.
+
+Agora cada folha entra com o **total dela**: a do PVC pelo total fechado dela,
+a do W-Vetro pelas esquadrias encolhidas no total fechado dela. Só depois,
+se o valor do pedido ainda for outro (porque foi escrito no nome do arquivo,
+por exemplo), a divisão inteira é ajustada.
+
+### Um "Total:" escrito à mão não é o total da máquina
+
+No pedido do Ivan Candiotto o vendedor escreveu o resumo no fim da folha do
+W-Vetro, e a última linha é `Total: 160.000,00` — o pedido **inteiro**, PVC
+junto. Como o rótulo é só "TOTAL", ele era guardado como o valor cheio da
+parte de alumínio; aí a trava que reconhece "este total já cobre as duas
+partes" não disparava e o PVC entrava duas vezes: R$ 277.969,06 em vez de
+160.000,00.
+
+Hoje, quando o PDF não imprime um valor cheio próprio para a parte do W-Vetro
+(o "TOTAL:" encontrado é a própria linha de fechamento), quem diz quanto vale
+essa parte são **as esquadrias**. No Ivan elas somam 67.211,04 — bem menos que
+160.000,00 — e a trava dispara certo.
+
 ### Dentro do .exe o monitor não se chama "monitorar"
 
 O `pedidos.py` precisa do leitor de esquadrias que mora no `monitorar.py`, e
