@@ -4258,9 +4258,10 @@ def _crm_alternativa_aluminio(lev):
     return min(alts, key=_pvc_qtd)
 
 
-def _crm_processar_negocio(page, nid):
+def _crm_processar_negocio(page, nid, auto=False):
     """Le 1 negocio do CRM, monta a alternativa de ALUMINIO no W-Vetro (sem
-    calcular) e marca como feito. Supervisionado: mostra o preview e confirma."""
+    calcular) e marca como feito. auto=False mostra o preview e pergunta antes;
+    auto=True (Vigia 24h) monta direto, sem perguntar nada."""
     global MODO_AUTO
     try:
         det = crm_negocio(nid)
@@ -4316,10 +4317,13 @@ def _crm_processar_negocio(page, nid):
     conf = [i + 1 for i, m in enumerate(itens) if m.get("_conferir")]
     if conf:
         print(f"\n  [!] CONFERIR depois os itens {conf} (tipo divergente/pendencia no CRM).")
-    r = input("\n  Montar este orcamento (SEM calcular)? ENTER = sim  |  N = nao: ").strip().lower()
-    if r == "n":
-        print("  Cancelado.")
-        return
+    if not auto:
+        r = input("\n  Montar este orcamento (SEM calcular)? ENTER = sim  |  N = nao: ").strip().lower()
+        if r == "n":
+            print("  Cancelado.")
+            return
+    else:
+        print("\n  (Vigia) montando automatico, sem perguntar...")
 
     MODO_AUTO = True
     resultados = {}
@@ -4357,6 +4361,79 @@ def _crm_processar_negocio(page, nid):
         flag = "  (CONFERIR)" if mud.get("_conferir") else ""
         print(f"    item {i} [{mud.get('tipo','')}] -> {marca} {st}{flag}")
     print("  " + "=" * 56)
+
+
+VIGIA_INTERVALO_MIN = 10   # minutos entre as rodadas do Vigia
+
+
+def _vigia_uma_rodada(page):
+    """Uma passada do Vigia: le 'Orcamentos a Fazer' e monta sozinho cada
+    negocio NOVO (com levantamento) que ainda nao foi feito. Nunca trava: o que
+    nao souber faz o mais parecido; o que der erro, anota e segue."""
+    try:
+        lista = crm_listar("orcamentos-a-fazer")
+    except Exception as e:
+        print(f"  [vigia] nao consegui ler o CRM agora (tento de novo depois): {e}")
+        return
+    negocios = lista.get("negocios", [])
+    vistos = _crm_ler_vistos()
+    com_lev = sum(1 for n in negocios if n.get("levantamento"))
+    pendentes = [n for n in negocios
+                 if n.get("levantamento") and str(n.get("id")) not in vistos]
+    print(f"  [vigia] 'Orcamentos a Fazer': {len(negocios)}  |  "
+          f"com levantamento: {com_lev}  |  novos p/ montar agora: {len(pendentes)}")
+    if not pendentes:
+        return
+    for n in pendentes:
+        nome = n.get("cliente", "?")
+        ident = str(n.get("id"))
+        print(f"\n  [vigia] >> montando sozinho: {nome}  (id {ident[:8]})")
+        try:
+            _crm_processar_negocio(page, n["id"], auto=True)
+        except Exception as e:
+            # qualquer erro inesperado: anota, tira print e SEGUE para o proximo.
+            print(f"  [vigia] [!] deu erro nesse ({nome}) -- anotado, seguindo: {e}")
+            try:
+                print_tela(page, f"vigia_erro_{ident[:8]}")
+            except Exception:
+                pass
+            # marca como visto pra nao ficar tentando o mesmo quebrado toda hora
+            # (voce confere pelo print/W-Vetro e me manda o erro aqui no chat).
+            _crm_marcar_visto(n["id"])
+
+
+def modo_vigia(page):
+    """VIGIA 24h: fica ligado o tempo todo. De tempos em tempos le o CRM e monta
+    sozinho (SEM calcular) cada orcamento NOVO de ALUMINIO que aparecer em
+    'Orcamentos a Fazer'. So W-Vetro -- PVC fica de fora. Deixe a janela aberta;
+    pare quando quiser com Ctrl + C."""
+    from datetime import datetime
+    print()
+    print("=" * 62)
+    print("   VIGIA 24h LIGADO")
+    print(f"   Confere o CRM a cada {VIGIA_INTERVALO_MIN} minutos e monta sozinho.")
+    print("   So ALUMINIO (W-Vetro). PVC fica de fora. NAO calcula.")
+    print("   O que nao souber, faz o mais parecido e segue (nunca trava).")
+    print("   >> DEIXE ESTA JANELA ABERTA. Para parar: aperte Ctrl + C.")
+    print("=" * 62)
+    rodada = 0
+    while True:
+        rodada += 1
+        print(f"\n  --- rodada {rodada}  ({datetime.now().strftime('%d/%m %H:%M')}) ---")
+        try:
+            _vigia_uma_rodada(page)
+        except KeyboardInterrupt:
+            print("\n  Vigia desligado (Ctrl+C). Ate logo!")
+            return
+        except Exception as e:
+            print(f"  [vigia] erro na rodada (ignorado, continuo): {e}")
+        print(f"  [vigia] proxima conferida em {VIGIA_INTERVALO_MIN} min. (Ctrl+C para parar)")
+        try:
+            for _ in range(VIGIA_INTERVALO_MIN * 60 // 5):
+                time.sleep(5)
+        except KeyboardInterrupt:
+            print("\n  Vigia desligado (Ctrl+C). Ate logo!")
+            return
 
 
 def _crm_extrai_id(txt):
@@ -4525,11 +4602,14 @@ def main():
                 print("  6) MONTAR itens (orcamento ja aberto na tela 'Escolha o desenho')")
                 print("  7) CRM -- montar a partir de 'Orcamentos a Fazer' (so aluminio)")
                 print("  8) CRM -- abrir um negocio pelo LINK/ID (so ver o levantamento)")
+                print("  9) VIGIA 24h -- fica ligado e monta sozinho os novos (so aluminio)")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
                 if op in ("0", "sair", "s", "exit", "q"):
                     break
+                elif op == "9":
+                    modo_vigia(page)
                 elif op == "7":
                     modo_crm(page)
                 elif op == "8":
