@@ -4307,6 +4307,64 @@ def _crm_processar_negocio(page, nid):
     print("  " + "=" * 56)
 
 
+def _crm_extrai_id(txt):
+    """Pega o id (UUID) de um link do CRM ou de um texto solto."""
+    m = _re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                   txt or "", _re.I)
+    return m.group(0) if m else (txt or "").strip()
+
+
+def _crm_ver_negocio(page, nid):
+    """SO LE um negocio (qualquer etapa, inclusive 'Orcamento Pronto') pelo id:
+    salva o JSON cru e mostra como o robo interpretaria cada item -- SEM montar
+    nada. Serve pra comparar o levantamento com o orcamento feito a mao."""
+    try:
+        det = crm_negocio(nid)
+        lev = crm_levantamento(nid)
+    except Exception as e:
+        print(f"  [!] erro lendo o negocio: {e}")
+        return
+    try:
+        import json as _json
+        PRINTS_DIR.mkdir(parents=True, exist_ok=True)
+        arq = PRINTS_DIR / f"crm_{str(nid)[:8]}.json"
+        arq.write_text(_json.dumps({"detalhe": det, "levantamento": lev},
+                                   ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n  >> dados crus salvos em: {arq}")
+        print("     (ME MANDE ESSE ARQUIVO aqui no chat)")
+    except Exception:
+        pass
+    cli = _crm_cliente(det)
+    print(f"\n  CLIENTE: {cli.get('nome')}  |  {cli.get('cidade','')}  |  vend: {cli.get('vendedor','')}")
+    alts = lev.get("alternativas", [])
+    print(f"  {len(alts)} alternativa(s): " + ", ".join(a.get("nome", "?") for a in alts))
+    unidade = lev.get("unidade_medida", "cm")
+    for alt in alts:
+        itens = []
+        for it in alt.get("itens", []):
+            if (it.get("tipo") or "").strip().upper() == "PE":
+                continue
+            mud = _spec_item_novo(_crm_item_para_linha(it, unidade))
+            if mud and mud.get("modelo"):
+                itens.append(mud)
+        if itens:
+            _preview_montar(f"{alt.get('nome', '?')}", itens)
+
+
+def modo_crm_por_id(page):
+    """Abre UM negocio pelo link/ID (serve pra 'Orcamento Pronto' que a API nao
+    lista). So mostra/salva -- nao monta."""
+    print()
+    print("CRM -- abrir um negocio pelo LINK/ID (so pra ver, nao monta).")
+    print("Cole o link do negocio no CRM (ex.: .../deals/830056cf-...) ou so o ID:")
+    txt = input("  Link/ID: ").strip()
+    if not txt:
+        print("  Cancelado.")
+        return
+    nid = _crm_extrai_id(txt)
+    _crm_ver_negocio(page, nid)
+
+
 def modo_crm(page):
     """Le as filas de trabalho do CRM ('Orcamentos a Fazer' e 'Atualizacoes') e
     deixa voce escolher um negocio pra montar o orcamento de ALUMINIO no W-Vetro
@@ -4414,6 +4472,7 @@ def main():
                 print("  5) ORCAMENTO NOVO COMPLETO (cliente + itens)")
                 print("  6) MONTAR itens (orcamento ja aberto na tela 'Escolha o desenho')")
                 print("  7) CRM -- montar a partir de 'Orcamentos a Fazer' (so aluminio)")
+                print("  8) CRM -- abrir um negocio pelo LINK/ID (so ver o levantamento)")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
 
@@ -4421,6 +4480,8 @@ def main():
                     break
                 elif op == "7":
                     modo_crm(page)
+                elif op == "8":
+                    modo_crm_por_id(page)
                 elif op == "1":
                     modo_mensagem(page)
                 elif op == "3":
