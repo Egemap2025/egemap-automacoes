@@ -4308,31 +4308,47 @@ def _crm_processar_negocio(page, nid):
 
 
 def modo_crm(page):
-    """Le a etapa 'Orcamentos a Fazer' do CRM e deixa voce escolher um negocio
-    pra montar o orcamento de ALUMINIO no W-Vetro (supervisionado). PVC fica de
-    fora e nao calcula -- voce valida, inclui o que faltar e calcula."""
+    """Le as filas de trabalho do CRM ('Orcamentos a Fazer' e 'Atualizacoes') e
+    deixa voce escolher um negocio pra montar o orcamento de ALUMINIO no W-Vetro
+    (supervisionado). PVC fica de fora e nao calcula -- voce valida, inclui o
+    que faltar e calcula."""
     print()
-    print("MODO CRM -- lendo 'Orcamentos a Fazer'...")
-    try:
-        lista = crm_listar("orcamentos-a-fazer")
-    except Exception as e:
-        print(f"  [!] nao consegui falar com a API do CRM: {e}")
-        print("  Confira a CRM_API_KEY (variavel de ambiente ou arquivo crm_api_key.txt).")
-        return
-    negocios = [n for n in lista.get("negocios", []) if n.get("levantamento")]
+    print("MODO CRM -- lendo as filas do CRM...")
+    negocios = []
+    for etapa in ("orcamentos-a-fazer", "atualizacoes"):
+        try:
+            lista = crm_listar(etapa)
+        except Exception as e:
+            print(f"  [!] nao consegui ler a etapa '{etapa}': {e}")
+            if etapa == "orcamentos-a-fazer":
+                print("  Confira a CRM_API_KEY (variavel de ambiente ou crm_api_key.txt).")
+            continue
+        nome_etapa = lista.get("etapa", etapa)
+        da_etapa = lista.get("negocios", [])
+        com_lev = sum(1 for n in da_etapa if n.get("levantamento"))
+        print(f"  {nome_etapa}: {len(da_etapa)} negocio(s)  |  com levantamento: {com_lev}")
+        for n in da_etapa:
+            n["_etapa"] = nome_etapa
+            negocios.append(n)
     if not negocios:
-        print("  Nenhum negocio COM levantamento em 'Orcamentos a Fazer'.")
+        print("  Nenhum negocio nas filas de trabalho.")
         return
     vistos = _crm_ler_vistos()
-    print(f"\n  Total na etapa: {lista.get('total', '?')}  |  Com levantamento: {len(negocios)}")
+    print("\n  NEGOCIOS (so da pra montar os que tem levantamento):")
     for i, n in enumerate(negocios, 1):
+        tem = "LEV ✔" if n.get("levantamento") else "-- sem levantamento"
         feito = "  (ja feito)" if n["id"] in vistos else ""
-        print(f"    {i:2d}) {n.get('cliente', '?')}  -- vend: {n.get('vendedor', '?')}{feito}")
-    esc = input("\n  Numero do negocio pra montar (Enter cancela): ").strip()
+        print(f"    {i:2d}) {n.get('cliente', '?'):32s} [{tem}]  {n.get('_etapa','')}"
+              f"  -- vend: {n.get('vendedor', '?')}{feito}")
+    esc = input("\n  Numero do negocio pra abrir (Enter cancela): ").strip()
     if not esc.isdigit() or not (1 <= int(esc) <= len(negocios)):
         print("  Cancelado.")
         return
-    _crm_processar_negocio(page, negocios[int(esc) - 1]["id"])
+    escolhido = negocios[int(esc) - 1]
+    if not escolhido.get("levantamento"):
+        print("  [!] esse negocio ainda NAO tem levantamento -- nao da pra montar.")
+        return
+    _crm_processar_negocio(page, escolhido["id"])
 
 
 def menu_alteracoes(page):
