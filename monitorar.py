@@ -1060,7 +1060,10 @@ def materiais_da_proposta(pdf_path):
 # do orcamento 2587 (Uillian Lamark), que tem os tres tipos no mesmo arquivo.
 LINHAS_DE_ALUMINIO = ("PERFISUD", "VERSATIC", "DELUXE", "SOLENE")
 # Portao de rolo de ferro: nao e esquadria de nenhum dos tres materiais.
-SINAIS_DE_OUTRO = ("PORTAO", "FERRO")
+# Portao vai pra "Outro" sempre, seja de aluminio ou de ferro -- decisao do
+# Natanael em 06/10/2026, perguntado com o portao de enrolar EM ALUMINIO do
+# pedido da Josiana (R$ 27.885,00) na frente.
+SINAIS_DE_PORTAO = ("PORTAO",)
 # Portas de madeira industrializada. Sao madeira mesmo pintadas de branco, e
 # por isso nao dao pra reconhecer pela cor do perfil.
 #
@@ -1209,10 +1212,17 @@ def material_do_item(item):
 
     if any(p in linha for p in LINHAS_DE_ALUMINIO):
         return "aluminio", "linha"
-    # "FERRO" so vale na descricao da esquadria. Nas OBSERVACOES de uma porta
-    # de madeira aparece "FERRO DECORATIVO", e isso a classificava como portao.
-    if any(p in linha or p in descricao for p in SINAIS_DE_OUTRO):
+    if any(p in linha or p in descricao for p in SINAIS_DE_PORTAO):
         return "outro", "portao"
+    # "FERRO" so manda quando a esquadria nao for de madeira: a porta
+    # pivotante de MADEIRA GRAPIA do pedido da Dalvana vem "COM ESTRUTURA DE
+    # FERRO" e e madeira (a folha e que conta). Decisao do Natanael em
+    # 06/10/2026. E so na descricao da esquadria: nas OBSERVACOES de uma porta
+    # de madeira aparece "FERRO DECORATIVO".
+    e_de_madeira = bool(_COR_DE_MADEIRA.search(cor) or _COR_DE_MADEIRA.search(descricao)
+                        or any(p in quadro for p in PRODUTOS_DE_MADEIRA))
+    if ("FERRO" in linha or "FERRO" in descricao) and not e_de_madeira:
+        return "outro", "ferro"
     # O PRODUTO decide antes do acabamento: uma porta de MDF com acabamento
     # "ROVERE" continua sendo madeira.
     #

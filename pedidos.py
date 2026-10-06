@@ -117,6 +117,49 @@ DINHEIRO_NO_TEXTO = re.compile(r"(\d{1,3}(?:\.\d{3})*,\d{2})")
 # CNPJ, data ou medida.
 SO_DINHEIRO = re.compile(r"(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})")
 
+# "0,80 x 2,10" e vao, "3x 5.000,00" e parcela -- nenhum dos dois e o valor
+# do pedido. O "x" grudado ou com um espaco so, antes ou depois, denuncia.
+MEDIDA_OU_PARCELA = re.compile(r"(?:\d\s*[xX]\s*$)|(?:^\s*[xX])")
+
+
+def valor_no_nome(stem):
+    """O valor escrito no nome do arquivo. (valor, aviso).
+
+    O valor no nome manda em tudo, porque foi escolha dele -- mas so quando
+    da pra ter certeza de que e um valor. Num nome como
+
+        "Pedido - Joao - vao 0,80 x 2,10 - R$ 16.000,00.pdf"
+
+    pegar o primeiro numero mandava R$ 0,80 pro CRM. Entao:
+
+      1. numero com "R$" na frente e dinheiro, e o ultimo deles manda;
+      2. sem "R$", vale se for o unico numero do nome;
+      3. numero de vao ("0,80 x 2,10") e de parcela ("3x 5.000,00") nao conta;
+      4. mais de um numero solto: nao da pra escolher, deixa o PDF decidir.
+    """
+    candidatos = []
+    for achado in VALOR_ESCRITO.finditer(stem or ""):
+        antes = (stem[:achado.start()] or "")[-6:]
+        depois = (stem[achado.end():] or "")[:6]
+        if MEDIDA_OU_PARCELA.search(antes) or MEDIDA_OU_PARCELA.search(depois):
+            continue
+        valor = para_numero(achado.group(1))
+        if valor > 0:
+            candidatos.append((valor, "R$" in achado.group(0).upper()))
+
+    com_cifrao = [v for v, cifrao in candidatos if cifrao]
+    if com_cifrao:
+        return com_cifrao[-1], ""
+    if len(candidatos) == 1:
+        return candidatos[0][0], ""
+    if len(candidatos) > 1:
+        return 0.0, ("o nome do arquivo tem mais de um valor "
+                     f"({', '.join(_reais(v) for v, _ in candidatos)}) — "
+                     "usei o total impresso no PDF. Pra mandar um valor pelo "
+                     "nome, escreva ele com \"R$\" na frente")
+    return 0.0, ""
+
+
 def para_numero(texto):
     """"12.345,67" -> 12345.67. Zero quando nao da pra ler.
 
@@ -369,7 +412,16 @@ def resumo_do_pedido(pdf_path, paginas=None):
     materiais, soma_das_linhas, inteiras = {}, 0.0, True
     cheio = desconto = fechado = 0.0
     escrito = False          # o valor fechado veio escrito, nao foi calculado
+
     for linhas in paginas:
+        # Os totais do resumo so valem na PAGINA onde estao as linhas de
+        # material. Sem isso, o "DESCONTO:" impresso pela folha da maquina
+        # entrava na conta de um resumo escrito a mao que nao deu desconto --
+        # e o valor ia pro CRM menor, calado. No pedido do Bruno os dois ficam
+        # na mesma pagina, que e justamente o caso que tem de continuar
+        # funcionando.
+        da_pagina = {}
+        tem_material = False
         for i, (_, _, texto) in enumerate(linhas):
             so_rotulo, junto = _rotulo_e_valor(texto)
             if not _e_rotulo(so_rotulo):
@@ -378,11 +430,12 @@ def resumo_do_pedido(pdf_path, paginas=None):
             if not rotulo:
                 continue
             valor = junto or _dinheiro_na_mesma_altura(linhas, i)
-            if valor <= 0:
-                continue
 
             citados = _materiais_do_rotulo(rotulo)
             if citados:
+                if valor <= 0:
+                    continue
+                tem_material = True
                 soma_das_linhas += valor
                 if len(citados) == 1:
                     material = citados.pop()
@@ -391,15 +444,18 @@ def resumo_do_pedido(pdf_path, paginas=None):
                     inteiras = False
                 continue
 
-            # O ultimo manda: o resumo fica no fim, depois das folhas das
-            # maquinas, que tambem tem "TOTAL:" e "DESCONTO:".
+            # Zero conta: "Valor Desconto: R$ 0,00" e o vendedor dizendo que
+            # nao houve desconto.
             papel = ROTULOS_DO_RESUMO.get(rotulo)
-            if papel == "fechado":
-                fechado, escrito = valor, True
-            elif papel == "cheio":
-                cheio = valor
-            elif papel == "desconto":
-                desconto = valor
+            if papel and (valor > 0 or papel == "desconto"):
+                da_pagina[papel] = max(valor, 0.0)
+
+        if tem_material and da_pagina:
+            if "fechado" in da_pagina:
+                fechado, escrito = da_pagina["fechado"], True
+            if "cheio" in da_pagina:
+                cheio = da_pagina["cheio"]
+            desconto = da_pagina.get("desconto", 0.0)
 
     if not materiais and not soma_das_linhas:
         return {}
@@ -439,13 +495,21 @@ def resumo_do_pedido(pdf_path, paginas=None):
     else:
         return {}
 
-    divide = bool(materiais and inteiras and cobre_tudo
+    if not cobre_tudo:
+        # O proprio resumo admitiu que as linhas de material nao cobrem o
+        # pedido inteiro. Entao ele tambem nao sabe o valor do pedido: quem
+        # decide passa a ser o quadro de totais. Sem isto, uma linha solta
+        # tipo "Entrada esquadrias PVC: 8.000,00" num pedido misto levava o
+        # valor do pedido inteiro para o pedaco do W-Vetro.
+        return {}
+
+    divide = bool(materiais and inteiras
                   and abs(sum(materiais.values()) - soma_das_linhas) <= 0.02)
     return {"materiais": materiais if divide else {},
             "desconto": desconto, "total": fechado, "divide": divide}
 
 
-def totais_do_pedido(pdf_path, paginas=None):
+def totais_do_pedido(pdf_path, paginas=None, avisos=None):
     """Os totais que o pedido imprime, lidos pela posicao na folha.
 
     Um pedido pode trazer DUAS partes no mesmo PDF: a do sistema de PVC e a
@@ -463,7 +527,11 @@ def totais_do_pedido(pdf_path, paginas=None):
     if paginas is None:
         paginas = _paginas(pdf_path)
 
-    achados, avisos = [], []   # (pagina, altura, sistema, rotulo, valor)
+    # So numeros saem daqui: quem quiser os avisos passa uma lista em "avisos".
+    # Misturar texto no dicionario de totais ja derrubou o "pedidos.py testar".
+    if avisos is None:
+        avisos = []
+    achados = []            # (pagina, altura, sistema, rotulo, valor)
     for n, linhas in enumerate(paginas):
         for i, (y, _, texto) in enumerate(linhas):
             so_rotulo, junto = _rotulo_e_valor(texto)
@@ -482,7 +550,8 @@ def totais_do_pedido(pdf_path, paginas=None):
                 # Acontece quando o proprio sistema imprime errado -- o pedido
                 # do Marcelo saiu com "57.600.11 (+)", ponto no lugar da
                 # virgula. Fica no log em vez de sumir calado.
-                avisos.append(f"\"{texto.strip()[:40]}\" na pagina {n + 1}")
+                avisos.append(f"nao consegui ler o numero de "
+                              f"\"{texto.strip()[:40]}\" na pagina {n + 1}")
 
     totais = {}
     for sistema, fechamento, bruto in (("pvc", FECHAMENTO_PVC, "TOTAL DAS ABERTURAS"),
@@ -513,8 +582,6 @@ def totais_do_pedido(pdf_path, paginas=None):
                           f"uma pagina ({sorted(p + 1 for p in paginas_que_fecham)}) "
                           f"— usei o ultimo")
 
-    if avisos:
-        totais["avisos"] = avisos
     return totais
 
 
@@ -563,7 +630,7 @@ def _fechamento(totais, resumo=None, bruto_alm=0.0):
     return 0.0, ""
 
 
-def valor_do_pedido(pdf_path):
+def valor_do_pedido(pdf_path, avisos=None):
     """Valor do pedido. Retorna (valor, de onde saiu).
 
     Procura nesta ordem:
@@ -583,14 +650,14 @@ def valor_do_pedido(pdf_path):
     Foi o que aconteceu com o pedido do Jardel Pires Coelho em 30/09/2026:
     foi pro CRM 28.130,67, que era so o PVC, faltando 10.141,86 de aluminio.
     """
-    no_nome = VALOR_ESCRITO.search(Path(pdf_path).stem)
-    if no_nome:
-        valor = para_numero(no_nome.group(1))
-        if valor > 0:
-            return valor, "escrito no nome do arquivo"
+    do_nome, aviso = valor_no_nome(Path(pdf_path).stem)
+    if do_nome > 0:
+        return do_nome, "escrito no nome do arquivo"
+    if aviso and avisos is not None:
+        avisos.append(aviso)
 
     paginas = _paginas(pdf_path)
-    valor, de_onde = _fechamento(totais_do_pedido(pdf_path, paginas),
+    valor, de_onde = _fechamento(totais_do_pedido(pdf_path, paginas, avisos),
                                  resumo_do_pedido(pdf_path, paginas),
                                  _soma_das_esquadrias(pdf_path))
     if valor > 0:
@@ -814,7 +881,8 @@ def enviar(pdf_path, log=print, arquivo_antigo=None):
             f"arquivo — nao enviei nada.")
         return False
 
-    valor, de_onde = valor_do_pedido(pdf_path)
+    avisos = []
+    valor, de_onde = valor_do_pedido(pdf_path, avisos=avisos)
     if valor > 0:
         log(f"[{cliente}] Pedido: {arquivo} — {_reais(valor)} ({de_onde}).")
     else:
@@ -822,8 +890,8 @@ def enviar(pdf_path, log=print, arquivo_antigo=None):
             f"assim mesmo. Pra ir com valor, escreva ele no nome do arquivo "
             f"(ex.: '... R$ 12.345,67').")
 
-    for aviso in totais_do_pedido(pdf_path).get("avisos", []):
-        log(f"[{cliente}] Pedido: nao consegui ler um total — {aviso}.")
+    for aviso in avisos:
+        log(f"[{cliente}] Pedido: {aviso}.")
 
     composicao = composicao_do_pedido(pdf_path, valor, log=log, cliente=cliente)
     if composicao:
@@ -879,14 +947,17 @@ def testar(alvo=None):
             print(f"    nao e pedido : nao comeca com \"Pedido\" — fica de fora\n")
             continue
         cliente = nome_do_cliente(pdf)
-        valor, de_onde = valor_do_pedido(pdf)
         print(f"  {pdf.name}")
         print(f"    cliente lido : {cliente or '(nao consegui ler)'}")
+        avisos = []
+        valor, de_onde = valor_do_pedido(pdf, avisos=avisos)
         print(f"    valor        : {_reais(valor)}" + (f"  ({de_onde})" if de_onde else "  (nao achei)"))
-        totais = totais_do_pedido(pdf)
+        totais = totais_do_pedido(pdf, avisos=avisos)
         if totais:
             print(f"    totais lidos : "
                   + ", ".join(f"{k}={_reais(v)}" for k, v in sorted(totais.items())))
+        for aviso in avisos:
+            print(f"    AVISO        : {aviso}")
         composicao = composicao_do_pedido(pdf, valor, log=lambda m: None)
         if composicao:
             print(f"    por material : "

@@ -1262,12 +1262,22 @@ nome do arquivo.
 a composição — uma divisão errada muda o valor do pedido no card. Preencher na
 mão custa um minuto; errar o valor custa mais.
 
-### Medida no nome do arquivo não é dinheiro
+### Nem todo número no nome do arquivo é o valor do pedido
 
-O valor escrito no nome do arquivo ganha de tudo, porque é escolha dele. Mas
-`1,50m` em `"Pedido - Ana 1,50m x 2,00m.pdf"` tem a mesma cara de dinheiro
-(vírgula e dois dígitos) e virava o valor do pedido. Agora um número com letra
-grudada depois não conta.
+O valor escrito no nome ganha de tudo, porque é escolha dele. Mas o programa
+pegava o **primeiro** número com cara de dinheiro, e num nome como
+
+    "Pedido - Joao - vao 0,80 x 2,10 - R$ 16.000,00.pdf"
+
+ia **R$ 0,80** pro CRM. As regras agora:
+
+  1. número com `R$` na frente é dinheiro, e o último deles manda;
+  2. sem `R$`, vale se for o único número do nome;
+  3. vão (`0,80 x 2,10`) e parcela (`3x 5.000,00`) não contam — é o `x`
+     grudado, antes ou depois, que denuncia;
+  4. número com letra colada (`1,50m`) é medida, não conta;
+  5. mais de um número solto: não dá pra escolher — usa o total impresso no
+     PDF e avisa no log.
 
 ### O desconto de cada folha fica na folha dele
 
@@ -1295,6 +1305,51 @@ Hoje, quando o PDF não imprime um valor cheio próprio para a parte do W-Vetro
 (o "TOTAL:" encontrado é a própria linha de fechamento), quem diz quanto vale
 essa parte são **as esquadrias**. No Ivan elas somam 67.211,04 — bem menos que
 160.000,00 — e a trava dispara certo.
+
+### De que material é cada esquadria — o que o Natanael decidiu
+
+Perguntado em 06/10/2026, com os pedidos de verdade na frente:
+
+  - **Janela de alumínio com veneziana de madeira** (`JANELA 02 FOLHAS DE
+    CORRER EM ALUMÍNIO L32 | VENEZIANA 04 FOLHAS PANTOGRÁFICAS EM MADEIRA
+    MACIÇA ITAÚBA`, cor do perfil PINTURA PRETO) → **madeira**, como já
+    estava. São 4 itens do pedido da Letícia Borges Nedel, R$ 31.143,10.
+  - **Porta de madeira grápia com estrutura de ferro** → **madeira**. A folha
+    é que conta; o ferro é só a estrutura. Antes caía em "Outro" por causa da
+    palavra FERRO (Dalvana R$ 10.400,00, EDI/Adonis R$ 9.500,00).
+  - **Portão** → **sempre "Outro"**, mesmo o de enrolar *em alumínio*
+    (Josiana, R$ 27.885,00).
+
+Por isso o "FERRO" só manda quando a esquadria não for de madeira, e o
+"PORTÃO" manda sempre.
+
+### O resumo só vale na página onde ele está
+
+O `TOTAL:` e o `DESCONTO:` que a máquina imprime ficam em páginas anteriores
+às do resumo escrito à mão. Lendo o PDF inteiro de uma vez, um desconto da
+máquina entrava na conta de um resumo que não deu desconto — e o valor ia pro
+CRM menor, calado, com o log dizendo "resumo por material escrito no pedido".
+
+Agora os rótulos de total do resumo só contam na **mesma página** em que há
+linha de material. No pedido do Bruno Luiz Salvan os dois estão na mesma
+página, que é justamente o caso que tinha de continuar funcionando.
+
+E quando o próprio resumo conclui que as linhas de material **não cobrem o
+pedido inteiro**, ele não decide mais o valor: quem decide passa a ser o
+quadro de totais. Sem isso, uma linha solta tipo `Entrada esquadrias PVC:
+8.000,00` num pedido misto levava o valor do pedido inteiro para o pedaço do
+W-Vetro.
+
+### Número não se mistura com texto num dicionário de números
+
+O `totais_do_pedido` passou a guardar uma lista de avisos dentro do próprio
+dicionário de totais. O `python pedidos.py testar` percorre esse dicionário
+formatando tudo como dinheiro — e morreu com `TypeError` no primeiro pedido
+que tinha aviso (o do Marcelo), parando a conferência no meio: 11 dos 23
+pedidos nunca chegavam a ser mostrados.
+
+De lá saem **só números**. Quem quiser os avisos passa uma lista:
+`totais_do_pedido(pdf, avisos=minha_lista)`.
 
 ### Dentro do .exe o monitor não se chama "monitorar"
 
