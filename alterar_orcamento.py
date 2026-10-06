@@ -4223,7 +4223,14 @@ def _crm_item_para_linha(item, unidade="cm"):
     if larg not in (None, "") and alt not in (None, ""):
         fator = 10 if (unidade or "cm").lower().startswith("cm") else 1
         try:
-            partes.append(f"{int(round(float(larg) * fator))}x{int(round(float(alt) * fator))}")
+            lmm = int(round(float(larg) * fator))
+            amm = int(round(float(alt) * fator))
+            # medida plausivel: esquadria tem pelo menos ~10cm (100mm). Numero
+            # minusculo (ex.: 20x60) = levantamento mal preenchido -> NAO manda a
+            # medida (o item fica 'sem medida' e o robo pula), em vez de criar uma
+            # esquadria de 2cm no W-Vetro.
+            if lmm >= 100 and amm >= 100:
+                partes.append(f"{lmm}x{amm}")
         except Exception:
             pass
     if amb and "definir" not in amb.lower():
