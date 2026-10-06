@@ -4094,12 +4094,61 @@ def _extrai_vidro_texto(texto):
     return f"{nome} {esp}mm {tipo}"
 
 
+def _extrai_vidro_projeto(mp):
+    """Le o vidro do campo 'material_projeto' do CRM -- o mais confiavel, pois ja
+    traz o vidro do jeito que foi especificado. Ex.:
+      'MEGA 25* BRANCO INCOLOR 06MM - TEMPERADO' -> 'incolor 6mm temperado'
+      'MEGA 25* BRANCO MINI-BOREAL 04MM - COMUM' -> 'mini boreal 4mm comum'
+      'LINHA 25 BRANCO SEM VIDRO'                -> 'sem vidro'
+    Devolve '' se nao achar spec."""
+    low = _sem_acento((mp or "").lower())
+    if not low:
+        return ""
+    if "sem vidro" in low:
+        return "sem vidro"
+    m = _re.search(r"(\d{1,2})\s*mm", low)
+    if not m:
+        return ""
+    esp = str(int(m.group(1)))        # '06' -> '6'
+    tipo = next((t for t in ("temperado", "comum", "laminado") if t in low), "temperado")
+    if "mini" in low and "boreal" in low:
+        return f"mini boreal {esp}mm {tipo}"
+    nome = next((n for n in ("incolor", "fume", "verde", "bronze", "cinza",
+                             "acidato", "jateado", "boreal", "refletivo") if n in low), "incolor")
+    return f"{nome} {esp}mm {tipo}"
+
+
+def _crm_unidade_efetiva(alt, unidade="cm"):
+    """O CRM diz 'cm', mas as vezes os numeros do levantamento ja vem em MM
+    (ex.: largura 800, 1800, 2000). Se a gente multiplicar por 10 nesse caso, a
+    medida sai 10x maior (800 -> 8000). Entao a gente DETECTA pelo tamanho medio:
+    esquadria media em cm fica ~100-250; em mm fica ~1000-2500. Media >= 500 =>
+    os numeros ja estao em mm (nao multiplica). Senao, estao em cm (multiplica)."""
+    u = (unidade or "cm").lower()
+    if u.startswith("mm"):
+        return "mm"
+    maxs = []
+    for it in (alt.get("itens") or []):
+        try:
+            maxs.append(max(float(it.get("largura")), float(it.get("altura"))))
+        except Exception:
+            pass
+    if not maxs:
+        return "cm"
+    return "mm" if (sum(maxs) / len(maxs)) >= 500 else "cm"
+
+
 def _crm_item_para_linha(item, unidade="cm"):
     """Converte 1 item do levantamento do CRM numa LINHA da mensagem do robo,
     pra reaproveitar _spec_item_novo (todas as regras de modelo/cor/vidro/etc).
     Medidas em cm viram mm (x10)."""
     cod = (item.get("codigo") or "").strip()
     tip = (item.get("esquadria") or "").strip()          # tipologia
+    # a esquadria do CRM as vezes traz a LINHA grudada no fim:
+    #   'JANELA DE CORRER ... | MEGA 25'   ou   'PORTINHOLA ... - L. 25'
+    # tira esse sufixo pra nao sujar a escolha do card (a linha vem do campo 'linha').
+    tip = _re.sub(r"\s*\|\s*.*$", "", tip)
+    tip = _re.sub(r"\s*-\s*l\.?\s*\d+\s*$", "", tip, flags=_re.I).strip()
     tipo = (item.get("tipo") or "").strip().upper()      # J / PJ / P / PE
     material = (item.get("material") or "").strip()
     linha = (item.get("linha") or "").strip()
@@ -4157,14 +4206,17 @@ def _crm_item_para_linha(item, unidade="cm"):
     #  4) janela (J) -> tenta achar a spec no texto da esquadria ('comum 4mm'...)
     #  5) senao vazio -> padrao por tipo (J 6mm / PJ 8mm) no _spec_item_novo
     vlow = _sem_acento((vidro or "").lower())
-    if "sem vidro" in vlow:
+    vp = _extrai_vidro_projeto(item.get("material_projeto"))   # o mais confiavel
+    if "sem vidro" in vlow or "nao se aplica" in vlow or vp == "sem vidro":
         partes.append("sem vidro")
     elif _re.search(r"\d\s*mm", vlow):
-        partes.append(vidro)                 # campo do CRM completo (J ou PJ)
+        partes.append(vidro)                 # campo 'vidro' do CRM ja completo
+    elif vp:
+        partes.append(vp)                    # do 'material_projeto' (ex.: mini boreal 4mm comum)
     elif tipo.startswith("PJ"):
         pass                                 # PJ sem spec -> padrao 8mm temperado
     else:
-        ex = _extrai_vidro_texto(tip)        # tenta na descricao da esquadria
+        ex = _extrai_vidro_texto(tip)        # ultimo recurso: acha na descricao
         if ex:
             partes.append(ex)
     larg, alt = item.get("largura"), item.get("altura")
@@ -4174,7 +4226,7 @@ def _crm_item_para_linha(item, unidade="cm"):
             partes.append(f"{int(round(float(larg) * fator))}x{int(round(float(alt) * fator))}")
         except Exception:
             pass
-    if amb:
+    if amb and "definir" not in amb.lower():
         partes.append(amb)
     try:
         q = int(item.get("quantidade") or 1)
@@ -4232,7 +4284,7 @@ def _crm_processar_negocio(page, nid):
     if not alt or not alt.get("itens"):
         print("  [!] esse negocio nao tem itens no levantamento.")
         return
-    unidade = lev.get("unidade_medida", "cm")
+    unidade = _crm_unidade_efetiva(alt, lev.get("unidade_medida", "cm"))
     print(f"\n  Alternativa escolhida (aluminio): {alt.get('nome', '?')}"
           f"  [{len(lev.get('alternativas', []))} alternativa(s) no total]")
 
@@ -4338,8 +4390,8 @@ def _crm_ver_negocio(page, nid):
     print(f"\n  CLIENTE: {cli.get('nome')}  |  {cli.get('cidade','')}  |  vend: {cli.get('vendedor','')}")
     alts = lev.get("alternativas", [])
     print(f"  {len(alts)} alternativa(s): " + ", ".join(a.get("nome", "?") for a in alts))
-    unidade = lev.get("unidade_medida", "cm")
     for alt in alts:
+        unidade = _crm_unidade_efetiva(alt, lev.get("unidade_medida", "cm"))
         itens = []
         for it in alt.get("itens", []):
             if (it.get("tipo") or "").strip().upper() == "PE":
