@@ -4216,6 +4216,17 @@ def _crm_processar_negocio(page, nid):
     except Exception as e:
         print(f"  [!] erro lendo o negocio no CRM: {e}")
         return
+    # Salva os dados CRUS (JSON) do negocio num arquivo, pra poder analisar os
+    # campos novos (ex.: codigo_sistema) e conferir a leitura. Fica em prints.
+    try:
+        import json as _json
+        PRINTS_DIR.mkdir(parents=True, exist_ok=True)
+        _arq = PRINTS_DIR / f"crm_{str(nid)[:8]}.json"
+        _arq.write_text(_json.dumps({"detalhe": det, "levantamento": lev},
+                                    ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"     (dados crus do CRM salvos em: {_arq})")
+    except Exception:
+        pass
     cli = _crm_cliente(det)
     alt = _crm_alternativa_aluminio(lev)
     if not alt or not alt.get("itens"):
