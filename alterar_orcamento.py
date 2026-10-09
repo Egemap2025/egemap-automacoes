@@ -4089,6 +4089,18 @@ def _crm_solene_invalida(item):
     return ("fixo" in txt and "peitoril" not in txt and "bandeira" not in txt)
 
 
+def _crm_item_dificil(item):
+    """True se o item e DIFICIL e precisa de conferencia humana:
+     - FACHADA / GLAZING  -> produto diferente (cortina de vidro, linha Hydro/
+       Citta Due), o robo nao monta certo sozinho.
+     - tipo 'A DEFINIR'   -> a abertura (giro/correr/pivotante) nao foi informada,
+       entao o robo so chuta. Monta no melhor palpite, mas marca pra CONFERIR."""
+    txt = _sem_acento(((item.get("esquadria") or "") + " "
+                       + (item.get("tipo") or "")).lower())
+    return ("glazing" in txt or "fachada" in txt or "a definir" in txt
+            or "cortina de vidro" in txt)
+
+
 def _extrai_vidro_texto(texto):
     """Acha uma spec de vidro dentro de um texto solto (ex.: a esquadria 'crua'
     do CRM que traz '...temperado 6mm...', 'comum 4mm' ou 'miniboreal'). Devolve
@@ -4229,8 +4241,17 @@ def _crm_item_para_linha(item, unidade="cm"):
         elif "manual" in acion or "recolhedor" in acion:
             desc += " manual"
 
+    # 'ripado vertical' numa PORTA (P/PJ) sem abertura definida -> quase sempre e
+    # PORTA PIVOTANTE ripada (ex.: entrada de grapia). Da o palpite certo e usa a
+    # linha RIPADOS (nao a L.30 de madeira comum).
+    if ("ripad" in low_desc and tipo in ("P", "PJ")
+            and not any(k in low_desc for k in ("pivotante", "giro", "abrir", "correr"))):
+        desc += " pivotante ripados"
+        low_desc = _sem_acento(desc.lower())
+
     partes = [f"{cod} {desc}".strip()]
-    if cor and "aplica" not in cor.lower() and "definir" not in cor.lower():
+    if (cor and cor.strip() not in ("-", "--", "–", "—")
+            and "aplica" not in cor.lower() and "definir" not in cor.lower()):
         partes.append(cor)
     # VIDRO -- em ordem de confianca:
     #  1) 'sem vidro'
@@ -4346,7 +4367,8 @@ def _crm_processar_negocio(page, nid, auto=False):
             # robo monta no melhor palpite, mas quase sempre precisam de ajuste.
             comp = "+" in (it.get("esquadria") or "")
             mud["_conferir"] = (bool(it.get("pendencias")) or _crm_tipo_diverge(it)
-                                or comp or _crm_solene_invalida(it))
+                                or comp or _crm_solene_invalida(it)
+                                or _crm_item_dificil(it))
             itens.append(mud)
 
     if not cli.get("nome"):
