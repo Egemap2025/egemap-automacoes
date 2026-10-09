@@ -1314,9 +1314,10 @@ def _eh_madeira(low):
 
 def _eh_pvc(low):
     """low = descricao SEM acento, minuscula. True se e esquadria de PVC
-    (linhas CONFORT / ELEGANCE). PVC NAO e feito por este robo -- e outro
-    sistema -- entao esses itens sao PULADOS."""
-    return ("pvc" in low or "confort" in low or "elegance" in low)
+    (linhas CONFORT/COMFORT / ELEGANCE / ARCHILINE / ARCHICENTRO). PVC NAO e
+    feito por este robo -- e outro sistema -- entao esses itens sao PULADOS."""
+    return any(k in low for k in ("pvc", "confort", "comfort", "elegance",
+                                  "archiline", "archicentro"))
 
 
 def _spec_item_novo(descricao):
@@ -4075,6 +4076,19 @@ def _crm_tipo_diverge(it):
     return bool(cp and tp and cp[0].upper() != tp[0].upper())
 
 
+def _crm_solene_invalida(item):
+    """True se o item e da linha SOLENE mas e maxim-ar ou vidro fixo. A Solene so
+    tem portas e janelas de CORRER -- entao esse item e uma inconsistencia: o robo
+    monta no Deluxe como palpite, mas marca pra CONFERIR."""
+    txt = _sem_acento(((item.get("linha") or "") + " "
+                       + (item.get("esquadria") or "")).lower())
+    if "solene" not in txt:
+        return False
+    if "maxim" in txt or "painel" in txt:
+        return True
+    return ("fixo" in txt and "peitoril" not in txt and "bandeira" not in txt)
+
+
 def _extrai_vidro_texto(texto):
     """Acha uma spec de vidro dentro de um texto solto (ex.: a esquadria 'crua'
     do CRM que traz '...temperado 6mm...', 'comum 4mm' ou 'miniboreal'). Devolve
@@ -4177,9 +4191,28 @@ def _crm_item_para_linha(item, unidade="cm"):
     # linha 'L.25'/'L.32'/'L.30' -> 'l25'/... ; se for texto (MDF Ultra/Colonial/
     # Ripados), passa como esta (vira palavra do card).
     eh_mad = ("madeira" in _sem_acento(material.lower())) or _eh_madeira(_sem_acento(desc.lower()))
+    low_desc = _sem_acento(desc.lower())
+    linha_low = _sem_acento((linha + " " + tip).lower())
+    # maxim-ar / painel-fixo / quadro-fixo. NAO confunde com 'peitoril fixo' nem
+    # 'bandeira fixa' (detalhes de uma janela de correr/maxim, nao o tipo fixo).
+    eh_maxfixo = ("maxim" in low_desc) or ("painel" in low_desc) or ("quadro" in low_desc and "fixo" in low_desc)
     ml = _re.search(r"(\d{2})", linha)
     if ml:
-        desc += f" l{ml.group(1)}"
+        num = ml.group(1)
+        desc += f" l{num}"
+        if num == "32" and not eh_mad:
+            # Linha 32 (aluminio) tem 2 variantes:
+            #  - SOLENE (premium, 'com baguete') -> SO portas e janelas de CORRER.
+            #  - DELUXE (padrao) -> tem tudo (maxim-ar, fixo, correr...).
+            # Regra EGEMAP: a Solene NAO tem maxim-ar nem vidro fixo. Entao:
+            # correr em Solene -> Solene (com baguete); maxim-ar/fixo (mesmo que
+            # pedido em Solene, que nao existe) -> Deluxe; '32' puro -> Deluxe.
+            if "solene" in linha_low and not eh_maxfixo:
+                desc += " solene baguete"
+            else:
+                desc += " deluxe"
+        elif num == "25" and not eh_mad and "versatic" not in linha_low:
+            desc += " versatic"       # linha 25 = Versatic 25
     else:
         if linha and "aplica" not in linha.lower() and "definir" not in linha.lower():
             desc += " " + linha       # ex.: 'MDF Ultra' vira palavra do card
@@ -4216,9 +4249,13 @@ def _crm_item_para_linha(item, unidade="cm"):
     elif tipo.startswith("PJ"):
         pass                                 # PJ sem spec -> padrao 8mm temperado
     else:
-        ex = _extrai_vidro_texto(tip)        # ultimo recurso: acha na descricao
+        ex = _extrai_vidro_texto(tip)        # tenta achar a spec na descricao
         if ex:
             partes.append(ex)
+        elif "maxim" in low_desc or "basculant" in low_desc:
+            # maxim-ar/basculante sem vidro informado -> mini-boreal 4mm comum
+            # (padrao EGEMAP: quase sempre entram em banheiro/lavabo/servico).
+            partes.append("mini boreal 4mm comum")
     larg, alt = item.get("largura"), item.get("altura")
     if larg not in (None, "") and alt not in (None, ""):
         fator = 10 if (unidade or "cm").lower().startswith("cm") else 1
@@ -4308,7 +4345,8 @@ def _crm_processar_negocio(page, nid, auto=False):
             # (esquadria com '+', ex.: 'peitoril + correr + bandeira') -- essas o
             # robo monta no melhor palpite, mas quase sempre precisam de ajuste.
             comp = "+" in (it.get("esquadria") or "")
-            mud["_conferir"] = bool(it.get("pendencias")) or _crm_tipo_diverge(it) or comp
+            mud["_conferir"] = (bool(it.get("pendencias")) or _crm_tipo_diverge(it)
+                                or comp or _crm_solene_invalida(it))
             itens.append(mud)
 
     if not cli.get("nome"):
