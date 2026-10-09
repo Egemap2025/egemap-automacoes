@@ -4411,6 +4411,25 @@ def _crm_processar_negocio(page, nid, auto=False):
 VIGIA_INTERVALO_MIN = 10   # minutos entre as rodadas do Vigia
 
 
+class _VigiaNavegadorFechado(Exception):
+    """Sinaliza que a janela do navegador foi fechada -- o Vigia precisa parar."""
+    pass
+
+
+def _page_viva(page):
+    """True se a janela/pagina do navegador ainda esta aberta e respondendo."""
+    try:
+        if page.is_closed():
+            return False
+    except Exception:
+        return False
+    try:
+        page.evaluate("1")
+        return True
+    except Exception:
+        return False
+
+
 def _vigia_uma_rodada(page):
     """Uma passada do Vigia: le 'Orcamentos a Fazer' e monta sozinho cada
     negocio NOVO (com levantamento) que ainda nao foi feito. Nunca trava: o que
@@ -4438,13 +4457,17 @@ def _vigia_uma_rodada(page):
         except Exception as e:
             # qualquer erro inesperado: anota, tira print e SEGUE para o proximo.
             print(f"  [vigia] [!] deu erro nesse ({nome}) -- anotado, seguindo: {e}")
+            # Se a janela do navegador foi FECHADA, nao adianta continuar: para o
+            # Vigia (e NAO marca visto, pra retomar esse negocio quando reabrir).
+            if not _page_viva(page):
+                raise _VigiaNavegadorFechado()
             try:
                 print_tela(page, f"vigia_erro_{ident[:8]}")
             except Exception:
                 pass
-            # marca como visto pra nao ficar tentando o mesmo quebrado toda hora
-            # (voce confere pelo print/W-Vetro e me manda o erro aqui no chat).
-            _crm_marcar_visto(n["id"])
+            # NAO marca visto: erro pode ser passageiro (navegador/internet). Assim
+            # ele TENTA DE NOVO na proxima rodada, em vez de pular um negocio bom
+            # pra sempre. (Sucesso ja marca visto dentro de _crm_processar_negocio.)
 
 
 def modo_vigia(page):
@@ -4467,11 +4490,24 @@ def modo_vigia(page):
         print(f"\n  --- rodada {rodada}  ({datetime.now().strftime('%d/%m %H:%M')}) ---")
         try:
             _vigia_uma_rodada(page)
+        except _VigiaNavegadorFechado:
+            print("\n  " + "=" * 56)
+            print("  [vigia] A JANELA DO NAVEGADOR FOI FECHADA -- Vigia parado.")
+            print("  >> Abra o robo de novo (icone EGEMAP) e ligue o Vigia (9).")
+            print("     (o negocio que estava montando NAO foi marcado como feito,")
+            print("      entao o Vigia pega ele de novo quando voltar.)")
+            print("  " + "=" * 56)
+            return
         except KeyboardInterrupt:
             print("\n  Vigia desligado (Ctrl+C). Ate logo!")
             return
         except Exception as e:
             print(f"  [vigia] erro na rodada (ignorado, continuo): {e}")
+        # seguranca: se o navegador morreu, para o Vigia (nao fica rodando a toa).
+        if not _page_viva(page):
+            print("\n  [vigia] navegador indisponivel -- Vigia parado.")
+            print("  >> Reabra o robo (icone EGEMAP) e ligue o Vigia (9).")
+            return
         print(f"  [vigia] proxima conferida em {VIGIA_INTERVALO_MIN} min. (Ctrl+C para parar)")
         try:
             for _ in range(VIGIA_INTERVALO_MIN * 60 // 5):
