@@ -2653,6 +2653,15 @@ def _escolher_card_auto(page, modelo, num=""):
             k in low_mod for k in ("pm15", "pm28", "pm33", "lambri", "ripad")):
         if "pm15" not in palavras:
             palavras.append("pm15")
+    # FACHADA / GLAZING (cortina de vidro em grid de modulos; linha Fachada Citta
+    # Due / Soluta). Reforca as palavras da fachada e TIRA 'maxim' (os modulos
+    # moveis internos sao maxim-ar, mas o CARD e de FACHADA, nao de maxim-ar --
+    # sem isso o scorer pegaria um card de maxim-ar por engano).
+    if "glazing" in low_mod or "fachada" in low_mod:
+        palavras = [w for w in palavras if not w.startswith("maxim")]
+        for e in ("fachada", "glazing", "soluta", "citta"):
+            if e not in palavras:
+                palavras.append(e)
     # espera os cards de desenho carregarem (aparecem 'PROJETO COM' / codigo)
     import time as _t
     fim = _t.time() + 10
