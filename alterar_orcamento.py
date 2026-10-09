@@ -1364,6 +1364,28 @@ def _spec_item_novo(descricao):
     if _re.search(r"\bsem\s+persiana\b", desc, _re.I):
         desc = _re.sub(r"\bsem\s+persiana\b", " ", desc, flags=_re.I).strip()
 
+    # FACHADA GLAZING (cortina de vidro em grade de modulos). Ex. do levantamento:
+    #   'Glazing 2 x 3 modulos, 2 maxim-ar (2a linha)'
+    # Guarda nh (modulos na largura) x nv (na altura) e quantos tem maxim-ar, e
+    # LIMPA esses numeros da descricao (senao viram 'folhas'/'modulos' e sujam o
+    # card). Essas infos viram variaveis NH/NV/MX/QTMX da janela de variaveis.
+    _low_fac = _sem_acento(desc.lower())
+    if "glazing" in _low_fac or "fachada" in _low_fac:
+        fac = {}
+        _mg = _re.search(r"(\d+)\s*x\s*(\d+)", desc)
+        if _mg:
+            fac["nh"], fac["nv"] = int(_mg.group(1)), int(_mg.group(2))
+        _mmx = _re.search(r"(\d+)\s*maxim", _low_fac)
+        if _mmx:
+            fac["qtmx"] = int(_mmx.group(1))
+        else:
+            fac["qtmx"] = 1 if "maxim" in _low_fac else 0
+        mud["_fachada"] = fac
+        desc = _re.sub(r"\d+\s*x\s*\d+(\s*m[oó]dulos?)?", " ", desc, flags=_re.I)
+        desc = _re.sub(r",?\s*\d+\s*maxim[-\s]*ar", " ", desc, flags=_re.I)
+        desc = _re.sub(r"\(.*?\)", " ", desc)               # tira '(2a linha)'
+        desc = _re.sub(r"\s{2,}", " ", desc).strip()
+
     # folhas por extenso -> numero (duas folhas -> 02 folhas), para casar tanto
     # o MODELO quanto o card certo (os cards mostram '02 FOLHAS', '03 FOLHAS'...)
     _NUMEXT = {"uma": "01", "um": "01", "duas": "02", "dois": "02",
@@ -2021,6 +2043,9 @@ def _modelo_dropdown(descricao):
     texto (ex.: 'ripada' escolhe o desenho RIPADO, mas o MODELO e PORTA
     PIVOTANTE)."""
     low = _sem_acento(descricao.lower())
+    # FACHADA / GLAZING (cortina de vidro em grid de modulos) -> MODELO 'FACHADA'
+    if "glazing" in low or "fachada" in low:
+        return "FACHADA"
     mf = _re.search(r"(\d{1,2})\s*folhas?", low)
     folhas = mf.group(1).zfill(2) if mf else None
     tem_porta = "porta" in low
@@ -2401,6 +2426,119 @@ def _fechar_aviso_valores(page):
           or _clicar_botao_real(page, r"^\s*fechar\s*$", timeout=3000))
     page.wait_for_timeout(500)
     return ok
+
+
+def _select_opcao_comeca(sel, alvo_n):
+    """No <select>, escolhe a opcao cujo texto (sem acento, minusculo) COMECA com
+    alvo_n (ex.: '2 ' -> '2 MODULOS'; 'sim' -> 'SIM'). True se escolheu."""
+    try:
+        opts = sel.locator("option")
+        n = opts.count()
+    except Exception:
+        return False
+    for i in range(n):
+        try:
+            txt = (opts.nth(i).inner_text() or "").strip()
+        except Exception:
+            continue
+        if _sem_acento(txt.lower()).startswith(alvo_n):
+            try:
+                sel.select_option(label=txt)
+            except Exception:
+                try:
+                    sel.select_option(value=opts.nth(i).get_attribute("value"))
+                except Exception:
+                    return False
+            return True
+    return False
+
+
+def _fachada_set_select(page, alvo_regex, alvo_opt):
+    """Na janela de variaveis, acha o SELECT cujo ROTULO casa com alvo_regex e
+    escolhe a opcao que comeca com alvo_opt. Mesmo metodo do _definir_modulos:
+    rotulo -> select da mesma linha; senao o select mais alinhado (geometria)."""
+    alvo = _re.compile(alvo_regex, _re.I)
+    alvo_n = _sem_acento(str(alvo_opt).lower())
+    for fr in page.frames:
+        try:
+            lab = fr.get_by_text(alvo)
+            nlab = lab.count()
+        except Exception:
+            nlab = 0
+        if not nlab:
+            continue
+        el, laby = None, None
+        for i in range(min(nlab, 6)):
+            try:
+                if lab.nth(i).is_visible():
+                    el = lab.nth(i)
+                    b = el.bounding_box()
+                    if b:
+                        laby = b["y"] + b["height"] / 2
+                    break
+            except Exception:
+                continue
+        if el is None:
+            continue
+        for xp in ("xpath=following::select[1]",
+                   "xpath=ancestor::*[.//select][1]//select"):
+            try:
+                c = el.locator(xp).first
+                if c.count() and c.is_visible() and _select_opcao_comeca(c, alvo_n):
+                    page.wait_for_timeout(300)
+                    return True
+            except Exception:
+                continue
+        if laby is not None:
+            best, bestd = None, 1e9
+            try:
+                sels = fr.locator("select")
+                nc = sels.count()
+            except Exception:
+                nc = 0
+            for i in range(nc):
+                c = sels.nth(i)
+                try:
+                    if not c.is_visible():
+                        continue
+                    b = c.bounding_box()
+                    if not b:
+                        continue
+                    d = abs((b["y"] + b["height"] / 2) - laby)
+                    if d < bestd:
+                        bestd, best = d, c
+                except Exception:
+                    continue
+            if best is not None and bestd <= 60 and _select_opcao_comeca(best, alvo_n):
+                page.wait_for_timeout(300)
+                return True
+    return False
+
+
+def _preencher_fachada(page, nh, nv, qtmx):
+    """Preenche as variaveis da FACHADA GLAZING (*EGE-PVSOLUTA):
+       NH   = QUANTIDADE DE MODULOS NA LARGURA -> '<nh> MODULOS'
+       NV   = QUANTIDADE DE MODULOS NA ALTURA  -> '<nv> MODULOS'
+       MX   = EXISTE MAXIM-AR                  -> SIM / NAO
+       QTMX = QUANT MODULOS COM MAXIM-AR       -> '<qtmx> MODULOS'
+    Retorna True se setou os principais (NH e NV)."""
+    tem_mx = bool(qtmx and int(qtmx) > 0)
+    oknh = oknv = True
+    if nh:
+        oknh = _fachada_set_select(page, r"m[oó]dulos?\s+na\s+largura", f"{int(nh)} ")
+        print(f"     fachada: modulos na largura -> {int(nh)}" if oknh
+              else "     [!] fachada: nao achei 'modulos na largura'")
+    if nv:
+        oknv = _fachada_set_select(page, r"m[oó]dulos?\s+na\s+altura", f"{int(nv)} ")
+        print(f"     fachada: modulos na altura -> {int(nv)}" if oknv
+              else "     [!] fachada: nao achei 'modulos na altura'")
+    # MAXIM-AR (setar DEPOIS dos modulos; ao marcar SIM pode surgir o QTMX).
+    _fachada_set_select(page, r"existe\s+maxim", "sim" if tem_mx else "nao")
+    if tem_mx:
+        page.wait_for_timeout(400)
+        _fachada_set_select(page, r"m[oó]dulos?\s+com\s+maxim", f"{int(qtmx)} ")
+        print(f"     fachada: maxim-ar -> SIM ({int(qtmx)} modulo[s])")
+    return oknh and oknv
 
 
 def _fechar_popup(page, tentativas=4):
@@ -2909,8 +3047,10 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
 
     # LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
     # modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
-    if linha:
-        _selecionar_select_rotulo(page, "LINHA", linha, "linha")
+    # FACHADA usa a linha propria 'HYDRO | FACHADA CITTA DUE' (nao a 25/32/30).
+    linha_sel = "fachada citta due" if mud.get("_fachada") else linha
+    if linha_sel:
+        _selecionar_select_rotulo(page, "LINHA", linha_sel, "linha")
         page.wait_for_timeout(700)
     else:
         print("     [i] linha nao informada -- usando a linha PADRAO da tela (confira!).")
@@ -2939,6 +3079,11 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         print("     " + "=" * 54)
         input("     Quando abrir a tela 'Dados do Projeto', aperte ENTER aqui...  ")
 
+    # alguns desenhos (ex.: FACHADA GLAZING) abrem um aviso 'imagem ilustrativa'
+    # logo apos escolher o card -- fecha pra liberar a tela 'Dados do Projeto'.
+    _fechar_popup(page)
+    page.wait_for_timeout(400)
+
     # tela 'Detalhes do Projeto'
     if not _esperar_url_ou_texto(page, "confirmadadosprojeto", "Detalhes do Projeto", 15000):
         print("     [!] nao abriu a tela 'Dados do Projeto' apos escolher o card.")
@@ -2962,7 +3107,11 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         _set_select_auto(frame, "COR ACESSORIOS", "cor", mud["acessorio"], "cor acessorio")
     if "cor" in mud:
         _set_select_auto(frame, "PERFIL", "cor", mud["cor"], "cor")
-    if "vidro" in mud:
+    if mud.get("_fachada"):
+        # fachada glazing usa VIDRO LAMINADO (o padrao do card ja e laminado
+        # refletivo) -- 'laminado' casa com a opcao certa do select.
+        _set_select_auto(frame, "VIDRO COR", "vidro", "laminado", "vidro")
+    elif "vidro" in mud:
         _set_select_auto(frame, "VIDRO COR", "vidro", mud["vidro"], "vidro")
     print_tela(page, f"{prefixo}_dados_{num}")
 
@@ -3013,6 +3162,12 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         page.wait_for_timeout(500)
     if apareceu:
         print("     janela de variaveis aberta -- finalizando...")
+        # FACHADA GLAZING: preenche os modulos (NH largura x NV altura) e o
+        # maxim-ar (MX/QTMX). Vem do texto 'Glazing 2 x 3 modulos, 2 maxim-ar'.
+        if mud.get("_fachada"):
+            fac = mud["_fachada"]
+            _preencher_fachada(page, fac.get("nh"), fac.get("nv"), fac.get("qtmx"))
+            page.wait_for_timeout(500)
         # MODULOS horizontais (ex.: maxim ar 03 modulos): preenche o campo MD
         # 'QUANTIDADE DE MODULOS' com o numero pedido.
         if mud.get("modulos"):
