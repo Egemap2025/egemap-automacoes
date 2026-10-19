@@ -4382,6 +4382,14 @@ def _vidro_resolver(vlow, vp, tipo, low_desc):
         m2 = _re.search(r"(\d{1,2})\s*mm", _sem_acento(vp.lower()))
         if m2:
             esp = m2.group(1)
+    # MAXIM-AR/basculante: vidro padrao EGEMAP e MINI-BOREAL 4mm comum (privacidade
+    # de banheiro/lavabo). So respeita outro vidro se vier EXPLICITO com espessura
+    # no campo do item (ex.: 'incolor 6mm temperado'); 'incolor'/'comum'/sem spec
+    # viram mini-boreal. Precisa vir ANTES do bloco abaixo, senao 'incolor comum'
+    # ja montaria 'incolor 4mm comum' e nunca chegaria no mini-boreal.
+    if (("maxim" in low_desc or "basculant" in low_desc)
+            and not mesp and nome in ("", "incolor")):
+        return "mini boreal 4mm comum"
     if nome or tip_v or esp:
         if not nome:                         # so citou tipo/espessura -> acha o nome
             nome = next((n for n in VIDRO_NOMES
