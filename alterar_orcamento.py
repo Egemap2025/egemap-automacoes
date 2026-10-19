@@ -4282,12 +4282,30 @@ def _crm_cliente(det):
     o = det.get("obra") or {}
     v = det.get("vendedor") or {}
     cli = {}
-    if c.get("nome"):
-        cli["nome"] = str(c["nome"]).strip()
-    if c.get("telefone"):
-        cli["celular"] = str(c["telefone"]).strip()
-    if c.get("email"):
-        cli["email"] = str(c["email"]).strip()
+    # O NOME vem do TITULO do negocio (o que aparece no CRM). As vezes o 'contato'
+    # vinculado esta trocado (ex.: negocio 'Carlos Maciel' com contato 'Marcio
+    # Mooscher'). Entao usa o titulo; telefone/email do contato so entram se for a
+    # MESMA pessoa (mesmo 1o nome). Endereco vem SEMPRE da obra do negocio.
+    titulo = (det.get("titulo") or "").strip()
+    nome_c = (c.get("nome") or "").strip()
+    nome = titulo or nome_c
+
+    def _primeiro(s):
+        p = _sem_acento((s or "").lower()).split()
+        return p[0] if p else ""
+    mesma_pessoa = bool(nome_c) and (not titulo or _primeiro(titulo) == _primeiro(nome_c))
+
+    if nome:
+        cli["nome"] = nome
+    if not mesma_pessoa and titulo and nome_c and _primeiro(titulo) != _primeiro(nome_c):
+        print(f"  [!] ATENCAO: o negocio e '{titulo}' mas o contato vinculado no CRM"
+              f" e '{nome_c}'. Vou cadastrar '{titulo}' (sem o telefone do contato)."
+              f" Confira/arrume o contato no CRM se precisar.")
+    if mesma_pessoa:
+        if c.get("telefone"):
+            cli["celular"] = str(c["telefone"]).strip()
+        if c.get("email"):
+            cli["email"] = str(c["email"]).strip()
     cidade = (o.get("cidade") or "").strip()
     uf = (o.get("uf") or "").strip()
     if cidade:
