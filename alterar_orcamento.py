@@ -4880,17 +4880,18 @@ def _crm_ver_negocio(page, nid):
 
 
 def modo_crm_por_id(page):
-    """Abre UM negocio pelo link/ID (serve pra 'Orcamento Pronto' que a API nao
-    lista). So mostra/salva -- nao monta."""
+    """Abre UM negocio pelo link/ID e MONTA (mostra a previa e pergunta antes).
+    Serve pra montar um negocio que esta no CRM mas ainda NAO aparece na lista da
+    opcao 7 (atraso/cache da API). So monta se a API conseguir ler pelo link."""
     print()
-    print("CRM -- abrir um negocio pelo LINK/ID (so pra ver, nao monta).")
+    print("CRM -- montar um negocio pelo LINK/ID (mostra a previa e pergunta).")
     print("Cole o link do negocio no CRM (ex.: .../deals/830056cf-...) ou so o ID:")
     txt = input("  Link/ID: ").strip()
     if not txt:
         print("  Cancelado.")
         return
     nid = _crm_extrai_id(txt)
-    _crm_ver_negocio(page, nid)
+    _crm_processar_negocio(page, nid, auto=False)
 
 
 def modo_crm(page):
@@ -5000,7 +5001,7 @@ def main():
                 print("  5) ORCAMENTO NOVO COMPLETO (cliente + itens)")
                 print("  6) MONTAR itens (orcamento ja aberto na tela 'Escolha o desenho')")
                 print("  7) CRM -- montar a partir de 'Orcamentos a Fazer' (so aluminio)")
-                print("  8) CRM -- abrir um negocio pelo LINK/ID (so ver o levantamento)")
+                print("  8) CRM -- montar um negocio pelo LINK/ID (quando nao aparece na lista)")
                 print("  9) VIGIA 24h -- fica ligado e monta sozinho os novos (so aluminio)")
                 print("  0) Sair")
                 op = input("Opcao: ").strip().lower()
