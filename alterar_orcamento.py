@@ -4527,6 +4527,18 @@ def _crm_processar_negocio(page, nid, auto=False):
         print(f"     (dados crus do CRM salvos em: {_arq})")
     except Exception:
         pass
+    # RASTREABILIDADE + TRAVA: mostra a etapa REAL do negocio (do detalhe) e, no
+    # Vigia (auto), so monta se estiver mesmo em 'Orcamentos a Fazer'. Assim o robo
+    # nunca monta sozinho um negocio de outra etapa (ja feito / atualizacao /
+    # perdido) que a lista por acaso tenha devolvido.
+    etapa = (det.get("etapa") or "").strip()
+    titulo = det.get("titulo") or (det.get("cliente") or {}).get("nome", "?")
+    print(f"     negocio: {titulo}  |  etapa: {etapa or '?'}  |  "
+          f"criado: {det.get('criado_em', '?')}  |  id: {str(nid)[:8]}")
+    if auto and etapa and "fazer" not in _sem_acento(etapa.lower()):
+        print(f"  [!] esse negocio esta em '{etapa}', NAO em 'Orcamentos a Fazer'"
+              f" -- PULANDO (nao e pra montar sozinho).")
+        return
     cli = _crm_cliente(det)
     alt = _crm_alternativa_aluminio(lev)
     if not alt or not alt.get("itens"):
