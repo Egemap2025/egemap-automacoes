@@ -2579,6 +2579,7 @@ def _fechar_popup(page, tentativas=4):
 def _selecionar_select_rotulo(page, rotulo, valor, nome):
     """Acha um <select> pelo ROTULO (em qualquer frame), seleciona a opcao que
     melhor casa com 'valor' e dispara o change. Retorna a opcao ou None."""
+    _vistas = []        # guarda as opcoes vistas, p/ diagnostico se falhar
     for fr in page.frames:
         loc = _campo_por_js(fr, rotulo, "select")
         if loc is None or not _visivel(loc):
@@ -2587,6 +2588,7 @@ def _selecionar_select_rotulo(page, rotulo, valor, nome):
                   and "SELECIONE" not in o.upper()]
         if not opcoes:
             continue
+        _vistas = opcoes
         # LINHA: 'l25'/'l32' devem usar a linha NORMAL. Linhas ESPECIAIS
         # (Solene, Guarda-corpo, Portao...) so entram se o usuario escrever o
         # nome. Sem isso, 'l25' casava com 'SOLENE 25' (que nao tem fixo/maxim).
@@ -2611,6 +2613,10 @@ def _selecionar_select_rotulo(page, rotulo, valor, nome):
         except Exception:
             continue
     print(f"     [!] nao consegui definir {nome} ('{valor}') automaticamente.")
+    if _vistas:
+        print(f"     Opcoes de {nome.upper()} que o robo viu (me manda esta lista):")
+        for o in _vistas[:30]:
+            print(f"        - {o}")
     return None
 
 
@@ -3047,8 +3053,20 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
 
     # LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
     # modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
-    # FACHADA usa a linha propria 'HYDRO | FACHADA CITTA DUE' (nao a 25/32/30).
-    linha_sel = "fachada citta due" if mud.get("_fachada") else linha
+    # LINHA: o NUMERO puro ('25'/'32') nem sempre casa com a opcao do dropdown --
+    # a linha 25 aparece como 'PERFISUD | VERSATIC 25' (ou o '25' fica na BITOLA).
+    # Entao enriquece a busca com o NOME COMERCIAL. FACHADA usa a linha propria.
+    linha_sel = linha
+    if mud.get("_fachada"):
+        linha_sel = "fachada citta due"
+    elif linha:
+        _nlin = _re.sub(r"\D", "", str(linha))           # so os digitos (25/32/30)
+        _mlow = _sem_acento((modelo + " " + str(linha)).lower())
+        if _nlin == "25":
+            linha_sel = "versatic 25"
+        elif _nlin == "32":
+            linha_sel = "solene 32" if "solene" in _mlow else "deluxe 32"
+        # 30 e demais: mantem como veio (madeira 'L. 30' casa pelo numero)
     if linha_sel:
         _selecionar_select_rotulo(page, "LINHA", linha_sel, "linha")
         page.wait_for_timeout(700)
