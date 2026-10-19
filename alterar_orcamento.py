@@ -1692,8 +1692,12 @@ def _set_select_auto(frame, rotulo, esperado, termo, nome):
     escolha, claro = _melhor_opcao(opcoes, termo, esperado)
     if escolha is None or not claro:
         if MODO_AUTO:
-            # melhor palpite: usa a melhor opcao encontrada (ou a 1a) e segue,
-            # sem perguntar. Deixa registrado que foi um palpite.
+            # melhor palpite: usa a melhor opcao encontrada e segue, sem perguntar.
+            if escolha is None and esperado == "vidro":
+                # NAO pega a 1a opcao da lista (que por ordem alfabetica costuma
+                # ser 'ACIDATO'): prefere uma opcao INCOLOR.
+                escolha = next((o for o in opcoes
+                                if "INCOLOR" in _sem_acento(o.upper())), None)
             escolha = escolha or opcoes[0]
             print(f"     (auto) {nome} em duvida p/ '{termo}' -> palpite: {escolha}")
         else:
@@ -4357,6 +4361,44 @@ def _crm_item_dificil(item):
             or "cortina de vidro" in txt)
 
 
+def _vidro_resolver(vlow, vp, tipo, low_desc):
+    """Resolve a spec de vidro do item. O NOME e o TIPO vem do CAMPO 'vidro' do
+    CRM quando ele cita algo (ex.: 'INCOLOR - TEMPERADO' manda 'incolor' + 'temperado'
+    -- o campo GANHA do material_projeto no nome). A ESPESSURA vem do campo, senao
+    do material_projeto, senao um padrao por tipo. IMPORTANTE: o resultado SEMPRE
+    tem a espessura (Nmm), senao a lista de vidro do W-Vetro nao casa e o robo
+    acabava pegando a 1a opcao ('ACIDATO'). Devolve '' so quando nao da pra decidir
+    nada (ai o _spec_item_novo poe o padrao por tipo)."""
+    vlow = vlow or ""
+    nome = next((n for n in VIDRO_NOMES if n in vlow and n not in ("boreal",)), "")
+    if "mini" in vlow and "boreal" in vlow:
+        nome = "mini boreal"
+    elif not nome and "boreal" in vlow:
+        nome = "mini boreal"
+    tip_v = next((t for t in ("temperado", "comum", "laminado") if t in vlow), "")
+    mesp = _re.search(r"(\d{1,2})\s*mm", vlow)
+    esp = mesp.group(1) if mesp else ""
+    if not esp and vp:                       # espessura do material_projeto
+        m2 = _re.search(r"(\d{1,2})\s*mm", _sem_acento(vp.lower()))
+        if m2:
+            esp = m2.group(1)
+    if nome or tip_v or esp:
+        if not nome:                         # so citou tipo/espessura -> acha o nome
+            nome = next((n for n in VIDRO_NOMES
+                         if vp and n in _sem_acento(vp.lower())), "incolor")
+        if not tip_v:
+            tip_v = "comum" if (nome == "mini boreal" or esp == "4") else "temperado"
+        if not esp:
+            esp = ("4" if (tip_v == "comum" or nome == "mini boreal")
+                   else ("8" if (tipo.startswith("PJ") or tipo == "P") else "6"))
+        return f"{nome} {int(esp)}mm {tip_v}"
+    if vp:
+        return vp
+    if "maxim" in low_desc or "basculant" in low_desc:
+        return "mini boreal 4mm comum"
+    return ""
+
+
 def _extrai_vidro_texto(texto):
     """Acha uma spec de vidro dentro de um texto solto (ex.: a esquadria 'crua'
     do CRM que traz '...temperado 6mm...', 'comum 4mm' ou 'miniboreal'). Devolve
@@ -4521,24 +4563,16 @@ def _crm_item_para_linha(item, unidade="cm"):
     #  3) porta-janela (PJ) sem spec -> padrao 8mm temperado (no _spec_item_novo)
     #  4) janela (J) -> tenta achar a spec no texto da esquadria ('comum 4mm'...)
     #  5) senao vazio -> padrao por tipo (J 6mm / PJ 8mm) no _spec_item_novo
+    # VIDRO: 'sem vidro' a parte; senao resolve NOME (do campo) + espessura
+    # (campo -> material_projeto -> padrao por tipo). Garante sempre a espessura.
     vlow = _sem_acento((vidro or "").lower())
-    vp = _extrai_vidro_projeto(item.get("material_projeto"))   # o mais confiavel
-    if _re.search(r"\d\s*mm", vlow):
-        partes.append(vidro)                 # vidro com espessura (mm) GANHA de tudo
-    elif "sem vidro" in vlow or "nao se aplica" in vlow or vp == "sem vidro":
+    vp = _extrai_vidro_projeto(item.get("material_projeto"))
+    if "sem vidro" in vlow or "nao se aplica" in vlow or vp == "sem vidro":
         partes.append("sem vidro")
-    elif vp:
-        partes.append(vp)                    # do 'material_projeto' (ex.: mini boreal 4mm comum)
-    elif tipo.startswith("PJ"):
-        pass                                 # PJ sem spec -> padrao 8mm temperado
     else:
-        ex = _extrai_vidro_texto(tip)        # tenta achar a spec na descricao
-        if ex:
-            partes.append(ex)
-        elif "maxim" in low_desc or "basculant" in low_desc:
-            # maxim-ar/basculante sem vidro informado -> mini-boreal 4mm comum
-            # (padrao EGEMAP: quase sempre entram em banheiro/lavabo/servico).
-            partes.append("mini boreal 4mm comum")
+        _v = _vidro_resolver(vlow, vp, tipo, low_desc)
+        if _v:
+            partes.append(_v)
     larg, alt = item.get("largura"), item.get("altura")
     if larg not in (None, "") and alt not in (None, ""):
         fator = 10 if (unidade or "cm").lower().startswith("cm") else 1
