@@ -1748,7 +1748,15 @@ def _set_quantidade(frame, page, valor):
     if inp is None:
         print("     [!] nao achei o campo QUANTIDADE")
         return False
-    for _tent in range(2):
+
+    def _ok():
+        try:
+            a = (inp.input_value() or "").strip()
+        except Exception:
+            return False
+        return a.replace(",00", "").replace(",0", "").strip() == valor
+
+    for _tent in range(4):
         try:
             inp.scroll_into_view_if_needed(timeout=2000)
             inp.click(timeout=2000)
@@ -1760,9 +1768,19 @@ def _set_quantidade(frame, page, valor):
             inp.type(valor, delay=40)
             inp.press("Tab")
             page.wait_for_timeout(400)
-            atual = (inp.input_value() or "").strip()
-            if atual.replace(",00", "").replace(",0", "").strip() == valor:
+            if _ok():
                 print(f"     quantidade -> {valor}")
+                return True
+            # 2a via: seta o valor via JS e dispara input/change (campo teimoso que
+            # reverte pra 0/1 com fill normal, comum no maxim-ar 'N modulos').
+            inp.evaluate(
+                "(e,v)=>{const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
+                "s.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                "e.dispatchEvent(new Event('change',{bubbles:true}));"
+                "e.dispatchEvent(new Event('keyup',{bubbles:true}));if(e.blur)e.blur();}", valor)
+            page.wait_for_timeout(500)
+            if _ok():
+                print(f"     quantidade -> {valor} (js)")
                 return True
         except Exception:
             continue
@@ -3272,18 +3290,29 @@ def montar_item_novo(page, num, mud):
         print("     [!] falta o MODELO na descricao (ex.: 'janela 2 folhas') -- pulando.")
         return False
 
-    # RECUPERACAO ANTI-CASCATA: se sobrou uma janela de variaveis/modal PRESA do
-    # item anterior (ex.: uma variavel obrigatoria ficou vazia e o CONFIRMAR nao
-    # fechou), ela bloqueia o 'Inserir Novo Projeto' e derruba TODOS os proximos
-    # itens. Entao, antes de comecar, tenta confirmar de novo e, se ainda estiver
-    # presa, FECHA a janela pra destravar o fluxo.
-    if _janela_variaveis_aberta(page) or _modal_edicao_aberto(page):
-        print("     (limpando uma janela presa do item anterior...)")
+    # RECUPERACAO ANTI-CASCATA: destrava o que o item anterior possa ter deixado
+    # preso (senao bloqueia o 'Inserir Novo Projeto' e derruba TODOS os proximos).
+    # (b) janela de VARIAVEIS presa (variavel obrigatoria vazia) -> confirma/fecha.
+    if _janela_variaveis_aberta(page):
+        print("     (limpando uma janela de variaveis presa do item anterior...)")
         if not _confirmar_edicao(page, max_tentativas=3):
             _fechar_modal(page)
             page.wait_for_timeout(600)
             _fechar_popup(page)
             page.wait_for_timeout(600)
+    # (a) preso na tela 'Dados do Projeto' (o item anterior NAO foi incluido, ex.:
+    #     quantidade invalida). 'Escolher outro projeto' volta pra 'Escolha o
+    #     desenho' -- de la este item monta DIRETO (ja_na_selecao abaixo), sem
+    #     precisar do 'Inserir Novo Projeto'. Assim 1 item ruim nao derruba o resto.
+    if "confirmadadosprojeto" in (page.url or "").lower():
+        print("     (destravando: voltando da tela 'Dados do Projeto' presa...)")
+        if not (_clicar_botao(page, r"escolher outro projeto", timeout=5000)
+                or _clicar_botao(page, r"outro projeto", timeout=3000)):
+            try:
+                page.go_back(timeout=5000)
+            except Exception:
+                pass
+        page.wait_for_timeout(1500)
 
     # o aviso 'itens com valores zerados' pode estar aberto na tela do orcamento
     _fechar_aviso_valores(page)
