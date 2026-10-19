@@ -1370,9 +1370,12 @@ def _spec_item_novo(descricao):
     # LIMPA esses numeros da descricao (senao viram 'folhas'/'modulos' e sujam o
     # card). Essas infos viram variaveis NH/NV/MX/QTMX da janela de variaveis.
     _low_fac = _sem_acento(desc.lower())
-    if "glazing" in _low_fac or "fachada" in _low_fac:
+    # o grid pode vir '2 x 3', '2 X 3' ou '2 × 3' -> aceita x/X e o sinal '×'.
+    _mg = _re.search(r"(\d+)\s*[x×]\s*(\d+)", _low_fac)
+    # so e FACHADA GLAZING se disser 'glazing', OU 'fachada' COM o grid de modulos
+    # (evita que uma 'janela da fachada frontal' seja tratada como fachada).
+    if "glazing" in _low_fac or ("fachada" in _low_fac and _mg):
         fac = {}
-        _mg = _re.search(r"(\d+)\s*x\s*(\d+)", desc)
         if _mg:
             fac["nh"], fac["nv"] = int(_mg.group(1)), int(_mg.group(2))
         _mmx = _re.search(r"(\d+)\s*maxim", _low_fac)
@@ -1381,7 +1384,7 @@ def _spec_item_novo(descricao):
         else:
             fac["qtmx"] = 1 if "maxim" in _low_fac else 0
         mud["_fachada"] = fac
-        desc = _re.sub(r"\d+\s*x\s*\d+(\s*m[oó]dulos?)?", " ", desc, flags=_re.I)
+        desc = _re.sub(r"\d+\s*[x×]\s*\d+(\s*m[oó]dulos?)?", " ", desc, flags=_re.I)
         desc = _re.sub(r",?\s*\d+\s*maxim[-\s]*ar", " ", desc, flags=_re.I)
         desc = _re.sub(r"\(.*?\)", " ", desc)               # tira '(2a linha)'
         desc = _re.sub(r"\s{2,}", " ", desc).strip()
@@ -2043,8 +2046,10 @@ def _modelo_dropdown(descricao):
     texto (ex.: 'ripada' escolhe o desenho RIPADO, mas o MODELO e PORTA
     PIVOTANTE)."""
     low = _sem_acento(descricao.lower())
-    # FACHADA / GLAZING (cortina de vidro em grid de modulos) -> MODELO 'FACHADA'
-    if "glazing" in low or "fachada" in low:
+    # GLAZING -> MODELO 'FACHADA'. (A fachada do CRM vem pela flag mud['_fachada'],
+    # que o _construir_na_selecao ja forca para 'FACHADA'; aqui so o 'glazing'
+    # explicito, pra nao confundir 'janela da fachada frontal' com fachada.)
+    if "glazing" in low:
         return "FACHADA"
     mf = _re.search(r"(\d{1,2})\s*folhas?", low)
     folhas = mf.group(1).zfill(2) if mf else None
@@ -3072,7 +3077,8 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         page.wait_for_timeout(700)
     else:
         print("     [i] linha nao informada -- usando a linha PADRAO da tela (confira!).")
-    _selecionar_select_rotulo(page, "MODELO", _modelo_dropdown(modelo), "modelo")
+    modelo_dd = "FACHADA" if mud.get("_fachada") else _modelo_dropdown(modelo)
+    _selecionar_select_rotulo(page, "MODELO", modelo_dd, "modelo")
     page.wait_for_timeout(700)
 
     # Pesquisar
@@ -3198,8 +3204,16 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
                 print(f"     [!] nao achei o campo ACIONAMENTO p/ definir '{acion}'.")
             page.wait_for_timeout(800)
         if not _confirmar_edicao(page):
-            print("     [!] a janela de variaveis nao fechou sozinha.")
+            # a janela de variaveis NAO confirmou (ex.: faltou uma variavel
+            # obrigatoria). O item NAO ficou salvo. Nao reporta sucesso: tenta
+            # destravar a janela e devolve False, pra o resumo marcar como FALHOU
+            # (antes isso caia em 'return True' e o item sumia reportado como ✔).
+            print("     [!] a janela de variaveis nao fechou/confirmou -- item NAO salvo.")
             print_tela(page, f"{prefixo}_variaveis_travou_{num}")
+            _fechar_modal(page)
+            page.wait_for_timeout(400)
+            _fechar_popup(page)
+            return False
 
     page.wait_for_timeout(1500)
     return True
@@ -4204,19 +4218,32 @@ def crm_levantamento(nid):
     return _crm_get(f"/negocios/{nid}/levantamento")
 
 
+# ids ja feitos NESTA SESSAO (memoria). Serve de rede de seguranca: se o arquivo
+# de 'vistos' nao puder ser lido/gravado (OneDrive/antivirus travando no Windows),
+# o Vigia ainda nao remonta o mesmo negocio na mesma sessao.
+_CRM_VISTOS_MEM = set()
+
+
 def _crm_ler_vistos():
+    vistos = set(_CRM_VISTOS_MEM)
     try:
-        return set(CRM_VISTOS.read_text(encoding="utf-8").split())
-    except Exception:
-        return set()
+        vistos |= set(CRM_VISTOS.read_text(encoding="utf-8").split())
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"  [!] nao consegui LER os 'feitos' ({CRM_VISTOS}): {e}")
+    return vistos
 
 
 def _crm_marcar_visto(nid):
+    _CRM_VISTOS_MEM.add(str(nid))        # memoria primeiro (sempre funciona)
     try:
         with CRM_VISTOS.open("a", encoding="utf-8") as f:
             f.write(str(nid) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  [!] nao consegui GRAVAR o 'feito' em {CRM_VISTOS}: {e}")
+        print("      (guardei na memoria desta sessao pra nao remontar agora;")
+        print("       mas feche/libere esse arquivo pra nao duplicar depois.)")
 
 
 def _crm_cliente(det):
@@ -4318,7 +4345,11 @@ def _extrai_vidro_projeto(mp):
     if not m:
         return ""
     esp = str(int(m.group(1)))        # '06' -> '6'
-    tipo = next((t for t in ("temperado", "comum", "laminado") if t in low), "temperado")
+    tipo = next((t for t in ("temperado", "comum", "laminado") if t in low), None)
+    if tipo is None:
+        # sem o tipo escrito: mini-boreal e vidro 4mm sao tipicamente COMUM;
+        # o resto (6/8mm incolor etc.) e temperado.
+        tipo = "comum" if (("mini" in low and "boreal" in low) or esp == "4") else "temperado"
     if "mini" in low and "boreal" in low:
         return f"mini boreal {esp}mm {tipo}"
     nome = next((n for n in ("incolor", "fume", "verde", "bronze", "cinza",
@@ -4389,7 +4420,9 @@ def _crm_item_para_linha(item, unidade="cm"):
     linha_low = _sem_acento((linha + " " + tip).lower())
     # maxim-ar / painel-fixo / quadro-fixo. NAO confunde com 'peitoril fixo' nem
     # 'bandeira fixa' (detalhes de uma janela de correr/maxim, nao o tipo fixo).
-    eh_maxfixo = ("maxim" in low_desc) or ("painel" in low_desc) or ("quadro" in low_desc and "fixo" in low_desc)
+    eh_maxfixo = (("maxim" in low_desc) or ("painel" in low_desc)
+                  or ("fixo" in low_desc and "peitoril" not in low_desc
+                      and "bandeira" not in low_desc))
     ml = _re.search(r"(\d{2})", linha)
     if ml:
         num = ml.group(1)
@@ -4443,10 +4476,10 @@ def _crm_item_para_linha(item, unidade="cm"):
     #  5) senao vazio -> padrao por tipo (J 6mm / PJ 8mm) no _spec_item_novo
     vlow = _sem_acento((vidro or "").lower())
     vp = _extrai_vidro_projeto(item.get("material_projeto"))   # o mais confiavel
-    if "sem vidro" in vlow or "nao se aplica" in vlow or vp == "sem vidro":
+    if _re.search(r"\d\s*mm", vlow):
+        partes.append(vidro)                 # vidro com espessura (mm) GANHA de tudo
+    elif "sem vidro" in vlow or "nao se aplica" in vlow or vp == "sem vidro":
         partes.append("sem vidro")
-    elif _re.search(r"\d\s*mm", vlow):
-        partes.append(vidro)                 # campo 'vidro' do CRM ja completo
     elif vp:
         partes.append(vp)                    # do 'material_projeto' (ex.: mini boreal 4mm comum)
     elif tipo.startswith("PJ"):
@@ -4476,7 +4509,10 @@ def _crm_item_para_linha(item, unidade="cm"):
     if amb and "definir" not in amb.lower():
         partes.append(amb)
     try:
-        q = int(item.get("quantidade") or 1)
+        # aceita 2 / '2' / '2.0' / '2,0' (o CRM as vezes manda decimal em texto)
+        q = int(round(float(str(item.get("quantidade") or 1).replace(",", "."))))
+        if q < 1:
+            q = 1
     except Exception:
         q = 1
     if q > 1:
@@ -4548,6 +4584,17 @@ def _crm_processar_negocio(page, nid, auto=False):
     print(f"\n  Alternativa escolhida (aluminio): {alt.get('nome', '?')}"
           f"  [{len(lev.get('alternativas', []))} alternativa(s) no total]")
 
+    # UNIDADE suspeita: o CRM diz uma unidade mas os numeros parecem de outra
+    # (ex.: diz 'cm' mas os valores estao em mm). Nesse caso as medidas podem sair
+    # 10x erradas -- avisa e marca TODOS os itens pra CONFERIR.
+    _udecl = _sem_acento((lev.get("unidade_medida") or "").lower())
+    _decl = ("mm" if (_udecl.startswith("mm") or "milim" in _udecl)
+             else ("cm" if (_udecl.startswith("cm") or "centim" in _udecl) else ""))
+    uni_suspeita = bool(_decl and _decl != unidade)
+    if uni_suspeita:
+        print(f"  [!] ATENCAO: o CRM diz medidas em '{lev.get('unidade_medida')}' mas"
+              f" parecem estar em '{unidade}'. CONFIRA AS MEDIDAS!")
+
     itens = []
     for it in alt.get("itens", []):
         if (it.get("tipo") or "").strip().upper() == "PE":
@@ -4560,9 +4607,17 @@ def _crm_processar_negocio(page, nid, auto=False):
             # (esquadria com '+', ex.: 'peitoril + correr + bandeira') -- essas o
             # robo monta no melhor palpite, mas quase sempre precisam de ajuste.
             comp = "+" in (it.get("esquadria") or "")
+            # medida implausivel (provavel erro de 10x): > 6,5m ou < 20cm
+            med_susp = False
+            try:
+                _lg = int(mud.get("largura", 0)); _al = int(mud.get("altura", 0))
+                if _lg and _al and (max(_lg, _al) > 6500 or min(_lg, _al) < 200):
+                    med_susp = True
+            except Exception:
+                pass
             mud["_conferir"] = (bool(it.get("pendencias")) or _crm_tipo_diverge(it)
                                 or comp or _crm_solene_invalida(it)
-                                or _crm_item_dificil(it))
+                                or _crm_item_dificil(it) or uni_suspeita or med_susp)
             itens.append(mud)
 
     if not cli.get("nome"):
@@ -4570,6 +4625,15 @@ def _crm_processar_negocio(page, nid, auto=False):
         return
     if not itens:
         print("  [!] nenhum item de W-Vetro pra montar (so PVC ou vazio).")
+        return
+    # Se TODOS os itens sao PVC (outro sistema), NAO cadastra cliente nem cria
+    # orcamento vazio -- esse negocio fica inteiro de fora. (Mistos aluminio+PVC
+    # seguem: so os de PVC sao pulados na montagem.)
+    if not any(not m.get("pvc") for m in itens):
+        print("  [!] esse negocio e SO PVC (outro sistema) -- nao vou cadastrar nem")
+        print("      criar orcamento. Fica inteiro de fora.")
+        if auto:
+            _crm_marcar_visto(nid)
         return
 
     # preview
@@ -4611,8 +4675,17 @@ def _crm_processar_negocio(page, nid, auto=False):
     finally:
         MODO_AUTO = False
 
-    # NAO calcula (voce inclui madeira que faltou/PVC e calcula). Marca como feito.
-    _crm_marcar_visto(nid)
+    # Marca como FEITO so se montou algo (ou se o que faltou nao e recuperavel).
+    # Se o orcamento foi criado mas NENHUM item entrou por FALHA (falhou/erro),
+    # NAO marca -- assim o Vigia tenta de novo (nao perde um negocio bom por um
+    # tropeco passageiro do W-Vetro). NAO calcula (voce confere e finaliza).
+    _algum_ok = any(v == "ok" for v in resultados.values())
+    _houve_falha = any(v in ("falhou", "erro") for v in resultados.values())
+    if _algum_ok or not _houve_falha:
+        _crm_marcar_visto(nid)
+    else:
+        print("  [!] nenhum item montou (so falhas) -- NAO vou marcar como feito;")
+        print("      o Vigia tenta este negocio de novo na proxima rodada.")
     print("\n  " + "=" * 56)
     print("  ✔ Orcamento de ALUMINIO montado (SEM calcular). Confira e finalize.")
     for i, mud in enumerate(itens, 1):
