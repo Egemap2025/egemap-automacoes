@@ -3090,7 +3090,7 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
         _nlin = _re.sub(r"\D", "", str(linha))           # so os digitos (25/32/30)
         _mlow = _sem_acento((modelo + " " + str(linha)).lower())
         if _nlin == "25":
-            linha_sel = "versatic 25"
+            linha_sel = "solene 25" if "solene" in _mlow else "versatic 25"
         elif _nlin == "32":
             linha_sel = "solene 32" if "solene" in _mlow else "deluxe 32"
         # 30 e demais: mantem como veio (madeira 'L. 30' casa pelo numero)
@@ -4339,7 +4339,8 @@ def _crm_tipo_diverge(it):
 def _crm_solene_invalida(item):
     """True se o item e da linha SOLENE mas e maxim-ar ou vidro fixo. A Solene so
     tem portas e janelas de CORRER -- entao esse item e uma inconsistencia: o robo
-    monta no Deluxe como palpite, mas marca pra CONFERIR."""
+    monta na linha TRADICIONAL de mesma bitola (Versatic 25 p/ Solene 25, Deluxe 32
+    p/ Solene 32) como palpite, mas marca pra CONFERIR."""
     txt = _sem_acento(((item.get("linha") or "") + " "
                        + (item.get("esquadria") or "")).lower())
     if "solene" not in txt:
@@ -4535,8 +4536,17 @@ def _crm_item_para_linha(item, unidade="cm"):
                 desc += " solene baguete"
             else:
                 desc += " deluxe"
-        elif num == "25" and not eh_mad and "versatic" not in linha_low:
-            desc += " versatic"       # linha 25 = Versatic 25
+        elif num == "25" and not eh_mad:
+            # Linha 25 (aluminio) tem 2 variantes (igual a 32):
+            #  - SOLENE 25 (premium, 'com baguete') -> SO portas e janelas de CORRER.
+            #  - VERSATIC 25 (tradicional) -> tem tudo (maxim-ar, fixo, correr...).
+            # Regra EGEMAP: a Solene NAO tem maxim-ar nem vidro fixo. Entao:
+            # correr em Solene -> Solene 25 (com baguete); maxim-ar/fixo (mesmo que
+            # pedido em Solene, que nao existe) -> Versatic 25; '25' puro -> Versatic.
+            if "solene" in linha_low and not eh_maxfixo:
+                desc += " solene baguete"
+            elif "versatic" not in linha_low:
+                desc += " versatic"
     else:
         if linha and "aplica" not in linha.lower() and "definir" not in linha.lower():
             desc += " " + linha       # ex.: 'MDF Ultra' vira palavra do card
