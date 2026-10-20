@@ -3057,6 +3057,34 @@ def _escolher_variacao_popup(page, modelo, num=""):
     return False
 
 
+def _linha_comercial(mud):
+    """Nome COMERCIAL da linha -- o que aparece na lista LINHA do W-Vetro. Serve
+    pra BUSCAR a opcao certa no dropdown E pra MOSTRAR no preview (pra voce ver
+    de cara em que linha cada item vai cair). A partir da linha numerica (25/32/
+    30) + o modelo (que carrega 'solene'/'versatic'/'deluxe'):
+      - fachada glazing  -> 'FACHADA CITTA DUE'      (linha Hydro)
+      - 25 + solene      -> 'SOLENE 25 COM BAGUETE'   (so correr)
+      - 25               -> 'VERSATIC 25'             (tradicional: tem tudo)
+      - 32 + solene      -> 'SOLENE 32'               (so correr)
+      - 32               -> 'DELUXE 32'               (tradicional: tem tudo)
+      - 30 / outras      -> a linha como veio (madeira 'L. 30' casa pelo numero)
+    Devolve '' quando nao da pra decidir (ai usa a linha PADRAO da tela)."""
+    if mud.get("_fachada"):
+        return "FACHADA CITTA DUE"
+    linha = str(mud.get("linha", "")).strip()
+    if not linha:
+        return ""
+    nlin = _re.sub(r"\D", "", linha)                 # so os digitos (25/32/30)
+    mlow = _sem_acento((str(mud.get("modelo", "")) + " " + linha).lower())
+    if nlin == "25":
+        return "SOLENE 25 COM BAGUETE" if "solene" in mlow else "VERSATIC 25"
+    if nlin == "32":
+        return "SOLENE 32" if "solene" in mlow else "DELUXE 32"
+    if nlin == "30":
+        return "L. 30"                                # madeira (casa pelo '30')
+    return linha
+
+
 def _construir_na_selecao(page, num, mud, prefixo="sub"):
     """MOTOR compartilhado: a partir da tela 'ESCOLHA O DESENHO | PROJETO'
     (selecioneprojeto), escolhe LINHA/MODELO -> Pesquisa -> escolhe o card ->
@@ -3081,19 +3109,9 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
     # LINHA e MODELO. O MODELO e inferido da descricao (janela de correr /
     # modulo fixo / maxim-ar / porta), e o card certo vem depois pelo texto.
     # LINHA: o NUMERO puro ('25'/'32') nem sempre casa com a opcao do dropdown --
-    # a linha 25 aparece como 'PERFISUD | VERSATIC 25' (ou o '25' fica na BITOLA).
-    # Entao enriquece a busca com o NOME COMERCIAL. FACHADA usa a linha propria.
-    linha_sel = linha
-    if mud.get("_fachada"):
-        linha_sel = "fachada citta due"
-    elif linha:
-        _nlin = _re.sub(r"\D", "", str(linha))           # so os digitos (25/32/30)
-        _mlow = _sem_acento((modelo + " " + str(linha)).lower())
-        if _nlin == "25":
-            linha_sel = "solene 25" if "solene" in _mlow else "versatic 25"
-        elif _nlin == "32":
-            linha_sel = "solene 32" if "solene" in _mlow else "deluxe 32"
-        # 30 e demais: mantem como veio (madeira 'L. 30' casa pelo numero)
+    # a linha 25 aparece como 'PERFISUD | SOLENE 25 | COM BAGUETE' ou 'VERSATIC 25'.
+    # Entao busca pelo NOME COMERCIAL (mesmo helper que o preview usa).
+    linha_sel = _linha_comercial(mud)
     if linha_sel:
         _selecionar_select_rotulo(page, "LINHA", linha_sel, "linha")
         page.wait_for_timeout(700)
@@ -3818,7 +3836,7 @@ def _preview_montar(orc, itens):
             print("     >>> PVC (Confort/Elegance) -- NAO sera feito (outro sistema).")
             continue
         print(f"     modelo      -> {mud.get('modelo') or '(nao informado!)'}")
-        print(f"     linha       -> {mud.get('linha','(padrao da tela)')}")
+        print(f"     linha       -> {_linha_comercial(mud) or '(padrao da tela)'}")
         if "acionamento" in mud:
             print(f"     acionamento -> {mud['acionamento']}")
         if "modulos" in mud:
