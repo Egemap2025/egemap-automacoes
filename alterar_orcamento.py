@@ -4493,6 +4493,44 @@ def _crm_unidade_efetiva(alt, unidade="cm"):
     return "mm" if (sum(maxs) / len(maxs)) >= 500 else "cm"
 
 
+def _crm_unidade_item(tipo, low_desc, larg, alt, unidade_orc="cm"):
+    """Decide mm/cm PRA ESTE item. Alguns levantamentos MISTURAM a unidade (ex.:
+    janela digitada em mm e porta em cm -- 'porta e grande, nao tem como ser
+    pequena'). Entao, em vez de usar uma unidade so pro orcamento inteiro, olha a
+    FISICA desta esquadria:
+      - porta / porta-janela: e sempre GRANDE (maior lado >= ~1,5 m);
+      - maxim-ar / basculante: e sempre PEQUENO (<= ~2,2 m);
+      - vidro fixo / painel: ate ~3,2 m;  janela comum: ate ~4 m.
+    Testa as 2 leituras (os numeros como MM, ou como CM = x10) e ve qual cabe no
+    tamanho plausivel deste tipo. Se SO uma cabe, usa ela. Se as duas (ou nenhuma)
+    cabem, cai no padrao do orcamento (unidade_orc)."""
+    try:
+        L = float(str(larg).replace(",", "."))
+        A = float(str(alt).replace(",", "."))
+    except Exception:
+        return unidade_orc or "cm"
+    eh_porta = tipo in ("P", "PJ", "PE") or "porta" in low_desc
+    if "maxim" in low_desc or "bascul" in low_desc or "exaustor" in low_desc:
+        teto = 2200                           # maxim-ar/basculante: pequeno
+    elif "fixo" in low_desc or "painel" in low_desc or "modulo" in low_desc:
+        teto = 3200
+    elif eh_porta:
+        teto = 6500                           # porta de correr grande
+    else:
+        teto = 4000                           # janela comum
+    piso_maior = 1500 if eh_porta else 350    # porta: maior lado nunca < 1,5 m
+    def _cabe(x, y):
+        mn, mx = min(x, y), max(x, y)
+        return mn >= 100 and piso_maior <= mx <= teto
+    mm_ok = _cabe(L, A)
+    cm_ok = _cabe(L * 10, A * 10)
+    if mm_ok and not cm_ok:
+        return "mm"
+    if cm_ok and not mm_ok:
+        return "cm"
+    return unidade_orc or "cm"
+
+
 def _crm_item_para_linha(item, unidade="cm"):
     """Converte 1 item do levantamento do CRM numa LINHA da mensagem do robo,
     pra reaproveitar _spec_item_novo (todas as regras de modelo/cor/vidro/etc).
@@ -4611,7 +4649,10 @@ def _crm_item_para_linha(item, unidade="cm"):
             partes.append(_v)
     larg, alt = item.get("largura"), item.get("altura")
     if larg not in (None, "") and alt not in (None, ""):
-        fator = 10 if (unidade or "cm").lower().startswith("cm") else 1
+        # unidade DECIDIDA PELO ITEM (o levantamento as vezes mistura: janela em
+        # mm, porta em cm). Cai no padrao do orcamento so quando fica ambiguo.
+        u_item = _crm_unidade_item(tipo, low_desc, larg, alt, unidade)
+        fator = 10 if u_item.lower().startswith("cm") else 1
         try:
             lmm = int(round(float(larg) * fator))
             amm = int(round(float(alt) * fator))
@@ -4709,8 +4750,11 @@ def _crm_processar_negocio(page, nid, auto=False):
              else ("cm" if (_udecl.startswith("cm") or "centim" in _udecl) else ""))
     uni_suspeita = bool(_decl and _decl != unidade)
     if uni_suspeita:
-        print(f"  [!] ATENCAO: o CRM diz medidas em '{lev.get('unidade_medida')}' mas"
-              f" parecem estar em '{unidade}'. CONFIRA AS MEDIDAS!")
+        print(f"  [!] ATENCAO: as medidas do CRM parecem estar em unidade diferente"
+              f" da declarada ('{lev.get('unidade_medida')}'), ou MISTURADAS (ex.:"
+              f" janela em mm e porta em cm).")
+        print(f"      O robo ajustou CADA item pelo tamanho (porta grande = cm,"
+              f" janelinha = mm). CONFIRA AS MEDIDAS no preview antes de montar!")
 
     itens = []
     for it in alt.get("itens", []):
