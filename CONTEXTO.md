@@ -1397,6 +1397,35 @@ Pra trocar a Capa de propósito (layout refeito, lugar novo definitivo):
 `EGEMAP-Monitor.exe --capa`, ou o `TROCAR_CAPA.bat`. Isso não mexe na pasta de
 orçamentos nem na de pedidos.
 
+### Tirar as pastas do OneDrive muda o endereço de tudo
+
+22/10, continuação. O Natanael tirou as pastas de dentro do OneDrive. A Área
+de Trabalho deixou de ser `C:\Users\X\OneDrive\Desktop` e virou
+`C:\Users\X\Desktop`. Todos os caminhos salvos apontavam pro antigo e
+quebraram de uma vez — a Capa foi só o primeiro a aparecer.
+
+**O pior não foi o monitor reclamar.** Foi o W-Vetro continuar salvando na
+pasta velha (esses programas lembram a última pasta usada), o monitor
+vigiando a nova, e **nenhum dos dois reclamar de nada**. Ele salvou o
+orçamento e não aconteceu nada — sem erro, sem log, sem pista.
+
+Por isso o monitor agora vigia **as duas**: a pasta configurada e a mesma
+pasta do outro lado do OneDrive, quando ela existe (`pasta_irma`). Vale para
+a pasta de orçamentos e para a de pedidos, e as duas aparecem no cabeçalho.
+Se a configurada sumiu e a irmã existe, ele adota a irmã sozinho e avisa.
+
+Também: quando a pasta de pedidos nunca foi configurada, ele procura sozinho
+uma pasta começando com "Pedido" ao lado da de orçamentos, na Área de
+Trabalho e na pasta do usuário — dos dois lados do OneDrive. **Só adota
+quando acha UMA**, pra não chutar. O risco de errar é pequeno de qualquer
+jeito: só vai pro CRM arquivo cujo nome começa com "Pedido", e pedido no CRM
+só acrescenta, nunca tira nada.
+
+Efeito colateral bom de sair do OneDrive: acabaram as duas dores conhecidas
+dele — arquivo travado durante a sincronização e evento de "modificado" sem
+ninguém ter mexido, que já fez proposta de ontem voltar pro CRM por cima da
+de hoje.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

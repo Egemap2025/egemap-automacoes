@@ -1688,11 +1688,14 @@ def merge_individual(capa_pdf_path, src_pdf_path, output_path,
 
 
 class PropostaHandler(FileSystemEventHandler):
-    def __init__(self, capa_pdf, pasta_raiz="", pasta_pedidos=""):
+    def __init__(self, capa_pdf, pasta_raiz="", pasta_pedidos="", pastas_pedidos=()):
         self.capa_pdf = capa_pdf
         self.pasta_raiz = pasta_raiz
         # Pedido nao e orcamento: nada da pasta de pedidos passa por aqui
         self.pasta_pedidos = pasta_pedidos
+        # Todas as pastas de pedido (a configurada e a irma do OneDrive): o
+        # que esta em qualquer uma delas nunca entra na montagem da proposta.
+        self.pastas_pedidos = [x for x in (pastas_pedidos or [pasta_pedidos]) if x]
         self._pending_single   = {}  # pdf_norm   -> (timestamp, caminho)
         self._pending_completo = {}  # folder_norm -> (timestamp, pasta, trigger)
         self._pending_crm      = {}  # pdf_norm   -> (timestamp, caminho, nome_antigo)
@@ -1719,7 +1722,7 @@ class PropostaHandler(FileSystemEventHandler):
         p = Path(path)
         if p.suffix.lower() != ".pdf":
             return
-        if _dentro_de(path, self.pasta_pedidos):
+        if any(_dentro_de(path, x) for x in self.pastas_pedidos):
             return  # pedido tem dono proprio (PedidoHandler) e nunca e montado
         if _is_proposta_gerada(str(p)):
             self._fila_crm(str(p))    # nao remonta, mas mantem o CRM em dia
@@ -1753,7 +1756,7 @@ class PropostaHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         origem, destino = Path(event.src_path), Path(event.dest_path)
-        if _dentro_de(destino, self.pasta_pedidos):
+        if any(_dentro_de(destino, x) for x in self.pastas_pedidos):
             return
 
         # Renomeou a proposta pronta (ex.: "... 24-08 PVC" -> "... 24-08 BRANCO"):
@@ -2054,8 +2057,9 @@ class PedidoHandler(FileSystemEventHandler):
     duplica nada.
     """
 
-    def __init__(self, pasta=""):
+    def __init__(self, pasta="", pastas=()):
         self.pasta = pasta
+        self.pastas = [x for x in (pastas or [pasta]) if x]
         self._pending = {}   # pdf_norm -> (timestamp, caminho, nome_antigo)
 
         # Os pedidos que JA ESTAVAM na pasta quando o monitor abriu ficam de
@@ -2064,9 +2068,9 @@ class PedidoHandler(FileSystemEventHandler):
         # evento sem nada ter mudado, e sem essa lista uma sincronizacao
         # despejaria a pasta inteira no CRM de uma vez.
         self._ja_estavam = set()
-        if pasta:
+        for alvo in self.pastas:
             try:
-                self._ja_estavam = {_norm(x) for x in Path(pasta).rglob("*.pdf")}
+                self._ja_estavam |= {_norm(x) for x in Path(alvo).rglob("*.pdf")}
             except Exception:
                 pass
 
@@ -2087,7 +2091,7 @@ class PedidoHandler(FileSystemEventHandler):
             return
         if _norm(p) in self._ja_estavam:
             return  # ja estava na pasta antes do monitor abrir: nao e pedido novo
-        if self.pasta and not _dentro_de(p, self.pasta):
+        if self.pastas and not any(_dentro_de(p, x) for x in self.pastas):
             return  # tirar o pedido da pasta nao e o mesmo que salvar um
         self._fila(p, arquivo_antigo)
 
@@ -2124,6 +2128,92 @@ class PedidoHandler(FileSystemEventHandler):
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
+def pasta_irma(pasta):
+    """A mesma pasta do outro lado do OneDrive, quando ela existe.
+
+        C:\\Users\\X\\Desktop\\DOCUMENTOS
+        C:\\Users\\X\\OneDrive\\Desktop\\DOCUMENTOS
+
+    Em 22/10/2026 o Natanael tirou as pastas de dentro do OneDrive. A Area de
+    Trabalho mudou de endereco e tudo que estava salvo apontava pro antigo. O
+    pior nao foi o monitor reclamar: foi o W-Vetro continuar salvando na pasta
+    velha (esses programas lembram a ultima pasta usada), o monitor vigiando a
+    nova, e nenhum dos dois reclamar de nada.
+
+    Entao o monitor passa a vigiar as duas. Devolve "" quando nao ha irma.
+    """
+    try:
+        caminho = Path(pasta).resolve()
+        casa = Path.home().resolve()
+        resto = caminho.relative_to(casa)
+    except Exception:
+        return ""
+
+    partes = list(resto.parts)
+    if not partes:
+        return ""
+    if partes[0].lower() == "onedrive":
+        irma = casa.joinpath(*partes[1:])          # tira o OneDrive
+    else:
+        irma = casa / "OneDrive" / resto           # poe o OneDrive
+    try:
+        if irma.is_dir() and irma.resolve() != caminho:
+            return str(irma)
+    except Exception:
+        pass
+    return ""
+
+
+def pastas_para_vigiar(pasta):
+    """A pasta configurada mais a irma do OneDrive, se existir."""
+    pastas = []
+    if pasta and Path(pasta).is_dir():
+        pastas.append(str(pasta))
+    irma = pasta_irma(pasta) if pasta else ""
+    if irma:
+        pastas.append(irma)
+    return pastas
+
+
+def achar_pasta_de_pedidos(pasta_raiz):
+    """Procura sozinho uma pasta de pedidos ("Pedidos 2026" e parecidos).
+
+    Procura ao lado da pasta de orcamentos, na Area de Trabalho e na pasta do
+    usuario -- nos dois lados do OneDrive. So adota quando acha UMA, pra nao
+    chutar. Mesmo assim o risco e pequeno: so vai pro CRM arquivo cujo nome
+    comeca com "Pedido", e pedido no CRM so acrescenta, nunca tira nada.
+    """
+    onde = []
+    try:
+        if pasta_raiz:
+            onde += [Path(pasta_raiz).parent, Path(pasta_raiz)]
+        casa = Path.home()
+        onde += [casa / "Desktop", casa / "OneDrive" / "Desktop",
+                 casa / "Documents", casa / "Documentos", casa]
+    except Exception:
+        return ""
+
+    achadas, vistos = [], set()
+    for base in onde:
+        try:
+            if not base.is_dir():
+                continue
+            for filho in base.iterdir():
+                if not filho.is_dir() or not filho.name.upper().startswith("PEDIDO"):
+                    continue
+                chave = _norm(filho)
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                achadas.append(filho)
+        except Exception:
+            continue
+
+    if len(achadas) == 1:
+        return str(achadas[0])
+    return ""
+
 
 def validar_capa(capa_pdf):
     """Retorna None se ok, ou mensagem de erro."""
@@ -2536,6 +2626,17 @@ def main():
     capa_ok  = bool(saved_capa) and validar_capa(saved_capa) is None
     pasta_ok = bool(saved_pasta) and Path(saved_pasta).is_dir()
 
+    # A pasta saiu de dentro do OneDrive (ou entrou)? Segue a mudanca sozinho.
+    if saved_pasta and not pasta_ok:
+        irma = pasta_irma(saved_pasta)
+        if irma:
+            print("  Nao achei a pasta de orcamentos em:")
+            print(f"    {saved_pasta}")
+            print("  Mas achei a mesma pasta aqui, e segui com ela:")
+            print(f"    {irma}")
+            print()
+            saved_pasta, pasta_ok = irma, True
+
     # A Capa saiu do lugar? Usa a copia guardada e segue trabalhando. Parar o
     # monitor numa pergunta por causa de um arquivo que alguem moveu custa um
     # dia inteiro de proposta sem ir pro CRM nem pro Drive.
@@ -2604,6 +2705,25 @@ def main():
 
     oferecer_conexao_crm()
     oferecer_conexao_drive()
+    if saved_pedidos and not Path(saved_pedidos).is_dir():
+        irma = pasta_irma(saved_pedidos)
+        if irma:
+            print(f"  A pasta dos pedidos mudou de lugar; segui com: {irma}")
+            print()
+            saved_pedidos = irma
+            save_config(capa_pdf, pasta_raiz, saved_pedidos)
+
+    if not saved_pedidos:
+        achada = achar_pasta_de_pedidos(pasta_raiz)
+        if achada:
+            print("  Achei sozinho a pasta dos pedidos:")
+            print(f"    {achada}")
+            print("  Pedido salvo ai vai pro card do cliente em Contrato.")
+            print("  Se nao for essa, rode o CONFIGURAR_PEDIDOS.bat.")
+            print()
+            saved_pedidos = achada
+            save_config(capa_pdf, pasta_raiz, saved_pedidos)
+
     pasta_pedidos = oferecer_pasta_pedidos(capa_pdf, pasta_raiz, saved_pedidos)
     oferecer_faxina_drive()
 
@@ -2620,6 +2740,9 @@ def main():
     print("=" * 55)
     print(f"  Programa: {_caminho_do_programa()}")
     print(f"  Monitorando: {pasta_raiz}")
+    _irma_raiz = pasta_irma(pasta_raiz)
+    if _irma_raiz:
+        print(f"         e tambem: {_irma_raiz}")
     print(f"  Capa: {Path(capa_pdf).name}")
     if crm_egemap is not None:
         email_crm = crm_egemap.carregar_config()[0]
@@ -2628,6 +2751,9 @@ def main():
         print("  Drive: conectado" if drive_egemap.configurado() else "  Drive: nao conectado")
     if pasta_pedidos:
         print(f"  Pedidos: {pasta_pedidos}")
+        _irma_ped = pasta_irma(pasta_pedidos)
+        if _irma_ped:
+            print(f"     e tambem: {_irma_ped}")
     print()
     print("  Salve qualquer PDF com COMPLETO no nome para")
     print("  disparar a montagem automatica da proposta.")
@@ -2640,14 +2766,21 @@ def main():
     print("=" * 55)
     print()
 
-    handler  = PropostaHandler(capa_pdf, pasta_raiz, pasta_pedidos)
+    # Vigia tambem a mesma pasta do outro lado do OneDrive, quando ela existe:
+    # o W-Vetro lembra a ultima pasta usada e continua salvando na antiga.
+    vigiadas = pastas_para_vigiar(pasta_raiz)
+    vigiadas_pedidos = pastas_para_vigiar(pasta_pedidos) if pasta_pedidos else []
+
+    handler  = PropostaHandler(capa_pdf, pasta_raiz, pasta_pedidos, vigiadas_pedidos)
     observer = Observer()
-    observer.schedule(handler, str(pasta_raiz), recursive=True)
+    for alvo in vigiadas:
+        observer.schedule(handler, alvo, recursive=True)
 
     handler_pedidos = None
-    if pasta_pedidos and Path(pasta_pedidos).is_dir() and pedidos_egemap is not None:
-        handler_pedidos = PedidoHandler(pasta_pedidos)
-        observer.schedule(handler_pedidos, str(pasta_pedidos), recursive=True)
+    if vigiadas_pedidos and pedidos_egemap is not None:
+        handler_pedidos = PedidoHandler(pasta_pedidos, vigiadas_pedidos)
+        for alvo in vigiadas_pedidos:
+            observer.schedule(handler_pedidos, alvo, recursive=True)
 
     observer.start()
 
