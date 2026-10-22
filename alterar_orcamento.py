@@ -3063,10 +3063,10 @@ def _linha_comercial(mud):
     de cara em que linha cada item vai cair). A partir da linha numerica (25/32/
     30) + o modelo (que carrega 'solene'/'versatic'/'deluxe'):
       - fachada glazing  -> 'FACHADA CITTA DUE'      (linha Hydro)
-      - 25 + solene      -> 'SOLENE 25 COM BAGUETE'   (so correr)
-      - 25               -> 'VERSATIC 25'             (tradicional: tem tudo)
-      - 32 + solene      -> 'SOLENE 32'               (so correr)
-      - 32               -> 'DELUXE 32'               (tradicional: tem tudo)
+      - 25 + solene      -> 'SOLENE 25 COM BAGUETE'              (so correr)
+      - 25               -> 'VERSATIC 25'                        (tradicional: tem tudo)
+      - 32 + solene      -> 'SOLENE 32 MINIMALISTA COM BAGUETE'  (so correr)
+      - 32               -> 'DELUXE 32'                          (tradicional: tem tudo)
       - 30 / outras      -> a linha como veio (madeira 'L. 30' casa pelo numero)
     Devolve '' quando nao da pra decidir (ai usa a linha PADRAO da tela)."""
     if mud.get("_fachada"):
@@ -3079,7 +3079,9 @@ def _linha_comercial(mud):
     if nlin == "25":
         return "SOLENE 25 COM BAGUETE" if "solene" in mlow else "VERSATIC 25"
     if nlin == "32":
-        return "SOLENE 32" if "solene" in mlow else "DELUXE 32"
+        # a conta tem 2 Solene 32 (MODULAR e MINIMALISTA COM BAGUETE). As de
+        # correr usam a 'MINIMALISTA COM BAGUETE' (mesma logica da Solene 25).
+        return "SOLENE 32 MINIMALISTA COM BAGUETE" if "solene" in mlow else "DELUXE 32"
     if nlin == "30":
         return "L. 30"                                # madeira (casa pelo '30')
     return linha
