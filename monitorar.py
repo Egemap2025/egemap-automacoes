@@ -2539,6 +2539,30 @@ def oferecer_pasta_pedidos(capa_pdf, pasta_raiz, atual):
 
 
 def main():
+    # "EGEMAP-Monitor.exe --teste" so confere que o programa abre: carrega
+    # tudo que ele precisa e sai. Roda na compilacao, antes de publicar.
+    #
+    # Existe porque em 22/10/2026 a compilacao pegou sozinha o PyMuPDF 2.0,
+    # recem-lancado, e o .exe publicado nem abria -- quebrava no "import
+    # fitz" procurando um arquivo de modelo que o empacotador nao incluiu.
+    # Com isso, uma versao que nao abre nao chega mais no Natanael.
+    if "--teste" in sys.argv[1:]:
+        print(f"PyMuPDF: {getattr(fitz, '__doc__', '?')}")
+        print(f"fitz   : {fitz.__name__}")
+        faltando = [nome for nome, mod in
+                    (("crm", crm_egemap), ("drive", drive_egemap),
+                     ("pedidos", pedidos_egemap)) if mod is None]
+        doc = fitz.open()
+        doc.new_page()
+        doc.close()
+        import watchdog.observers  # noqa: F401
+        if faltando:
+            print(f"ERRO: modulos que nao carregaram: {', '.join(faltando)}")
+            sys.exit(1)
+        print("OK: o programa abre e todos os modulos carregaram.")
+        sys.exit(0)
+
+
     # "EGEMAP-Monitor.exe --limpar-drive" faz a faxina nas pastas do Drive
     # (LIMPAR_DRIVE.bat). Mostra tudo antes e so mexe se voce confirmar.
     if "--limpar-drive" in sys.argv[1:]:

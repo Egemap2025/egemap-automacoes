@@ -1426,6 +1426,34 @@ dele — arquivo travado durante a sincronização e evento de "modificado" sem
 ninguém ter mexido, que já fez proposta de ontem voltar pro CRM por cima da
 de hoje.
 
+### A versão do PyMuPDF fica presa, e o .exe é testado antes de publicar
+
+22/10, o pior erro do dia, e foi meu. A compilação instalava `pip install
+pymupdf` **sem versão**. O PyMuPDF **2.0** saiu em 19/10 e as compilações
+116 e 117 pegaram ele sozinhas. A 2.0 traz um pacote novo (`pymupdf.layout`)
+com arquivos de modelo ONNX que o PyInstaller não empacota — o .exe
+publicado **nem abria**:
+
+    FileNotFoundError: ...\pymupdf\layout/resources/onnx/layout_rf24.1+imf1.yaml
+    [PYI-3280:ERROR] Failed to execute script 'monitorar'
+
+O Natanael baixou, abriu e a janela fechou sozinha. Pior do que o problema
+que a versão vinha resolver.
+
+Duas travas, as duas necessárias:
+
+1. **`pymupdf==1.28.2` preso no `build-exe.yml`.** É a versão que rodou
+   semanas na máquina dele (a do build 115, de 06/10). Pra subir: trocar lá e
+   **conferir o .exe abrindo**, não só compilando.
+2. **`EGEMAP-Monitor.exe --teste`** roda na compilação, depois de gerar e
+   **antes de publicar**: carrega tudo, abre um PDF em branco, confere que
+   `crm`, `drive` e `pedidos` entraram, e sai. Se não abrir, não vira
+   release.
+
+A lição maior: compilar com sucesso não quer dizer que o programa abre. O
+PyInstaller não reclama de arquivo de dados que falta — isso só aparece na
+máquina de quem usa.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

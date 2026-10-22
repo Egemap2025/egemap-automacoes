@@ -26,13 +26,26 @@ jobs:
         with:
           python-version: "3.11"
 
+      # A versao do PyMuPDF fica PRESA de proposito. Em 22/10/2026 o
+      # "pip install pymupdf" pegou sozinho o 2.0, lancado tres dias antes,
+      # que traz um pacote novo (pymupdf.layout) com arquivos de modelo que o
+      # PyInstaller nao empacota. O .exe publicado nem abria: quebrava no
+      # "import fitz". A 1.28.2 e a que rodou por semanas na maquina do
+      # Natanael. Pra subir de versao: trocar aqui e CONFERIR o .exe abrindo.
       - name: Instalar dependências
         run: |
-          pip install pymupdf watchdog pyinstaller
+          pip install "pymupdf==1.28.2" watchdog pyinstaller
 
       - name: Gerar EXE
         run: |
           pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." --hidden-import crm --hidden-import drive --hidden-import limpar_drive --hidden-import pedidos monitorar.py
+
+      # Confere que o .exe ABRE antes de publicar. Sem isto, uma versao que
+      # nem inicia vira release e chega no Natanael.
+      - name: Conferir que o EXE abre
+        run: |
+          dist\EGEMAP-Monitor.exe --teste
+          if ($LASTEXITCODE -ne 0) { throw "O EXE nao abriu" }
 
       - name: Publicar EXE como artefato
         uses: actions/upload-artifact@v4
