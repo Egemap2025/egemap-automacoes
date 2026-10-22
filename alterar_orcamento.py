@@ -1431,6 +1431,14 @@ def _spec_item_novo(descricao):
 
     mud["modelo"] = _re.sub(r"\s+", " ", desc).strip()
 
+    # TRILHO MACARRAO (trilho embutido): nao e um card diferente -- e a variavel
+    # 'TIPO DE MARCO INFERIOR = TRILHO MACARRAO' na janela de variaveis da porta/
+    # janela de correr. Se a esquadria cita 'macarrao' ou 'trilho embutido', marca
+    # pra setar essa variavel na hora de confirmar.
+    _dlow = _sem_acento(descricao.lower())
+    if "macarrao" in _dlow or "trilho embutido" in _dlow:
+        mud["_marco_macarrao"] = True
+
     # demais campos (cor / vidro / medida / qtde / ambiente)
     for p in partes[1:]:
         low = p.lower()
@@ -3245,6 +3253,14 @@ def _construir_na_selecao(page, num, mud, prefixo="sub"):
             if not _definir_acionamento(page, acion):
                 print(f"     [!] nao achei o campo ACIONAMENTO p/ definir '{acion}'.")
             page.wait_for_timeout(800)
+        # TRILHO MACARRAO: TIPO DE MARCO INFERIOR = TRILHO MACARRAO (trilho embutido)
+        if mud.get("_marco_macarrao"):
+            if _fachada_set_select(page, r"marco\s+inferior", "trilho macarrao"):
+                print("     trilho embutido -> MARCO INFERIOR = TRILHO MACARRAO")
+            else:
+                print("     [!] nao achei a variavel TIPO DE MARCO INFERIOR"
+                      " (confira na mao: TRILHO MACARRAO).")
+            page.wait_for_timeout(600)
         if not _confirmar_edicao(page):
             # a janela de variaveis NAO confirmou (ex.: faltou uma variavel
             # obrigatoria). O item NAO ficou salvo. Nao reporta sucesso: tenta
@@ -3841,6 +3857,8 @@ def _preview_montar(orc, itens):
         print(f"     linha       -> {_linha_comercial(mud) or '(padrao da tela)'}")
         if "acionamento" in mud:
             print(f"     acionamento -> {mud['acionamento']}")
+        if mud.get("_marco_macarrao"):
+            print(f"     marco inf.  -> TRILHO MACARRAO (trilho embutido)")
         if "modulos" in mud:
             print(f"     modulos     -> {mud['modulos']}")
         for chave, nome in CAMPOS_PREVIEW:
