@@ -2176,31 +2176,33 @@ def pastas_para_vigiar(pasta):
     return pastas
 
 
-def achar_pasta_de_pedidos(pasta_raiz):
-    """Procura sozinho uma pasta de pedidos ("Pedidos 2026" e parecidos).
-
-    Procura ao lado da pasta de orcamentos, na Area de Trabalho e na pasta do
-    usuario -- nos dois lados do OneDrive. So adota quando acha UMA, pra nao
-    chutar. Mesmo assim o risco e pequeno: so vai pro CRM arquivo cujo nome
-    comeca com "Pedido", e pedido no CRM so acrescenta, nunca tira nada.
-    """
+def _pastas_onde_procurar(pasta_raiz=""):
+    """Os lugares onde as pastas de trabalho costumam estar."""
     onde = []
     try:
         if pasta_raiz:
             onde += [Path(pasta_raiz).parent, Path(pasta_raiz)]
         casa = Path.home()
         onde += [casa / "Desktop", casa / "OneDrive" / "Desktop",
-                 casa / "Documents", casa / "Documentos", casa]
+                 casa / "Documents", casa / "Documentos",
+                 casa / "OneDrive" / "Documentos", casa / "OneDrive" / "Documents",
+                 casa]
     except Exception:
-        return ""
+        return []
+    return onde
 
+
+def _procurar_pastas(pasta_raiz, comeca_com):
+    """Pastas cujo nome comeca com isso, nos lugares de sempre. Sem repetir."""
     achadas, vistos = [], set()
-    for base in onde:
+    for base in _pastas_onde_procurar(pasta_raiz):
         try:
             if not base.is_dir():
                 continue
-            for filho in base.iterdir():
-                if not filho.is_dir() or not filho.name.upper().startswith("PEDIDO"):
+            for filho in sorted(base.iterdir()):
+                if not filho.is_dir():
+                    continue
+                if not _sem_acento(filho.name).startswith(comeca_com):
                     continue
                 chave = _norm(filho)
                 if chave in vistos:
@@ -2209,10 +2211,39 @@ def achar_pasta_de_pedidos(pasta_raiz):
                 achadas.append(filho)
         except Exception:
             continue
+    return achadas
 
-    if len(achadas) == 1:
-        return str(achadas[0])
-    return ""
+
+def achar_pastas_de_orcamentos(pasta_raiz):
+    """Pastas de orcamento alem da configurada.
+
+    Em 22/10/2026 o Natanael respondeu "DOCUMENTOS" quando o monitor pediu a
+    pasta de orcamentos -- era onde ele tinha acabado de salvar a Capa. Os
+    orcamentos moram em "ORCAMENTOS", ao lado. Resultado: o monitor ficou
+    horas vigiando a pasta errada, e nem ele nem o monitor tinham como
+    perceber -- salvava orcamento e simplesmente nao acontecia nada.
+
+    Vigiar uma pasta a mais nao custa nada e nao estraga nada: proposta so e
+    montada a partir de PDF que E orcamento, e o destino no Drive sai da
+    propria pasta do cliente. Ja vigiar de menos custa o dia de trabalho.
+    """
+    achadas = []
+    for pasta in _procurar_pastas(pasta_raiz, "ORCAMENTO"):
+        if pasta_raiz and _norm(pasta) == _norm(pasta_raiz):
+            continue
+        achadas.append(str(pasta))
+    return achadas
+
+
+def achar_pasta_de_pedidos(pasta_raiz):
+    """Procura sozinho uma pasta de pedidos ("Pedidos 2026" e parecidos).
+
+    So adota quando acha UMA, pra nao chutar. Mesmo assim o risco e pequeno:
+    so vai pro CRM arquivo cujo nome comeca com "Pedido", e pedido no CRM so
+    acrescenta, nunca tira nada.
+    """
+    achadas = _procurar_pastas(pasta_raiz, "PEDIDO")
+    return str(achadas[0]) if len(achadas) == 1 else ""
 
 
 def validar_capa(capa_pdf):
@@ -2612,6 +2643,23 @@ def main():
         input("\nPressione ENTER para fechar.")
         sys.exit(0)
 
+    # "EGEMAP-Monitor.exe --pasta" troca so a pasta de orcamentos
+    if "--pasta" in sys.argv[1:]:
+        capa_atual, pasta_atual, pedidos_atual = load_config()
+        if pasta_atual:
+            print(f"Pasta de hoje: {pasta_atual}\n")
+        print("Cole o caminho da pasta de orcamentos e aperte Enter")
+        print("(da pra arrastar a pasta pra dentro desta janela):")
+        nova = input("> ").strip().strip('"').strip("'")
+        if not Path(nova).is_dir():
+            print(f"\nERRO: Pasta nao encontrada: {nova}")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        save_config(capa_atual, nova, pedidos_atual)
+        print("\nPronto, pasta trocada. Ele vigia essa pasta e tudo que esta dentro.")
+        input("\nPressione ENTER para fechar.")
+        sys.exit(0)
+
     # "EGEMAP-Monitor.exe --pedidos" so escolhe a pasta dos pedidos
     if "--pedidos" in sys.argv[1:]:
         capa_atual, pasta_atual, _ = load_config()
@@ -2760,13 +2808,22 @@ def main():
         except Exception:
             pass
 
+    # Vigia tambem a mesma pasta do outro lado do OneDrive, quando ela existe:
+    # o W-Vetro lembra a ultima pasta usada e continua salvando na antiga.
+    vigiadas = pastas_para_vigiar(pasta_raiz)
+    for extra in achar_pastas_de_orcamentos(pasta_raiz):
+        for alvo in pastas_para_vigiar(extra):
+            if not any(_norm(alvo) == _norm(x) for x in vigiadas):
+                vigiadas.append(alvo)
+    vigiadas_pedidos = pastas_para_vigiar(pasta_pedidos) if pasta_pedidos else []
+
     print()
     print("=" * 55)
     print(f"  Programa: {_caminho_do_programa()}")
     print(f"  Monitorando: {pasta_raiz}")
-    _irma_raiz = pasta_irma(pasta_raiz)
-    if _irma_raiz:
-        print(f"         e tambem: {_irma_raiz}")
+    for _extra in vigiadas:
+        if _norm(_extra) != _norm(pasta_raiz):
+            print(f"         e tambem: {_extra}")
     print(f"  Capa: {Path(capa_pdf).name}")
     if crm_egemap is not None:
         email_crm = crm_egemap.carregar_config()[0]
@@ -2789,11 +2846,6 @@ def main():
     print("  Pressione Ctrl+C para parar.")
     print("=" * 55)
     print()
-
-    # Vigia tambem a mesma pasta do outro lado do OneDrive, quando ela existe:
-    # o W-Vetro lembra a ultima pasta usada e continua salvando na antiga.
-    vigiadas = pastas_para_vigiar(pasta_raiz)
-    vigiadas_pedidos = pastas_para_vigiar(pasta_pedidos) if pasta_pedidos else []
 
     handler  = PropostaHandler(capa_pdf, pasta_raiz, pasta_pedidos, vigiadas_pedidos)
     observer = Observer()

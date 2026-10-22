@@ -1454,6 +1454,31 @@ A lição maior: compilar com sucesso não quer dizer que o programa abre. O
 PyInstaller não reclama de arquivo de dados que falta — isso só aparece na
 máquina de quem usa.
 
+### O monitor acha sozinho a pasta de orçamentos
+
+22/10, no fim do dia. Quando o monitor pediu a pasta de orçamentos, foi
+respondido `C:\Users\T-GAMER\Desktop\DOCUMENTOS` — que é onde a Capa tinha
+acabado de ser salva. Os orçamentos moram em
+`C:\Users\T-GAMER\Desktop\ORÇAMENTOS`, ao lado.
+
+Resultado: horas vigiando a pasta errada. E **nem ele nem o monitor tinham
+como perceber** — salvava o orçamento e simplesmente não acontecia nada. Sem
+erro, sem log, sem pista. Foi preciso pedir o caminho do arquivo com
+"Copiar como caminho" pra descobrir.
+
+Agora o monitor **vigia também qualquer pasta começando com "ORÇAMENTO"**
+(sem acento conta igual) que ele achar na Área de Trabalho, em Documentos, na
+pasta do usuário e ao lado da configurada — dos dois lados do OneDrive.
+
+Vigiar uma pasta a mais não custa nada e não estraga nada: proposta só é
+montada a partir de PDF que **é** orçamento, e o destino no Drive sai da
+própria pasta do cliente (`_destino_drive` só usa a pasta raiz pra saber se o
+PDF está solto na raiz). Já vigiar de menos custa o dia de trabalho.
+
+Pra trocar a pasta de propósito: `EGEMAP-Monitor.exe --pasta`, ou o
+`TROCAR_PASTA.bat`. Vigia a pasta escolhida **e tudo que estiver dentro**, em
+qualquer nível — pasta de cliente nova já entra vigiada sozinha.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
