@@ -1364,6 +1364,39 @@ divisão por material funcionaria em todo teste aqui e **nunca** no programa que
 ele usa. Por isso a procura começa pelos módulos já carregados (`monitorar` e
 `__main__`, nessa ordem, conferindo se o módulo tem mesmo o leitor dentro).
 
+### A Capa sumiu do lugar e o monitor parou o dia inteiro
+
+22/10. O Natanael abriu o monitor e viu "Aviso: capa anterior nao encontrada"
+seguido da PRIMEIRA CONFIGURACAO. O arquivo de config
+(`~/.egemap_monitor_config.txt`) estava intacto — o que não estava era o **PDF
+da Capa**, no caminho salvo na linha 1. Alguém moveu, renomeou ou
+sincronizou a pasta.
+
+Três coisas estavam erradas nisso:
+
+1. **O monitor parava.** A pergunta da primeira configuração é um `input()`
+   sem tempo — ele fica ali parado, sem vigiar pasta nenhuma. Se isso
+   acontece na abertura do Windows, o dia inteiro de proposta não vai pro CRM
+   nem pro Drive e ninguém percebe.
+2. **O aviso não dizia o caminho.** "Capa anterior não encontrada" não ajuda a
+   achar o que moveu.
+3. **Perguntava as duas coisas de novo**, mesmo quando só a Capa tinha sumido
+   — convite pra trocar a pasta de orçamentos sem querer.
+
+Agora: toda vez que a Capa é usada com sucesso fica uma **cópia guardada** em
+`~/.egemap_capa_backup.pdf`. Se a original sumir, o monitor usa a cópia, diz
+qual caminho procurou e **continua trabalhando**. A config continua apontando
+pro caminho original, então pôr o arquivo de volta no lugar volta tudo ao
+normal sozinho.
+
+Quando falta mesmo alguma coisa, ele pergunta **só o que falta**, e diz que dá
+pra arrastar o arquivo ou a pasta pra dentro da janela em vez de digitar o
+caminho.
+
+Pra trocar a Capa de propósito (layout refeito, lugar novo definitivo):
+`EGEMAP-Monitor.exe --capa`, ou o `TROCAR_CAPA.bat`. Isso não mexe na pasta de
+orçamentos nem na de pedidos.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

@@ -67,6 +67,44 @@ def load_config():
 
 def save_config(capa, pasta, pasta_pedidos=""):
     CONFIG_FILE.write_text(f"{capa}\n{pasta}\n{pasta_pedidos}\n", encoding="utf-8")
+    guardar_copia_da_capa(capa)
+
+
+# Copia de seguranca da Capa, guardada junto com a config.
+#
+# A Capa mora numa pasta do usuario, e basta alguem mover, renomear ou
+# sincronizar essa pasta pra ela sumir do caminho salvo. Quando isso acontecia,
+# o monitor caia na "PRIMEIRA CONFIGURACAO" e ficava parado numa pergunta --
+# sem vigiar nada, no meio do expediente, e sem dizer que caminho procurou.
+# Foi o que aconteceu em 22/10/2026.
+#
+# Agora toda vez que a Capa e usada com sucesso fica uma copia aqui. Se a
+# original sumir, o monitor usa a copia, avisa e continua trabalhando.
+CAPA_GUARDADA = Path.home() / ".egemap_capa_backup.pdf"
+
+
+def guardar_copia_da_capa(capa):
+    """Guarda uma copia da Capa. Nunca levanta excecao."""
+    try:
+        origem = Path(capa)
+        if not origem.is_file() or origem.resolve() == CAPA_GUARDADA.resolve():
+            return
+        dados = origem.read_bytes()
+        if dados and (not CAPA_GUARDADA.exists()
+                      or CAPA_GUARDADA.read_bytes() != dados):
+            CAPA_GUARDADA.write_bytes(dados)
+    except Exception:
+        pass
+
+
+def capa_de_reserva():
+    """A copia guardada, se ela existir e ainda servir de Capa."""
+    try:
+        if CAPA_GUARDADA.is_file() and validar_capa(str(CAPA_GUARDADA)) is None:
+            return str(CAPA_GUARDADA)
+    except Exception:
+        pass
+    return ""
 
 # ── Codigos de material no nome do arquivo ────────────────────────────────────
 #
@@ -2444,6 +2482,22 @@ def main():
         input("\nPressione ENTER para fechar.")
         sys.exit(0 if ok else 1)
 
+    # "EGEMAP-Monitor.exe --capa" troca so o PDF de Capa
+    if "--capa" in sys.argv[1:]:
+        capa_atual, pasta_atual, pedidos_atual = load_config()
+        if capa_atual:
+            print(f"Capa de hoje: {capa_atual}\n")
+        nova = input("Cole o caminho do novo PDF de Capa e aperte Enter:\n> ").strip().strip('"').strip("'")
+        erro = validar_capa(nova)
+        if erro:
+            print(f"\nERRO: {erro}")
+            input("\nPressione ENTER para fechar.")
+            sys.exit(1)
+        save_config(nova, pasta_atual, pedidos_atual)
+        print("\nPronto, Capa trocada.")
+        input("\nPressione ENTER para fechar.")
+        sys.exit(0)
+
     # "EGEMAP-Monitor.exe --pedidos" so escolhe a pasta dos pedidos
     if "--pedidos" in sys.argv[1:]:
         capa_atual, pasta_atual, _ = load_config()
@@ -2479,39 +2533,65 @@ def main():
         print()
 
     saved_capa, saved_pasta, saved_pedidos = load_config()
-    config_ok = (
-        saved_capa and saved_pasta
-        and Path(saved_capa).exists()
-        and Path(saved_pasta).is_dir()
-        and validar_capa(saved_capa) is None
-    )
+    capa_ok  = bool(saved_capa) and validar_capa(saved_capa) is None
+    pasta_ok = bool(saved_pasta) and Path(saved_pasta).is_dir()
 
-    if config_ok:
+    # A Capa saiu do lugar? Usa a copia guardada e segue trabalhando. Parar o
+    # monitor numa pergunta por causa de um arquivo que alguem moveu custa um
+    # dia inteiro de proposta sem ir pro CRM nem pro Drive.
+    if not capa_ok and saved_capa:
+        reserva = capa_de_reserva()
+        if reserva:
+            print("  Nao achei a Capa em:")
+            print(f"    {saved_capa}")
+            print("  Usei a copia guardada e continuei normalmente.")
+            print("  Pra apontar a Capa pro lugar novo, rode uma vez:")
+            print("    EGEMAP-Monitor.exe --capa")
+            print()
+            saved_capa, capa_ok = reserva, True
+
+    if capa_ok and pasta_ok:
         capa_pdf   = saved_capa
         pasta_raiz = saved_pasta
         print(f"  Capa : {Path(capa_pdf).name}")
         print(f"  Pasta: {pasta_raiz}")
         print()
+        guardar_copia_da_capa(capa_pdf)
     else:
-        # Primeira vez: faz as duas perguntas e nunca mais pergunta
-        if saved_capa and not Path(saved_capa).exists():
-            print(f"Aviso: capa anterior nao encontrada.")
+        # Pergunta SO o que falta. Quando so a Capa sumiu, a pasta de
+        # orcamentos continua valendo -- perguntar as duas de novo era
+        # convite pra trocar a pasta certa sem querer.
+        if saved_capa and not capa_ok:
+            print("  Nao achei a Capa em:")
+            print(f"    {saved_capa}")
+            print()
+        if saved_pasta and not pasta_ok:
+            print("  Nao achei a pasta de orcamentos em:")
+            print(f"    {saved_pasta}")
             print()
 
-        print("PRIMEIRA CONFIGURACAO (so precisa fazer uma vez)\n")
+        if capa_ok:
+            capa_pdf = saved_capa
+        else:
+            print("Cole o caminho do PDF de Capa e aperte Enter")
+            print("(da pra arrastar o arquivo pra dentro desta janela):")
+            capa_pdf = input("> ").strip().strip('"').strip("'")
+            erro = validar_capa(capa_pdf)
+            if erro:
+                print(f"\nERRO: {erro}")
+                input("\nPressione ENTER para fechar.")
+                sys.exit(1)
 
-        capa_pdf = input("1. Cole o caminho do PDF de Capa e aperte Enter:\n> ").strip().strip('"').strip("'")
-        erro = validar_capa(capa_pdf)
-        if erro:
-            print(f"\nERRO: {erro}")
-            input("\nPressione ENTER para fechar.")
-            sys.exit(1)
-
-        pasta_raiz = input("\n2. Cole o caminho da pasta de orcamentos e aperte Enter:\n> ").strip().strip('"').strip("'")
-        if not Path(pasta_raiz).is_dir():
-            print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
-            input("\nPressione ENTER para fechar.")
-            sys.exit(1)
+        if pasta_ok:
+            pasta_raiz = saved_pasta
+        else:
+            print("\nCole o caminho da pasta de orcamentos e aperte Enter")
+            print("(da pra arrastar a pasta pra dentro desta janela):")
+            pasta_raiz = input("> ").strip().strip('"').strip("'")
+            if not Path(pasta_raiz).is_dir():
+                print(f"\nERRO: Pasta nao encontrada: {pasta_raiz}")
+                input("\nPressione ENTER para fechar.")
+                sys.exit(1)
 
         save_config(capa_pdf, pasta_raiz, saved_pedidos)
         print("\nPronto! A partir de agora abre automaticamente com o Windows.\n")
