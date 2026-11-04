@@ -1515,6 +1515,45 @@ cadastrado. A proposta de PVC marcava a opção de alumínio. Agora, no empate,
 ganha quem casa **melhor**: mais material em comum e menos material que a
 proposta não tem.
 
+### O envio pro CRM não pode falhar calado
+
+04/11, ainda no Geraldo. Ele salvou a proposta três vezes. As três foram
+montadas, as três subiram pro Drive — e **nenhuma chegou no CRM, sem uma
+linha de erro no log**. O log mostrava a composição sendo calculada (que só
+acontece no caminho do CRM) e, logo depois, o Drive. Entre as duas, silêncio.
+
+Dois buracos juntos:
+
+1. **No `crm.py`**, as três primeiras linhas do `lancar_proposta` ficavam
+   FORA do `try`:
+
+       if not configurado():
+           return False                      # <- saía calado
+       materiais = {normalizar(m) for m in materiais if m}
+       nome_linha = nome_linha or nome_do_orcamento(materiais)
+       try:
+           ...
+
+   Qualquer estouro ali — ou simplesmente o CRM não estar conectado —
+   terminava sem log.
+
+2. **No `monitorar.py`**, o envio roda numa thread em segundo plano
+   (`daemon=True`) pra não travar o monitor. Exceção dentro de thread **não
+   aparece em lugar nenhum**: não derruba o programa e não passa pelo
+   `try/except` do `tick()`.
+
+Os dois juntos faziam o pior tipo de falha: o trabalho não acontece e nada
+avisa.
+
+Agora: tudo dentro do `try` no `lancar_proposta`, com mensagem própria pro
+"CRM não conectado"; e no monitor a thread chama um embrulho que **garante
+uma linha no log dando no que der**, com o traceback. Quando falha, a
+proposta sai do `_JA_ENVIADO` — assim renomear o arquivo tenta de novo, em
+vez de ser ignorado como "já enviei".
+
+A regra que fica: **todo trabalho que roda em segundo plano precisa de um
+embrulho que logue a exceção.** Thread que morre calada é bug invisível.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

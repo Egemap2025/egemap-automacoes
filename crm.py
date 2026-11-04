@@ -1118,13 +1118,20 @@ def lancar_proposta(pdf_path, cliente, valor, materiais, log=print,
                    juntada com o PVC num COMPLETO): o PDF entra, mas o card
                    nao anda porque o orcamento nao acabou
     """
-    if not configurado():
-        return False
-
-    materiais = {normalizar(m) for m in materiais if m}
-    nome_linha = nome_linha or nome_do_orcamento(materiais)
-
     try:
+        # Tudo daqui pra baixo fica DENTRO do try. Antes, estas tres linhas
+        # ficavam de fora: se alguma estourasse, a excecao morria dentro da
+        # thread em segundo plano e nao aparecia no log. Em 04/11/2026 o
+        # Natanael salvou a proposta do Geraldo tres vezes, o Drive recebeu
+        # as tres e o CRM nao recebeu nenhuma -- sem UMA linha de erro.
+        if not configurado():
+            log(f"[{cliente}] CRM: nao esta conectado — nao lancei nada. "
+                f"Rode o CONECTAR_CRM.bat.")
+            return False
+
+        materiais = {normalizar(m) for m in materiais if m}
+        nome_linha = nome_linha or nome_do_orcamento(materiais)
+
         crm = CRM().entrar()
         negocio = crm.encontrar_negocio(cliente)
 

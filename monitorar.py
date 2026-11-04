@@ -11,6 +11,7 @@ import os
 import threading
 import subprocess
 import unicodedata
+import traceback
 from pathlib import Path
 from datetime import date
 
@@ -1458,18 +1459,35 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
                        if nome in crm_egemap.MATERIAL_DA_COMPOSICAO}
     materiais_reais.discard("outro")
 
-    threading.Thread(
-        target=crm_egemap.lancar_proposta,
-        args=(pdf_path, client, valor, materiais),
-        kwargs={"log": log,
-                "nome_linha": nome_da_linha(pdf_path, materiais),
-                "nome_antigo": nome_antigo,
-                "parcial": e_peca_de_completo(pdf_path),
-                "composicao": composicao,
-                "materiais_reais": materiais_reais,
-                "detalhe": detalhe_do_nome(pdf_path)},
-        daemon=True,
-    ).start()
+    def _mandar():
+        """Manda pro CRM e GARANTE uma linha no log, dando no que der.
+
+        O envio roda em segundo plano. Uma excecao aqui morria dentro da
+        thread, sem aparecer em lugar nenhum: a proposta subia pro Drive, o
+        CRM nao recebia nada e o log ficava mudo. Foi o que aconteceu com o
+        Geraldo em 04/11/2026, tres vezes seguidas.
+        """
+        try:
+            ok = crm_egemap.lancar_proposta(
+                pdf_path, client, valor, materiais, log=log,
+                nome_linha=nome_da_linha(pdf_path, materiais),
+                nome_antigo=nome_antigo,
+                parcial=e_peca_de_completo(pdf_path),
+                composicao=composicao,
+                materiais_reais=materiais_reais,
+                detalhe=detalhe_do_nome(pdf_path))
+        except BaseException as e:
+            log(f"[{client}] CRM: ERRO ao lancar {arquivo} — "
+                f"{type(e).__name__}: {e}")
+            log(traceback.format_exc())
+            _JA_ENVIADO.pop(chave, None)   # deixa tentar de novo
+            return
+        if not ok:
+            # Nao levantou excecao e nao deu certo: libera pra nova tentativa
+            # quando o arquivo for tocado de novo.
+            _JA_ENVIADO.pop(chave, None)
+
+    threading.Thread(target=_mandar, daemon=True).start()
 
 
 # ── Google Drive ─────────────────────────────────────────────────────────────
