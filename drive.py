@@ -307,6 +307,30 @@ def enviar(pdf_path, destino, materiais=None, client="", log=None):
         except Exception as e:
             _log(f"aviso ao localizar a pasta no Drive — {e}")
 
+        # MANDA PRIMEIRO, APAGA DEPOIS. Era ao contrario, e bastava o envio
+        # falhar pra proposta sumir do Drive: em 04/11/2026 o monitor apagou a
+        # versao anterior do Geraldo as 14:26:46 e o envio falhou as 14:26:49
+        # ("directory not found", o arquivo tinha acabado de ser renomeado).
+        # A pasta ficou sem nenhuma. Agora, se o envio falhar, a versao
+        # anterior continua la.
+        enviou = False
+        try:
+            r2 = _rclone("copyto", str(pdf_path), _remote(destino, nome),
+                         "--ignore-times", timeout=120)
+            if r2.returncode == 0:
+                enviou = True
+                _log(f"{nome} enviado em {destino}.")
+            else:
+                detalhe = (r2.stderr or r2.stdout or "").strip().splitlines()
+                _log(f"falha ao enviar {nome}" + (f" — {detalhe[-1]}" if detalhe else ""))
+        except Exception as e:
+            _log(f"erro ao enviar {nome} — {e}")
+
+        if not enviou:
+            _log(f"nao apaguei a versao anterior de {nome} — o envio falhou, "
+                 f"entao o que ja estava no Drive fica.")
+            return
+
         try:
             for f in _listar(destino):
                 fname = f.get("Name", "")
@@ -319,18 +343,7 @@ def enviar(pdf_path, destino, materiais=None, client="", log=None):
                 _rclone("deletefile", _remote(destino, fname))
                 _log(f"removi versao anterior de hoje ({fname})")
         except Exception as e:
-            _log(f"aviso ao verificar pasta antes de enviar — {e}")
-
-        try:
-            r2 = _rclone("copyto", str(pdf_path), _remote(destino, nome),
-                         "--ignore-times", timeout=120)
-            if r2.returncode == 0:
-                _log(f"{nome} enviado em {destino}.")
-            else:
-                detalhe = (r2.stderr or r2.stdout or "").strip().splitlines()
-                _log(f"falha ao enviar {nome}" + (f" — {detalhe[-1]}" if detalhe else ""))
-        except Exception as e:
-            _log(f"erro ao enviar {nome} — {e}")
+            _log(f"aviso ao limpar a versao anterior — {e}")
 
 
 if __name__ == "__main__":

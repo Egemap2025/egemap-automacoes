@@ -1571,6 +1571,21 @@ Capa, o valor lido da Página Final, os materiais, a composição, e aí o envio
 com tudo que o CRM responder. Serve pra recuperar uma proposta e, mais
 importante, pra **descobrir onde ela some**.
 
+### No Drive: manda primeiro, apaga depois
+
+04/11, Geraldo. O `drive.enviar` apagava a versão anterior do dia **antes**
+de mandar a nova. Bastou o envio falhar pra pasta ficar sem nenhuma:
+
+    14:26:46  Drive: removi versao anterior de hoje (... 04-11 ALM.pdf)
+    14:26:49  Drive: falha ao enviar ... — Failed to copyto: directory not found
+
+(o arquivo tinha acabado de ser renomeado na máquina, então o rclone não
+achou mais a origem). Só não virou perda porque a proposta foi salva de novo
+logo depois.
+
+Agora manda primeiro e só apaga a anterior **depois de o envio dar certo**.
+Falhando o envio, o que já estava no Drive fica — e o log diz isso.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
