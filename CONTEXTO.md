@@ -1554,6 +1554,23 @@ vez de ser ignorado como "já enviei".
 A regra que fica: **todo trabalho que roda em segundo plano precisa de um
 embrulho que logue a exceção.** Thread que morre calada é bug invisível.
 
+### Arrastar o PDF em cima do EGEMAP-Monitor.exe reenvia pro CRM
+
+Quando uma proposta não entra no CRM, não dá pra depender do vigia de pasta
+pra investigar: é justamente ele (ou a fila, ou a thread, ou o "já enviei")
+que pode estar engolindo. Então existe um caminho sem nada disso:
+
+    EGEMAP-Monitor.exe --lancar "C:\...\Proposta Comercial Fulano 04-11.pdf"
+
+ou, mais simples, **arrastar o PDF em cima do `EGEMAP-Monitor.exe`** — o
+Windows passa o arquivo como primeiro argumento e ele entende.
+
+Roda na frente de quem chamou, um passo por linha: qual Capa está valendo,
+que cliente saiu do nome da pasta, se o CRM está conectado, se o PDF tem
+Capa, o valor lido da Página Final, os materiais, a composição, e aí o envio
+com tudo que o CRM responder. Serve pra recuperar uma proposta e, mais
+importante, pra **descobrir onde ela some**.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,

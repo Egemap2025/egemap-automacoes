@@ -2587,6 +2587,77 @@ def oferecer_pasta_pedidos(capa_pdf, pasta_raiz, atual):
     return pasta
 
 
+def lancar_na_hora(pdf_path):
+    """Manda uma proposta pro CRM agora, imprimindo cada passo. 0 se deu certo."""
+    pdf = Path(pdf_path)
+    print()
+    print(f"Arquivo : {pdf}")
+    if not pdf.is_file():
+        print("ERRO: arquivo nao encontrado.")
+        input("\nPressione ENTER para fechar.")
+        return 1
+
+    capa_pdf, _pasta, _ped = load_config()
+    if not capa_pdf or validar_capa(capa_pdf) is not None:
+        capa_pdf = capa_de_reserva()
+    print(f"Capa    : {Path(capa_pdf).name if capa_pdf else '(nenhuma)'}")
+
+    client = suggest_client_name(pdf.parent)
+    print(f"Cliente : {client}   (vem do nome da pasta)")
+
+    if crm_egemap is None:
+        print("ERRO: integracao com o CRM indisponivel nesta versao.")
+        input("\nPressione ENTER para fechar.")
+        return 1
+    if not crm_egemap.configurado():
+        print("ERRO: o CRM nao esta conectado. Rode o CONECTAR_CRM.bat.")
+        input("\nPressione ENTER para fechar.")
+        return 1
+    print("CRM     : conectado")
+
+    com_capa = bool(capa_pdf) and proposta_tem_capa(str(pdf), capa_pdf)
+    print(f"Tem capa: {'sim' if com_capa else 'NAO — o monitor recusaria este arquivo'}")
+
+    valor = valor_da_proposta(str(pdf))
+    print(f"Valor   : {format_brl(valor) if valor else 'NAO ACHEI na Pagina Final'}")
+    if valor <= 0:
+        input("\nPressione ENTER para fechar.")
+        return 1
+
+    materiais = materiais_da_proposta(str(pdf))
+    nome_linha = nome_da_linha(str(pdf), materiais)
+    peca = e_peca_de_completo(str(pdf))
+    print(f"Materiais: {sorted(materiais)}   linha no CRM: '{nome_linha}'")
+    print(f"E peca de COMPLETO: {'sim — nao entraria sozinha' if peca else 'nao'}")
+
+    composicao = composicao_da_proposta(str(pdf), materiais, valor, client)
+    print(f"Composicao: {composicao or '(nao consegui dividir — fica pendente)'}")
+
+    materiais_reais = {crm_egemap.MATERIAL_DA_COMPOSICAO[n]
+                       for n, _ in composicao
+                       if n in crm_egemap.MATERIAL_DA_COMPOSICAO}
+    materiais_reais.discard("outro")
+
+    print()
+    print("Falando com o CRM agora...")
+    print("-" * 55)
+    try:
+        ok = crm_egemap.lancar_proposta(
+            str(pdf), client, valor, materiais, log=print,
+            nome_linha=nome_linha, parcial=peca,
+            composicao=composicao, materiais_reais=materiais_reais,
+            detalhe=detalhe_do_nome(str(pdf)))
+    except BaseException as e:
+        print(f"ERRO: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        input("\nPressione ENTER para fechar.")
+        return 1
+    print("-" * 55)
+    print("DEU CERTO." if ok else "NAO DEU CERTO — veja as linhas acima.")
+    input("\nPressione ENTER para fechar.")
+    return 0 if ok else 1
+
+
 def main():
     # "EGEMAP-Monitor.exe --teste" so confere que o programa abre: carrega
     # tudo que ele precisa e sai. Roda na compilacao, antes de publicar.
@@ -2660,6 +2731,27 @@ def main():
         print("\nPronto, Capa trocada.")
         input("\nPressione ENTER para fechar.")
         sys.exit(0)
+
+    # "EGEMAP-Monitor.exe --lancar <pdf>" manda UMA proposta pro CRM na hora,
+    # na sua frente (LANCAR_NO_CRM.bat, e so arrastar o PDF em cima).
+    #
+    # Serve pra duas coisas: recuperar uma proposta que nao entrou, e
+    # DESCOBRIR POR QUE. Aqui nao tem vigia de pasta, nem fila, nem segundo
+    # plano, nem "ja enviei" -- cada passo e impresso. Em 04/11/2026 a
+    # proposta do Geraldo nao chegava no CRM e o log nao dizia nada; sem um
+    # caminho assim nao da pra saber onde ela some.
+    # Tambem funciona ARRASTANDO O PDF EM CIMA do EGEMAP-Monitor.exe: o
+    # Windows passa o arquivo como primeiro argumento. E o jeito mais simples
+    # de reenviar uma proposta sem abrir prompt de comando nenhum.
+    solto = [a for a in sys.argv[1:] if not a.startswith("-")]
+    arrastado = (solto[0] if len(sys.argv) > 1 and solto
+                 and solto[0].lower().endswith(".pdf")
+                 and Path(solto[0]).is_file() else "")
+    if "--lancar" in sys.argv[1:] or arrastado:
+        alvo = arrastado or (solto[0] if solto else
+                             input("Cole o caminho da proposta (ou arraste o PDF aqui):\n> ")
+                             ).strip().strip('"').strip("'")
+        sys.exit(lancar_na_hora(alvo))
 
     # "EGEMAP-Monitor.exe --pasta" troca so a pasta de orcamentos
     if "--pasta" in sys.argv[1:]:
