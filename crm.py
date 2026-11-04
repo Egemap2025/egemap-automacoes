@@ -660,6 +660,16 @@ class CRM:
 
         O terceiro caso exige conter ESTRITAMENTE mais: duas opcoes de PVC
         cobrem o mesmo material e por isso nao se atropelam.
+
+        E nao basta o material: o COMPLETO so toma o lugar de uma linha
+        quando ele REALMENTE CONTEM aquela linha, material por material.
+        Em 04/11/2026 o Geraldo pediu duas OPCOES pros mesmos 24 vaos -- uma
+        em aluminio (R$ 180.852,56) e uma em PVC (R$ 208.280,02, montada pelo
+        COMPLETO). As duas propostas foram montadas e as duas estao no Drive,
+        mas no CRM a de PVC APAGOU a de aluminio: "aluminio" e subconjunto de
+        "pvc + aluminio", e so isso bastava. Nos numeros dava pra ver que uma
+        nao continha a outra -- a linha apagada tinha R$ 142.588,06 de
+        aluminio e a que entrou no lugar tem R$ 27.129,77.
         """
         negocio_id = negocio["id"]
 
@@ -671,6 +681,39 @@ class CRM:
             f"&deal_id=eq.{negocio_id}&tipo=eq.orcamento",
         )
 
+        nova = {MATERIAL_DA_COMPOSICAO.get(m, m): float(v)
+                for m, v in (composicao or [])}
+
+        def cabe_dentro(linha_id):
+            """A linha antiga cabe inteira dentro da proposta nova?
+
+            Compara material por material. Sem composicao dos dois lados nao
+            da pra afirmar que cabe -- e ai nao substitui: deixar duas linhas
+            pra alguem apagar custa um clique, apagar uma proposta que o
+            cliente ainda vai escolher custa o orcamento.
+            """
+            if not nova:
+                return False
+            try:
+                itens = self._tabela(
+                    "deal_budget_items",
+                    f"select=material,value&budget_id=eq.{linha_id}",
+                )
+            except Exception:
+                return False
+            if not itens:
+                return False
+            for item in itens:
+                chave = MATERIAL_DA_COMPOSICAO.get(item.get("material"),
+                                                   item.get("material"))
+                try:
+                    tinha = float(item.get("value") or 0)
+                except (TypeError, ValueError):
+                    return False
+                if tinha - nova.get(chave, 0.0) > 0.02:
+                    return False
+            return True
+
         def substitui(linha):
             nome = linha.get("name") or ""
             if normalizar(nome) == normalizar(nome_orcamento):
@@ -678,7 +721,9 @@ class CRM:
             if nome_antigo and normalizar(nome) == normalizar(nome_antigo):
                 return True
             do_linha = materiais_do_nome(linha.get("file_name") or nome)
-            return bool(do_linha) and do_linha < materiais
+            if not (do_linha and do_linha < materiais):
+                return False
+            return cabe_dentro(linha["id"])
 
         substituir = [b for b in existentes if substitui(b)]
 
@@ -814,13 +859,16 @@ class CRM:
         pendentes = [i for i in itens if not i.get("feito")]
         faltam_marcar = quantos_feitos - (len(itens) - len(pendentes))
 
-        def casa_pelo_material(item):
+        def materiais_do_item(item):
             do_item = {
                 normalizar(m.get("material"))
                 for m in (item.get("materiais") or []) if isinstance(m, dict)
             }
             do_item.discard("")
-            return bool(do_item & materiais)
+            return do_item
+
+        def casa_pelo_material(item):
+            return bool(materiais_do_item(item) & materiais)
 
         numeros = set(re.findall(r"\d+", detalhe or ""))
 
@@ -831,7 +879,15 @@ class CRM:
             # "25" e do primeiro.
             exato = bool(numeros) and linhas == numeros
             parcial = bool(numeros) and bool(linhas & numeros)
-            return (not exato, not parcial, not casa_pelo_material(item))
+            # Entre os que casam pelo material, ganha o que casa MELHOR: mais
+            # material em comum e menos material que a proposta nao tem. O
+            # Geraldo pediu duas opcoes -- uma so de aluminio e outra de
+            # PVC + aluminio -- e a proposta de PVC marcava a de aluminio, so
+            # porque era a primeira cadastrada.
+            do_item = materiais_do_item(item)
+            comuns = len(do_item & materiais)
+            sobra = len(do_item - materiais)
+            return (not exato, not parcial, not comuns, -comuns, sobra)
 
         # Entre iguais vale a ordem do cadastro (sorted e estavel).
         for item in sorted(pendentes, key=prioridade)[:max(0, faltam_marcar)]:

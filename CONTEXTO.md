@@ -1479,6 +1479,42 @@ Pra trocar a pasta de propósito: `EGEMAP-Monitor.exe --pasta`, ou o
 `TROCAR_PASTA.bat`. Vigia a pasta escolhida **e tudo que estiver dentro**, em
 qualquer nível — pasta de cliente nova já entra vigiada sozinha.
 
+### Duas OPÇÕES pro mesmo cliente: o COMPLETO apagava a outra
+
+04/11, cliente Geraldo. Ele pediu **duas opções alternativas** pros mesmos 24
+vãos: Orçamento 1 em alumínio (R$ 180.852,56) e Orçamento 2 em PVC
+(R$ 208.280,02, montado pelo COMPLETO porque a parte que o PVC não cobre sai
+do W-Vetro). As duas propostas foram montadas certinho e **as duas estão no
+Drive**. No CRM ficou **uma só**.
+
+A culpa é da terceira regra do `substitui()` em `enviar_orcamento`:
+
+    do_linha = materiais_do_nome(linha.get("file_name") or nome)
+    return bool(do_linha) and do_linha < materiais
+
+Ela existe para o COMPLETO de verdade: você salva o PVC, salva o alumínio, o
+monitor monta os dois individuais e depois o COMPLETO — que deve **tomar o
+lugar** dos dois. Só que ela olhava **só o conjunto de materiais**.
+`{aluminio}` é subconjunto de `{pvc, aluminio}`, então a proposta de PVC
+apagou a de alumínio (e apagou o PDF dela do storage junto).
+
+Dava pra ver pelos números que uma não continha a outra: a linha apagada
+tinha **R$ 142.588,06** de alumínio e a que entrou no lugar tem
+**R$ 27.129,77**.
+
+Agora o COMPLETO só toma o lugar de uma linha quando **realmente a contém**,
+material por material (`cabe_dentro`): cada valor da linha antiga tem que ser
+menor ou igual ao da composição nova. Sem composição dos dois lados, **não
+substitui** — deixar duas linhas pra alguém apagar custa um clique; apagar
+uma proposta que o cliente ainda vai escolher custa o orçamento.
+
+**Junto, o "marcar feito" escolhia errado.** Com dois orçamentos pendentes e
+uma proposta só, a prioridade era `(linha exata, linha parcial, casa pelo
+material)` — os dois casavam pelo material, empatava, e ganhava o primeiro
+cadastrado. A proposta de PVC marcava a opção de alumínio. Agora, no empate,
+ganha quem casa **melhor**: mais material em comum e menos material que a
+proposta não tem.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
