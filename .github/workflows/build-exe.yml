@@ -36,9 +36,15 @@ jobs:
         run: |
           pip install "pymupdf==1.28.2" watchdog pyinstaller
 
+      # Grava o numero da versao pra ele aparecer no cabecalho do monitor.
+      - name: Carimbar a versao
+        run: |
+          "VERSAO = '${{ github.run_number }}'" | Out-File -Encoding utf8 versao.py
+          Get-Content versao.py
+
       - name: Gerar EXE
         run: |
-          pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." --hidden-import crm --hidden-import drive --hidden-import limpar_drive --hidden-import pedidos monitorar.py
+          pyinstaller --onefile --name "EGEMAP-Monitor" --add-data "DMSans-Regular.ttf;." --add-data "NewsCycle-Bold.ttf;." --hidden-import versao --hidden-import crm --hidden-import drive --hidden-import limpar_drive --hidden-import pedidos monitorar.py
 
       # Confere que o .exe ABRE antes de publicar. Sem isto, uma versao que
       # nem inicia vira release e chega no Natanael.

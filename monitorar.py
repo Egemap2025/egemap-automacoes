@@ -51,6 +51,15 @@ except Exception:
 
 # ── Config salva em arquivo texto simples ─────────────────────────────────────
 
+# Numero da versao, gravado pela compilacao em versao.py. Aparece no
+# cabecalho porque passei um dia inteiro sem saber qual copia do .exe o
+# Natanael estava rodando -- ele tinha tres na maquina, e cada print podia
+# ser de uma versao diferente. Sem isso nao da pra confiar em nenhum log.
+try:
+    from versao import VERSAO
+except Exception:
+    VERSAO = "sem numero (rodando pelo Python)"
+
 CONFIG_FILE = Path.home() / ".egemap_monitor_config.txt"
 
 def load_config():
@@ -1487,6 +1496,7 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
             # quando o arquivo for tocado de novo.
             _JA_ENVIADO.pop(chave, None)
 
+    log(f"[{client}] CRM: mandando {arquivo} — {format_brl(valor)}...")
     threading.Thread(target=_mandar, daemon=True).start()
 
 
@@ -2280,6 +2290,33 @@ def validar_capa(capa_pdf):
     return None
 
 
+def _outras_copias_no_disco():
+    """Outros EGEMAP-Monitor*.exe nas pastas de sempre.
+
+    Baixar a versao nova sem apagar a velha deixa "EGEMAP-Monitor (1).exe" ao
+    lado do antigo, e dai e sorte qual deles voce abre. Em 04/11/2026 isso
+    custou horas: o print mostrava uma versao e eu procurava o problema em
+    outra.
+    """
+    eu = _caminho_do_programa()
+    if eu.suffix.lower() != ".exe":
+        return []
+    achadas = []
+    try:
+        casa = Path.home()
+        pastas = {eu.parent, casa / "Desktop", casa / "OneDrive" / "Desktop",
+                  casa / "Downloads"}
+        for pasta in pastas:
+            if not pasta.is_dir():
+                continue
+            for arquivo in pasta.glob("EGEMAP-Monitor*.exe"):
+                if _norm(arquivo) != _norm(eu):
+                    achadas.append(str(arquivo))
+    except Exception:
+        return []
+    return sorted(set(achadas))
+
+
 def _caminho_do_programa():
     """O arquivo do programa que esta rodando agora."""
     return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
@@ -2591,6 +2628,7 @@ def lancar_na_hora(pdf_path):
     """Manda uma proposta pro CRM agora, imprimindo cada passo. 0 se deu certo."""
     pdf = Path(pdf_path)
     print()
+    print(f"Versao  : {VERSAO}")
     print(f"Arquivo : {pdf}")
     if not pdf.is_file():
         print("ERRO: arquivo nao encontrado.")
@@ -2667,6 +2705,7 @@ def main():
     # fitz" procurando um arquivo de modelo que o empacotador nao incluiu.
     # Com isso, uma versao que nao abre nao chega mais no Natanael.
     if "--teste" in sys.argv[1:]:
+        print(f"Versao : {VERSAO}")
         print(f"PyMuPDF: {getattr(fitz, '__doc__', '?')}")
         print(f"fitz   : {fitz.__name__}")
         faltando = [nome for nome, mod in
@@ -2929,7 +2968,11 @@ def main():
 
     print()
     print("=" * 55)
+    print(f"  Versao: {VERSAO}")
     print(f"  Programa: {_caminho_do_programa()}")
+    for outra in _outras_copias_no_disco():
+        print(f"  ATENCAO: tem outra copia do programa em {outra}")
+        print(f"           apague ela, senao voce abre a versao errada sem ver.")
     print(f"  Monitorando: {pasta_raiz}")
     for _extra in vigiadas:
         if _norm(_extra) != _norm(pasta_raiz):
