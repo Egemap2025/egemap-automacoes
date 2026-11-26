@@ -1690,3 +1690,50 @@ ignoradas.
 - Depois de mexer, o `.exe` novo sai sozinho pelo Actions. Mande o link
   `releases/latest/download/EGEMAP-Monitor.exe` — não peça para procurar
   artefato na aba Actions, é confuso.
+
+---
+
+## 26/11/2026 — O pedido que não ia pro CRM "depois de pronto"
+
+O Natanael: *"os pedido, não esta sendo enviado para o CRM de pois de pronto"*.
+
+Os pedidos **não** estavam globalmente quebrados — dois foram pro CRM no
+mesmo dia pelo monitor. Era um caso específico, e calado. Três furos:
+
+**1. O furo de verdade: salvar a versão pronta em cima do mesmo nome.**
+O `PedidoHandler` guardava, ao abrir, só os **nomes** dos PDFs que já
+estavam na pasta (`_ja_estavam`), pra não despejar a pasta inteira no CRM
+quando o OneDrive sincroniza. Mas essa lista era um bloqueio **permanente**
+por nome. Então:
+
+- ele salva um rascunho do pedido (ou reinicia o monitor / o PC);
+- o arquivo passa a estar na lista;
+- ele termina e salva a **versão pronta em cima do mesmo nome**;
+- o monitor ignora, **pra sempre, sem uma linha no log**.
+
+Agora a lista guarda **tamanho + data**, não o nome. "O OneDrive só passou a
+mão" continua de fora; "salvei de novo" entra, e diz no log:
+`Pedido - X.pdf mudou depois que o monitor abriu — vou mandar.`
+
+**Lição:** uma lista de "ignorar o que já estava aí" tem que ser por
+**conteúdo**, nunca por nome. Por nome ela vira um bloqueio eterno de um
+arquivo que o usuário vai editar justamente porque ele ainda não estava
+pronto.
+
+**2. `crm.lancar_pedido` tinha `if not configurado(): return False` FORA do
+`try`** — o mesmo erro que eu já tinha corrigido no `lancar_proposta` e
+deixei passar no gêmeo. CRM desconectado = pedido sumia sem log.
+
+**3. `_lancar_pedido_no_crm` largava a thread sem embrulho.** A regra do
+dia 3 (*todo trabalho em segundo plano precisa de um embrulho que logue a
+exceção*) valia pra proposta e não tinha sido aplicada no pedido.
+
+**Lição que vale pra tudo:** quando eu conserto um furo, tenho que procurar
+o **gêmeo** dele no caminho paralelo no mesmo commit. Proposta e pedido são
+dois caminhos espelhados; consertar um e deixar o outro é garantir que o bug
+volta pelo outro lado.
+
+**De bônus:** arrastar um PDF em cima do `.exe` (ou do `LANCAR_NO_CRM.bat`)
+agora reconhece **pedido** também. Antes tratava tudo como orçamento e o
+pedido morria em "não achei o valor na Página Final" — não havia como forçar
+um pedido na mão e ver o motivo.

@@ -1222,10 +1222,14 @@ def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None,
     valor          -- valor do pedido (float)
     arquivo_antigo -- nome anterior, quando o pedido acabou de ser renomeado
     """
-    if not configurado():
-        return False
-
     try:
+        # Dentro do try, como no lancar_proposta: antes isto ficava de fora e
+        # o pedido podia terminar sem UMA linha de log.
+        if not configurado():
+            log(f"[{cliente}] CRM: nao esta conectado — nao lancei o pedido. "
+                f"Rode o CONECTAR_CRM.bat.")
+            return False
+
         crm = CRM().entrar()
         negocio = crm.encontrar_contrato(cliente)
 

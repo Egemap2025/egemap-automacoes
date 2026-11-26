@@ -1,6 +1,7 @@
 @echo off
-:: Manda UMA proposta pro CRM na hora, mostrando cada passo.
-:: Arraste o PDF da proposta pronta para cima deste arquivo.
+:: Manda UM arquivo pro CRM na hora, mostrando cada passo.
+:: Serve pra orcamento E pra pedido -- ele ve sozinho qual e.
+:: Arraste o PDF pronto para cima deste arquivo.
 cd /d "%~dp0"
 
 IF EXIST "EGEMAP-Monitor.exe" (

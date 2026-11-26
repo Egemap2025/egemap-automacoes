@@ -2053,7 +2053,11 @@ def _lancar_pedido_no_crm(pdf_path, arquivo_antigo=None):
     Roda em segundo plano, como o resto: se a internet cair ou o CRM demorar,
     o monitor continua montando as propostas normalmente.
     """
-    if pedidos_egemap is None or crm_egemap is None or not crm_egemap.configurado():
+    if pedidos_egemap is None or crm_egemap is None:
+        return
+    if not crm_egemap.configurado():
+        log(f"[pedido] CRM nao conectado — {Path(pdf_path).name} nao foi lancado. "
+            f"Rode o CONECTAR_CRM.bat.")
         return
 
     # O OneDrive mexe nos arquivos ao sincronizar e isso dispara evento sem
@@ -2068,12 +2072,27 @@ def _lancar_pedido_no_crm(pdf_path, arquivo_antigo=None):
         return
     _JA_ENVIADO_PEDIDO[chave] = assinatura
 
-    threading.Thread(
-        target=pedidos_egemap.enviar,
-        args=(pdf_path,),
-        kwargs={"log": log, "arquivo_antigo": arquivo_antigo},
-        daemon=True,
-    ).start()
+    arquivo = Path(pdf_path).name
+
+    def _mandar():
+        """Manda o pedido e GARANTE uma linha no log, dando no que der.
+
+        Mesmo embrulho do caminho da proposta: excecao dentro de thread em
+        segundo plano nao aparece em lugar nenhum, e o pedido sumia calado.
+        """
+        try:
+            ok = pedidos_egemap.enviar(pdf_path, log=log,
+                                       arquivo_antigo=arquivo_antigo)
+        except BaseException as e:
+            log(f"[pedido] ERRO ao lancar {arquivo} — {type(e).__name__}: {e}")
+            log(traceback.format_exc())
+            _JA_ENVIADO_PEDIDO.pop(chave, None)   # deixa tentar de novo
+            return
+        if not ok:
+            _JA_ENVIADO_PEDIDO.pop(chave, None)
+
+    log(f"[pedido] mandando {arquivo} pro CRM...")
+    threading.Thread(target=_mandar, daemon=True).start()
 
 
 class PedidoHandler(FileSystemEventHandler):
@@ -2095,15 +2114,44 @@ class PedidoHandler(FileSystemEventHandler):
         # comodidade -- o OneDrive toca nos arquivos ao sincronizar e dispara
         # evento sem nada ter mudado, e sem essa lista uma sincronizacao
         # despejaria a pasta inteira no CRM de uma vez.
-        self._ja_estavam = set()
+        #
+        # Guarda o TAMANHO e a DATA de cada um, nao so o nome. Antes era so o
+        # nome, e isso criava um buraco calado: se o pedido ja estava na pasta
+        # (um rascunho salvo antes, ou o monitor reaberto no meio), salvar a
+        # versao pronta EM CIMA DO MESMO NOME era ignorado pra sempre, sem uma
+        # linha no log. Com tamanho e data, "o mesmo arquivo de antes" continua
+        # de fora e "salvei de novo" entra.
+        self._ja_estavam = {}
         for alvo in self.pastas:
             try:
-                self._ja_estavam |= {_norm(x) for x in Path(alvo).rglob("*.pdf")}
+                for x in Path(alvo).rglob("*.pdf"):
+                    try:
+                        st = x.stat()
+                    except OSError:
+                        continue
+                    self._ja_estavam[_norm(x)] = (st.st_mtime_ns, st.st_size)
             except Exception:
                 pass
 
     def quantos_ja_estavam(self):
         return len(self._ja_estavam)
+
+    def _e_o_mesmo_de_antes(self, p):
+        """True = arquivo intocado desde que o monitor abriu (nao reenvia)."""
+        antes = self._ja_estavam.get(_norm(p))
+        if antes is None:
+            return False
+        try:
+            st = p.stat()
+        except OSError:
+            return True       # nao consigo ver: melhor nao mexer
+        if (st.st_mtime_ns, st.st_size) == antes:
+            return True       # o OneDrive so passou a mao: nada mudou
+        if st.st_mtime_ns < antes[0]:
+            return True       # ficou mais antigo (restauracao): nao e salvar
+        self._ja_estavam.pop(_norm(p), None)
+        log(f"[pedido] {p.name} mudou depois que o monitor abriu — vou mandar.")
+        return False
 
     def _fila(self, path, arquivo_antigo=None):
         chave = _norm(path)
@@ -2117,8 +2165,8 @@ class PedidoHandler(FileSystemEventHandler):
         p = Path(path)
         if p.suffix.lower() != ".pdf" or p.name.startswith("~$"):
             return
-        if _norm(p) in self._ja_estavam:
-            return  # ja estava na pasta antes do monitor abrir: nao e pedido novo
+        if self._e_o_mesmo_de_antes(p):
+            return  # intocado desde que o monitor abriu: nao e pedido novo
         if self.pastas and not any(_dentro_de(p, x) for x in self.pastas):
             return  # tirar o pedido da pasta nao e o mesmo que salvar um
         self._fila(p, arquivo_antigo)
@@ -2624,16 +2672,65 @@ def oferecer_pasta_pedidos(capa_pdf, pasta_raiz, atual):
     return pasta
 
 
-def lancar_na_hora(pdf_path):
-    """Manda uma proposta pro CRM agora, imprimindo cada passo. 0 se deu certo."""
+def lancar_pedido_na_hora(pdf_path):
+    """Manda um PEDIDO pro CRM agora, imprimindo cada passo. 0 se deu certo.
+
+    E o mesmo caminho que o monitor usa sozinho, so que na frente dos olhos:
+    quando um pedido nao chega no CRM, arrastar ele aqui mostra o motivo em
+    vez de deixar sumir calado.
+    """
     pdf = Path(pdf_path)
     print()
     print(f"Versao  : {VERSAO}")
     print(f"Arquivo : {pdf}")
+    print("Tipo    : PEDIDO")
+
+    if pedidos_egemap is None or crm_egemap is None:
+        print("ERRO: integracao com o CRM indisponivel nesta versao.")
+        input("\nPressione ENTER para fechar.")
+        return 1
+    if not crm_egemap.configurado():
+        print("ERRO: o CRM nao esta conectado. Rode o CONECTAR_CRM.bat.")
+        input("\nPressione ENTER para fechar.")
+        return 1
+    print("CRM     : conectado")
+
+    print()
+    print("Falando com o CRM agora...")
+    print("-" * 55)
+    try:
+        ok = pedidos_egemap.enviar(str(pdf), log=print)
+    except BaseException as e:
+        print(f"ERRO: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        input("\nPressione ENTER para fechar.")
+        return 1
+    print("-" * 55)
+    print("DEU CERTO." if ok else "NAO DEU CERTO — veja as linhas acima.")
+    input("\nPressione ENTER para fechar.")
+    return 0 if ok else 1
+
+
+def lancar_na_hora(pdf_path):
+    """Manda uma proposta pro CRM agora, imprimindo cada passo. 0 se deu certo."""
+    pdf = Path(pdf_path)
     if not pdf.is_file():
+        print()
+        print(f"Versao  : {VERSAO}")
+        print(f"Arquivo : {pdf}")
         print("ERRO: arquivo nao encontrado.")
         input("\nPressione ENTER para fechar.")
         return 1
+
+    # Pedido e orcamento sao caminhos diferentes no CRM. Antes, arrastar um
+    # pedido aqui fazia ele ser tratado como orcamento e morrer em "nao achei
+    # o valor na Pagina Final" -- nao havia como forcar um pedido na mao.
+    if pedidos_egemap is not None and pedidos_egemap.e_pedido(str(pdf)):
+        return lancar_pedido_na_hora(str(pdf))
+
+    print()
+    print(f"Versao  : {VERSAO}")
+    print(f"Arquivo : {pdf}")
 
     capa_pdf, _pasta, _ped = load_config()
     if not capa_pdf or validar_capa(capa_pdf) is not None:
