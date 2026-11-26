@@ -3114,7 +3114,14 @@ def main():
     if handler_pedidos is not None:
         quantos = handler_pedidos.quantos_ja_estavam()
         log(f"Vigiando tambem a pasta dos pedidos. Os {quantos} pedido(s) que ja "
-            f"estavam la ficam como estao — so os novos vao pro CRM.")
+            f"estavam la ficam como estao enquanto voce nao mexer neles — "
+            f"salvar um de novo manda ele pro CRM.")
+    elif pedidos_egemap is not None:
+        # Sem isso o programa abria quieto, sem pasta de pedidos, e NENHUM
+        # pedido ia pro CRM sem dizer o porque.
+        log("ATENCAO: nao estou vigiando pasta de pedidos — nenhum pedido vai "
+            "pro CRM. Rode o TROCAR_PASTA.bat, ou arraste o PDF do pedido "
+            "aqui em cima pra mandar na mao.")
 
     try:
         while True:
