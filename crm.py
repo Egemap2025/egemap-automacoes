@@ -448,7 +448,7 @@ class CRM:
         """
         return self._tabela(
             "deals",
-            "select=id,title,value,orcamento_detalhes,stage_id,contact_id,"
+            "select=id,title,value,obra_nome,orcamento_detalhes,stage_id,contact_id,"
             "pipeline_stages(name),contacts(first_name,last_name)"
             f"&org_id=eq.{self.org_id}&status=eq.open",
         )
@@ -458,10 +458,18 @@ class CRM:
 
     @staticmethod
     def _nomes_do_negocio(negocio):
-        """[(nome, e_o_titulo?)] do card: o titulo e o nome do contato.
+        """[(nome, e_o_titulo?)] do card: o titulo, o contato e o nome da obra.
 
-        Saber qual dos dois casou importa: o titulo e o nome do negocio, e o
+        Saber qual deles casou importa: o titulo e o nome do negocio, e o
         contato as vezes esta gravado so com o primeiro nome.
+
+        O NOME DA OBRA entra porque nem sempre o card tem o nome de quem a
+        obra e. Quando quem fecha com a EGEMAP e o construtor ou o arquiteto,
+        o card fica no nome dele e o dono da obra vai pro campo "Obra" --
+        mas o orcamento e feito no nome do dono. Dois cards do Jean Charles
+        Matos em 26/11/2026 so se distinguem por ai: um e a obra do "Ademir e
+        Taise" e o outro a do "Emanoel". Sem o nome da obra, a pasta
+        "Ademir e Taise" nao achava card nenhum.
         """
         nomes = [(negocio.get("title") or "", True)]
         contato = negocio.get("contacts") or {}
@@ -472,6 +480,9 @@ class CRM:
         )
         if nome_contato:
             nomes.append((nome_contato, False))
+        obra = (negocio.get("obra_nome") or "").strip()
+        if obra:
+            nomes.append((obra, False))
         return [(n, e_titulo) for n, e_titulo in nomes if n]
 
     @classmethod
@@ -921,7 +932,7 @@ class CRM:
         """
         return self._tabela(
             "deals",
-            "select=id,title,value,status,orcamento_detalhes,stage_id,contact_id,"
+            "select=id,title,value,status,obra_nome,orcamento_detalhes,stage_id,contact_id,"
             "pipeline_stages(name),contacts(first_name,last_name)"
             f"&org_id=eq.{self.org_id}&status=in.({','.join(STATUS_QUE_VALEM)})",
         )

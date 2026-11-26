@@ -1586,6 +1586,46 @@ logo depois.
 Agora manda primeiro e só apaga a anterior **depois de o envio dar certo**.
 Falhando o envio, o que já estava no Drive fica — e o log diz isso.
 
+### O card também é procurado pelo nome da OBRA
+
+26/11. Quando quem fecha com a EGEMAP é o construtor ou o arquiteto, o card
+fica **no nome dele** e o dono da obra vai para o campo **Obra** do CRM
+(`deals.obra_nome`). Só que o orçamento é feito no nome do dono da obra — então
+a pasta se chama "Ademir e Taise" e o card se chama "Jean Charles Matos". O
+monitor não achava nada.
+
+Pior: havia **dois** cards com o título "Jean Charles Matos", e o que os
+distingue é justamente a obra (um é "Ademir e Taise", o outro "Emanoel").
+Procurar pelo título nunca resolveria.
+
+Agora `_nomes_do_negocio` devolve **três** nomes do card: título, contato e
+nome da obra. O resto da busca não mudou — as travas continuam valendo, e é
+por isso que isto é seguro.
+
+**Conferido nos 631 cards reais**, cada nome de pasta plausível (810 no
+total), antes e depois: 6 passaram a achar (exatamente os 6 nomes de obra, cada
+um no card certo), **nenhum deixou de achar, nenhum mudou de card, nenhum foi
+pro card errado**.
+
+E nas variações que ele escreveria de verdade:
+
+    "Ademir e Taise" / "Ademir e Taíse" / "ADEMIR E TAISE" -> card certo
+    "Emanoel"                 -> card certo
+    "Sthela Teixeira"         -> card certo (obra da Antonelli Construções)
+    "Miguel e Meroli"         -> card certo
+    "Jean Charles Matos"      -> RECUSA (dois cards com esse título)
+    "Antonelli Construcoes"   -> RECUSA (é título de um card e obra de outro)
+    "Ademir" sozinho          -> RECUSA (existe "Ademir dos Santos")
+    "Daniela" sozinha         -> RECUSA (existe outra Daniela)
+    "Ademir Souza"            -> não acha (não cai no Jean Charles)
+
+Ou seja: a regra de que **um primeiro nome sozinho não identifica ninguém**
+continua valendo para o nome da obra também. Vale escrever a obra como está
+no card.
+
+Vale para a proposta e para o pedido: os dois passam pela mesma busca
+(`negocios_que_valem`), e o `obra_nome` entrou nos dois SELECTs.
+
 ### Nunca travar esperando resposta
 
 O monitor abre junto com o Windows. Toda pergunta na abertura (conectar CRM,
