@@ -1394,11 +1394,18 @@ def _lancar_no_crm(pdf_path, capa_pdf, origem_antiga=None):
     nome antigo e calculado aqui, com os mesmos materiais, senao "MAD ALM"
     viraria "Mad Alm" na busca e "Madeira + Aluminio" na criacao.
     """
-    if crm_egemap is None or not crm_egemap.configurado():
+    if crm_egemap is None:
         return
 
     arquivo = Path(pdf_path).name
     client = suggest_client_name(Path(pdf_path).parent)
+
+    # Ficava um "return" mudo aqui: CRM desconectado derrubava a proposta sem
+    # UMA linha. O lado do pedido avisa desde hoje; este e o gemeo que faltava.
+    if not crm_egemap.configurado():
+        log(f"[{client}] CRM: nao esta conectado — {arquivo} nao foi lancado. "
+            f"Rode o CONECTAR_CRM.bat.")
+        return
 
     # O OneDrive mexe nos arquivos ao sincronizar e isso dispara evento sem
     # nada ter mudado. Se e o mesmo arquivo de antes, nao reenvia.
@@ -1666,7 +1673,12 @@ def _dentro_de(path, pasta):
     if not pasta:
         return False
     try:
-        return _norm(path).startswith(_norm(pasta) + os.sep)
+        raiz = _norm(pasta)
+        # "D:\" ja termina em barra; somar outra gerava "D:\\" e NADA casava,
+        # ou seja: pasta na raiz de um disco descartava todo arquivo, calado.
+        if not raiz.endswith(os.sep):
+            raiz += os.sep
+        return _norm(path).startswith(raiz)
     except Exception:
         return False
 
@@ -2046,6 +2058,51 @@ PEDIDO_WAIT_SECONDS = 12
 # Pedido ja mandado ao CRM: caminho -> (mtime, tamanho)
 _JA_ENVIADO_PEDIDO = {}
 
+# Lista em disco dos pedidos que entraram na fila e AINDA NAO tiveram
+# confirmacao de envio.
+#
+# Existe porque a fila vivia so na memoria: se o programa fosse fechado nos 12
+# segundos de espera -- ou se o Windows reiniciasse, ou a janela fosse fechada
+# no X, que nem chega a virar KeyboardInterrupt -- o pedido era perdido. E na
+# abertura seguinte ele estava intocado na pasta, entrava na lista de "ja
+# estavam" e ficava bloqueado PRA SEMPRE, sem uma linha de log. Com a lista em
+# disco, a abertura seguinte repesca o que ficou e diz o que esta fazendo.
+FILA_PEDIDOS = Path.home() / ".egemap_pedidos_na_fila.txt"
+_FILA_TRAVA = threading.Lock()
+_ENVIOS_VIVOS = []      # threads de envio, pra esperar antes de fechar
+
+
+def _fila_ler():
+    try:
+        return [l.strip() for l in
+                FILA_PEDIDOS.read_text(encoding="utf-8").splitlines() if l.strip()]
+    except OSError:
+        return []
+
+
+def _fila_por(caminho):
+    """Anota que este pedido entrou na fila."""
+    with _FILA_TRAVA:
+        atual = _fila_ler()
+        if not any(_norm(c) == _norm(caminho) for c in atual):
+            try:
+                FILA_PEDIDOS.write_text("\n".join(atual + [str(caminho)]),
+                                        encoding="utf-8")
+            except OSError:
+                pass
+
+
+def _fila_tirar(caminho):
+    """Risca o pedido da lista -- so depois do CRM confirmar."""
+    with _FILA_TRAVA:
+        atual = _fila_ler()
+        novo = [c for c in atual if _norm(c) != _norm(caminho)]
+        if len(novo) != len(atual):
+            try:
+                FILA_PEDIDOS.write_text("\n".join(novo), encoding="utf-8")
+            except OSError:
+                pass
+
 
 def _lancar_pedido_no_crm(pdf_path, arquivo_antigo=None):
     """Manda o PDF do pedido para o card do cliente, sem travar o monitor.
@@ -2088,11 +2145,15 @@ def _lancar_pedido_no_crm(pdf_path, arquivo_antigo=None):
             log(traceback.format_exc())
             _JA_ENVIADO_PEDIDO.pop(chave, None)   # deixa tentar de novo
             return
-        if not ok:
+        if ok:
+            _fila_tirar(pdf_path)   # so sai da lista com o CRM confirmando
+        else:
             _JA_ENVIADO_PEDIDO.pop(chave, None)
 
     log(f"[pedido] mandando {arquivo} pro CRM...")
-    threading.Thread(target=_mandar, daemon=True).start()
+    t = threading.Thread(target=_mandar, daemon=True)
+    _ENVIOS_VIVOS.append(t)
+    t.start()
 
 
 class PedidoHandler(FileSystemEventHandler):
@@ -2133,6 +2194,37 @@ class PedidoHandler(FileSystemEventHandler):
             except Exception:
                 pass
 
+        # Repesca os pedidos que ficaram pendurados quando o programa fechou.
+        self._repescar()
+
+    def _repescar(self):
+        """Pedidos que entraram na fila e nunca tiveram confirmacao do CRM."""
+        for caminho in _fila_ler():
+            p = Path(caminho)
+            if not p.is_file():
+                _fila_tirar(caminho)
+                continue
+            if self.pastas and not any(_dentro_de(p, x) for x in self.pastas):
+                continue
+            self._ja_estavam.pop(_norm(p), None)   # senao ele se bloqueia
+            self._fila(p)
+            log(f"[pedido] {p.name} ficou da ultima vez sem confirmacao do CRM "
+                f"— vou mandar de novo.")
+
+    def pendentes(self):
+        """Nomes do que esta na fila agora, pra avisar antes de fechar."""
+        return [Path(c).name for _, c, __ in self._pending.values()]
+
+    def drenar(self):
+        """Manda agora o que esta na fila, sem esperar os 12 segundos."""
+        for chave in list(self._pending):
+            _, pdf_path, arquivo_antigo = self._pending.pop(chave)
+            try:
+                if Path(pdf_path).exists():
+                    _lancar_pedido_no_crm(pdf_path, arquivo_antigo)
+            except Exception as e:
+                log(f"ERRO ao enviar o pedido {Path(pdf_path).name}: {e}")
+
     def quantos_ja_estavam(self):
         return len(self._ja_estavam)
 
@@ -2143,12 +2235,19 @@ class PedidoHandler(FileSystemEventHandler):
             return False
         try:
             st = p.stat()
-        except OSError:
-            return True       # nao consigo ver: melhor nao mexer
+        except OSError as e:
+            log(f"[pedido] {p.name}: nao consegui ler o arquivo ({e.strerror or e}) "
+                f"— nao mandei. Salve ele de novo daqui a pouco.")
+            return True
         if (st.st_mtime_ns, st.st_size) == antes:
             return True       # o OneDrive so passou a mao: nada mudou
         if st.st_mtime_ns < antes[0]:
-            return True       # ficou mais antigo (restauracao): nao e salvar
+            # Antes isto descartava calado. Acontece quando o OneDrive devolve
+            # uma versao antiga; renomear continua sendo a saida.
+            log(f"[pedido] {p.name} ficou com data MAIS ANTIGA do que estava "
+                f"— nao mandei, porque isso costuma ser o OneDrive devolvendo "
+                f"versao velha. Se e o pedido certo, renomeie ele.")
+            return True
         self._ja_estavam.pop(_norm(p), None)
         log(f"[pedido] {p.name} mudou depois que o monitor abriu — vou mandar.")
         return False
@@ -2160,6 +2259,7 @@ class PedidoHandler(FileSystemEventHandler):
         if anterior and anterior[2] and not arquivo_antigo:
             arquivo_antigo = anterior[2]
         self._pending[chave] = (time.time(), str(path), arquivo_antigo)
+        _fila_por(path)
 
     def _queue(self, path, arquivo_antigo=None, renomeou=False):
         p = Path(path)
@@ -2205,6 +2305,9 @@ class PedidoHandler(FileSystemEventHandler):
             try:
                 if Path(pdf_path).exists():
                     _lancar_pedido_no_crm(pdf_path, arquivo_antigo)
+                else:
+                    log(f"[pedido] {Path(pdf_path).name} saiu da pasta antes de "
+                        f"eu mandar — nao foi pro CRM.")
             except Exception as e:
                 log(f"ERRO ao enviar o pedido {Path(pdf_path).name} ao CRM: {e}")
 
@@ -2712,6 +2815,8 @@ def lancar_pedido_na_hora(pdf_path):
         input("\nPressione ENTER para fechar.")
         return 1
     print("-" * 55)
+    if ok:
+        _fila_tirar(str(pdf))   # mandado na mao: sai da lista de pendentes
     print("DEU CERTO." if ok else "NAO DEU CERTO — veja as linhas acima.")
     input("\nPressione ENTER para fechar.")
     return 0 if ok else 1
@@ -3126,7 +3231,7 @@ def main():
         # Sem isso o programa abria quieto, sem pasta de pedidos, e NENHUM
         # pedido ia pro CRM sem dizer o porque.
         log("ATENCAO: nao estou vigiando pasta de pedidos — nenhum pedido vai "
-            "pro CRM. Rode o TROCAR_PASTA.bat, ou arraste o PDF do pedido "
+            "pro CRM. Rode o CONFIGURAR_PEDIDOS.bat, ou arraste o PDF do pedido "
             "aqui em cima pra mandar na mao.")
 
     try:
@@ -3138,6 +3243,25 @@ def main():
     except KeyboardInterrupt:
         log("Parando monitor...")
         observer.stop()
+        # Antes o que estava na fila era simplesmente perdido aqui, e o pedido
+        # ficava bloqueado pra sempre na abertura seguinte. Agora manda na hora
+        # e espera o CRM responder.
+        if handler_pedidos is not None:
+            na_fila = handler_pedidos.pendentes()
+            if na_fila:
+                log(f"Antes de fechar, mandando {len(na_fila)} pedido(s) que "
+                    f"estavam na fila: {', '.join(na_fila)}")
+                handler_pedidos.drenar()
+            vivos = [t for t in _ENVIOS_VIVOS if t.is_alive()]
+            if vivos:
+                log(f"Esperando {len(vivos)} envio(s) terminar...")
+                limite = time.time() + 40
+                for t in vivos:
+                    t.join(max(0.0, limite - time.time()))
+                presos = [t for t in vivos if t.is_alive()]
+                if presos:
+                    log(f"ATENCAO: {len(presos)} envio(s) nao terminaram. "
+                        f"Eles vao ser tentados de novo na proxima abertura.")
 
     observer.join()
     print("\nMonitor encerrado.")

@@ -518,8 +518,15 @@ class CRM:
         notas.sort(key=lambda x: x[0], reverse=True)
         return notas
 
-    def _escolher(self, notas, candidatos=()):
-        """Retorna (negocio, duvida). negocio None se nao deu pra decidir."""
+    def _escolher(self, notas, candidatos=(), preferir_etapa=""):
+        """Retorna (negocio, duvida). negocio None se nao deu pra decidir.
+
+        preferir_etapa -- no empate entre homonimos, o card desta etapa ganha.
+        O pedido passa "contrato": sem isso ele herdava a regra da PROPOSTA
+        (ganha o card ABERTO), escolhia o card de outra etapa e era recusado
+        culpando o card errado -- mandando o Natanael mexer no card que nao
+        era o dele.
+        """
         if not notas:
             return None, None
         melhor, comuns, e_titulo, negocio = notas[0]
@@ -576,9 +583,29 @@ class CRM:
             # Exige nota IGUAL a do primeiro, nao so parecida: "Cristiano
             # Paulo de Matos" e "Cristiano Mat" quase empatam e sao duas
             # pessoas -- ali o card aberto nao pode ganhar do exato.
-            abertos = [n for n in empatados
-                       if n[0] >= melhor - 1e-9 and n[3].get("status") == "open"]
-            if len(abertos) == 1:
+            exatos = [n for n in empatados if n[0] >= melhor - 1e-9]
+
+            if preferir_etapa:
+                # Primeiro o NOME, depois a etapa. "Elizandro Scheffer" empata
+                # com "Elizandro Sheffer Constante" (em Contrato) e com
+                # "Elizandro Scheffer" (titulo igualzinho, noutra etapa): se a
+                # etapa decidisse antes, o pedido iria pro card da outra
+                # grafia, que pode ser outra pessoa. Com UM titulo igualzinho,
+                # e ele -- e se estiver na etapa errada a recusa diz isso, que
+                # e a resposta certa.
+                pelo_titulo = [n for n in exatos if n[2]]
+                if len(pelo_titulo) == 1:
+                    return pelo_titulo[0][3], None
+
+                # Sem titulo igualzinho pra decidir, aí vale a etapa: o pedido
+                # quer o card de "Contrato", o contrario da proposta.
+                na_etapa = [n for n in exatos
+                            if _etapa_de(n[3]) == preferir_etapa]
+                if len(na_etapa) == 1:
+                    return na_etapa[0][3], None
+
+            abertos = [n for n in exatos if n[3].get("status") == "open"]
+            if len(abertos) == 1 and not preferir_etapa:
                 return abertos[0][3], None
             return None, (negocio, empatados[1][3])
 
@@ -955,12 +982,14 @@ class CRM:
         if negocios is None:
             negocios = self.negocios_que_valem()
         negocio, duvida = self._escolher(
-            self._ranquear(cliente, negocios), negocios)
+            self._ranquear(cliente, negocios), negocios,
+            preferir_etapa=ETAPA_PEDIDO_NORM)
 
         if duvida:
             raise ClienteNaoEncontrado(
                 f"'{cliente}' ficou parecido com dois cards "
-                f"('{duvida[0]['title']}' e '{duvida[1]['title']}'). "
+                f"('{duvida[0]['title']}' em '{_nome_etapa(duvida[0])}' e "
+                f"'{duvida[1]['title']}' em '{_nome_etapa(duvida[1])}'). "
                 f"Confira o nome do arquivo."
             )
         if not negocio:
@@ -999,7 +1028,7 @@ class CRM:
         return []
 
     def enviar_pedido(self, negocio, pdf_path, valor, arquivo_antigo=None,
-                      composicao=None):
+                      composicao=None, log=None):
         """Poe o pedido de fabrica no card, no lugar proprio dele.
 
         NUNCA tira os orcamentos: a proposta anexada quando o orcamento saiu
@@ -1029,12 +1058,17 @@ class CRM:
         nomes = {arquivo.strip().lower()}
         if arquivo_antigo:
             nomes.add(Path(arquivo_antigo).name.strip().lower())
-        anterior = next(
-            (b for b in pedidos
-             if (b.get("file_name") or "").strip().lower() in nomes),
-            None,
-        )
+        # Procura SO entre as linhas que ainda valem. Antes pegava qualquer
+        # linha com aquele nome de arquivo, historico incluido: reenviar o
+        # pedido com o nome antigo escrevia numa linha ja substituida, o card
+        # nao mudava nada e o log ainda dizia "Atualizado".
+        com_o_nome = [b for b in pedidos
+                      if (b.get("file_name") or "").strip().lower() in nomes]
+        anterior = next((b for b in com_o_nome if not b.get("substituido_em")), None)
         vigente = next((b for b in pedidos if not b.get("substituido_em")), None)
+        if anterior is None and com_o_nome and log:
+            log(f"Pedido: a linha de \"{arquivo}\" ja tinha sido substituida "
+                f"no card — vou criar uma linha nova com este valor.")
 
         caminho = self._subir_pdf(negocio_id, pdf_path)
         registro = {
@@ -1237,7 +1271,8 @@ def lancar_pedido(pdf_path, cliente, valor, log=print, arquivo_antigo=None,
             composicao = crm.composicao_herdada(negocio["id"], valor)
 
         nome, atualizou, intactas, substituiu = crm.enviar_pedido(
-            negocio, pdf_path, valor, arquivo_antigo, composicao=composicao)
+            negocio, pdf_path, valor, arquivo_antigo, composicao=composicao,
+            log=lambda m: log(f"[{cliente}] {m}"))
 
         acao = "Atualizado" if atualizou else "Lancado"
         junto = f", junto dos {intactas} orcamento(s) que ja estavam la" if intactas else ""

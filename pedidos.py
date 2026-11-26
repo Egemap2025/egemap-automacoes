@@ -242,9 +242,16 @@ def texto_do_pdf(pdf_path):
 #
 # "VALOR TOTAL (R$)" fica de fora de proposito: ele aparece em CADA item do
 # Archicentro e nao e total de nada.
-FECHAMENTO_PVC = ("TOTAL COM DESCONTO", "TOTAL GERAL", "TOTAL")
+# Rotulos que FECHAM a folha -- o valor que vale e o ultimo deles de baixo pra
+# cima. Os quatro primeiros do ALM eram os unicos reconhecidos; qualquer folha
+# que fechasse com "TOTAL A PAGAR" ou parecido caia no total BRUTO, e ainda
+# dizia "ja com desconto" no log. Era o valor errado indo pro CRM, calado.
+FECHAMENTO_EXTRA = ("TOTAL A PAGAR", "VALOR A PAGAR", "LIQUIDO A PAGAR",
+                    "TOTAL LIQUIDO", "VALOR LIQUIDO", "TOTAL FINAL",
+                    "VALOR FINAL", "TOTAL A VISTA")
+FECHAMENTO_PVC = ("TOTAL COM DESCONTO", "TOTAL GERAL", "TOTAL") + FECHAMENTO_EXTRA
 FECHAMENTO_ALM = ("VALOR TOTAL DO PEDIDO", "VALOR TOTAL DO ORCAMENTO",
-                  "TOTAL COM DESCONTO", "TOTAL GERAL")
+                  "TOTAL COM DESCONTO", "TOTAL GERAL") + FECHAMENTO_EXTRA
 
 ROTULOS_PVC = FECHAMENTO_PVC + ("TOTAL DAS ABERTURAS", "DESCONTO")
 ROTULOS_ALM = FECHAMENTO_ALM + ("TOTAL", "DESCONTO")
@@ -565,12 +572,30 @@ def totais_do_pedido(pdf_path, paginas=None, avisos=None):
         brutos = [a for a in do_sistema if a[3] == bruto]
         if brutos:
             totais[f"{sistema}_bruto"] = brutos[-1][4]
-        if sistema not in totais and brutos:
-            totais[sistema] = brutos[-1][4]
         descontos = [a for a in do_sistema if a[3] == "DESCONTO"]
+        desconto_daqui = descontos[-1][4] if descontos else 0.0
         if descontos:
             totais.setdefault("desconto", 0.0)
-            totais["desconto"] += descontos[-1][4]
+            totais["desconto"] += desconto_daqui
+
+        if sistema not in totais and brutos:
+            # Nenhum rotulo de fechamento reconhecido nesta folha. Antes isto
+            # mandava o total BRUTO pro CRM sem avisar -- era exatamente o
+            # "ta indo o primeiro valor" de que o Natanael reclamou.
+            cru = brutos[-1][4]
+            if desconto_daqui > 0:
+                totais[sistema] = round(cru - desconto_daqui, 2)
+                avisos.append(
+                    f"nao achei a linha que fecha o total de {sistema.upper()} "
+                    f"— peguei o total de {_reais(cru)} e abati o desconto de "
+                    f"{_reais(desconto_daqui)} que estava escrito. CONFIRA")
+            else:
+                totais[sistema] = cru
+                totais[f"{sistema}_so_bruto"] = True
+                avisos.append(
+                    f"nao achei a linha que fecha o total de {sistema.upper()} "
+                    f"— usei o total de {_reais(cru)}, que pode ser o valor "
+                    f"ANTES do desconto. CONFIRA")
 
         # Duas folhas do mesmo sistema no mesmo PDF fecham duas vezes, em
         # paginas diferentes. Fica com a ultima, mas avisa: somar as duas
@@ -606,7 +631,11 @@ def _fechamento(totais, resumo=None, bruto_alm=0.0):
 
     pvc = totais.get("pvc", 0.0)
     alm = totais.get("alm", 0.0)
-    com_desconto = totais.get("desconto", 0.0) > 0
+    # Antes bastava existir uma linha "DESCONTO:" no PDF pra dizer "ja com
+    # desconto" -- mesmo quando o valor escolhido era o BRUTO, sem desconto
+    # nenhum. O log mentia justamente no numero que importa.
+    so_bruto = totais.get("pvc_so_bruto") or totais.get("alm_so_bruto")
+    com_desconto = totais.get("desconto", 0.0) > 0 and not so_bruto
 
     # O cheio da parte do W-Vetro. Quando o PDF nao imprime um bruto proprio
     # (o "TOTAL:" que ele achou e a propria linha de fechamento), quem diz

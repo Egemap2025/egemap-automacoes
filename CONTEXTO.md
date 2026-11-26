@@ -1737,3 +1737,68 @@ volta pelo outro lado.
 agora reconhece **pedido** também. Antes tratava tudo como orçamento e o
 pedido morria em "não achei o valor na Página Final" — não havia como forçar
 um pedido na mão e ver o motivo.
+
+### A auditoria do caminho do pedido (mesmo dia)
+
+Depois de consertar o furo de cima, passei uma auditoria adversarial no
+caminho inteiro do pedido: 6 lentes varrendo o código, cada achado julgado
+por 3 céticos independentes com a ordem de **refutar na dúvida**. 56 achados,
+41 refutados, **15 confirmados**. Todos os 15 consertados. Os que importam:
+
+**O pedido na fila morria quando o programa fechava — e depois travava pra
+sempre.** A fila dos 12 segundos (`_pending`) vivia só na memória. Fechar a
+janela nesse intervalo (ou reiniciar o Windows; e no Windows o X do console
+manda `CTRL_CLOSE_EVENT`, que nem vira `KeyboardInterrupt`) perdia o pedido.
+Na abertura seguinte ele estava intocado na pasta, entrava em `_ja_estavam` e
+ficava bloqueado **sem uma linha de log**. Agora a fila é anotada em disco
+(`~/.egemap_pedidos_na_fila.txt`), o nome só sai de lá **quando o CRM
+confirma**, a abertura repesca o que ficou, e o fechamento manda o que está na
+fila e espera os envios (até 40s) em vez de cortar threads daemon no meio.
+
+**Lição:** fila em memória + lista de "ignorar o que já estava" = perda
+silenciosa permanente. Se existe uma janela de espera, ela precisa sobreviver
+ao processo.
+
+**O valor do pedido ia BRUTO quando o rótulo de fechamento era desconhecido —
+e o log dizia "já com desconto".** Só quatro rótulos eram reconhecidos. Uma
+folha que fecha com `TOTAL A PAGAR` caía no `TOTAL:` bruto. Provado: mandava
+R$ 8.383,45 em vez de R$ 8.000,00, dizendo "total com desconto". Era
+literalmente a reclamação do Natanael de outubro ("muitas vezes tá indo o
+primeiro valor"), num caminho que eu não tinha coberto. Agora: 8 rótulos de
+fechamento a mais; cair no bruto **avisa**; se há desconto escrito, ele é
+abatido e o aviso diz o que fez; e "com desconto" só sai quando é verdade.
+
+**Lição:** um log que descreve o número errado é pior do que não ter log — ele
+transforma um erro visível em erro confiável.
+
+**O desempate entre homônimos usava a regra da PROPOSTA no pedido.** Com dois
+cards do mesmo nome, ganhava o card **aberto** — certo pra orçamento, errado
+pro pedido, que quer o de **Contrato**. O pedido era recusado culpando o card
+errado. Agora `_escolher(..., preferir_etapa="contrato")`, mas com o **nome na
+frente da etapa**: na primeira tentativa a etapa decidia antes, e "Elizandro
+Scheffer" ia pro card "Elizandro Sheffer Constante" — outra grafia, possível
+outra pessoa. Título igualzinho ganha; só sem ele a etapa desempata.
+
+Conferido nos 631 cards reais / 611 nomes de pasta: **proposta 0 mudanças**;
+pedido **35 nomes passaram a achar** o card certo em Contrato, nenhum perdido,
+nenhum trocado, e **0** dos 438 que acham caem em card cujo nome não casa.
+
+**Lição:** regra de desempate copiada entre dois fluxos parecidos é bug
+esperando. E quando se mexe em desempate, a evidência de NOME vem antes de
+qualquer preferência de estado.
+
+**Reenviar o pedido com o nome antigo escrevia na linha já substituída:** o
+card não mudava e o log dizia "Atualizado". Agora procura só entre as linhas
+vigentes e avisa quando cria linha nova.
+
+**O resto:** proposta com CRM desconectado sumia sem log (o gêmeo que eu tinha
+deixado — de novo); `_e_o_mesmo_de_antes` bloqueava calado quando `stat()`
+falha ou a data volta pra trás; arquivo que sai da pasta antes do envio saía
+da fila calado; pasta na raiz de um disco (`D:\`) descartava **todo** pedido
+porque `_norm(pasta) + os.sep` virava `D:\\`; e a linha de resgate que eu
+escrevi hoje mandava rodar o `TROCAR_PASTA.bat`, que é o dos orçamentos — o
+certo é `CONFIGURAR_PEDIDOS.bat`.
+
+**Lição sobre mim:** três dos 15 eram erros que eu mesmo introduzi nas horas
+anteriores, dois deles no próprio conserto. Auditar o que acabei de escrever
+não é desconfiança exagerada — é onde estavam.
