@@ -2161,11 +2161,16 @@ class PedidoHandler(FileSystemEventHandler):
             arquivo_antigo = anterior[2]
         self._pending[chave] = (time.time(), str(path), arquivo_antigo)
 
-    def _queue(self, path, arquivo_antigo=None):
+    def _queue(self, path, arquivo_antigo=None, renomeou=False):
         p = Path(path)
         if p.suffix.lower() != ".pdf" or p.name.startswith("~$"):
             return
-        if self._e_o_mesmo_de_antes(p):
+        # Renomear e coisa de gente, nunca do OneDrive, e e justamente o que o
+        # Natanael faz pra forcar de novo ("tirei uma letra e salvei"). Entao
+        # rename passa sempre, mesmo que esse nome ja existisse antes.
+        if renomeou:
+            self._ja_estavam.pop(_norm(p), None)
+        elif self._e_o_mesmo_de_antes(p):
             return  # intocado desde que o monitor abriu: nao e pedido novo
         if self.pastas and not any(_dentro_de(p, x) for x in self.pastas):
             return  # tirar o pedido da pasta nao e o mesmo que salvar um
@@ -2188,7 +2193,8 @@ class PedidoHandler(FileSystemEventHandler):
         renomeado = (origem.suffix.lower() == ".pdf"
                      and _norm(origem.parent) == _norm(destino.parent)
                      and origem.name != destino.name)
-        self._queue(destino, str(origem) if renomeado else None)
+        self._queue(destino, str(origem) if renomeado else None,
+                    renomeou=renomeado)
 
     def tick(self):
         now = time.time()
